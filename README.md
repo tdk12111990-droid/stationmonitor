@@ -19,10 +19,23 @@ StationMonitor/
 
 ## Cài đặt & Chạy
 
-### Yêu cầu
+### Yêu cầu hệ thống (System Requirements)
+
+Để chạy dự án, bạn cần cài đặt các thành phần sau. Bạn có thể cài đặt thủ công hoặc dùng lệnh tự động:
+
+#### 🚀 Cách 1: Cài đặt tự động (Khuyên dùng Windows)
+Chuột phải vào file **`setup-env.bat`** tại thư mục gốc và chọn **"Run as Administrator"**. Lệnh này sẽ tự động tải và cài đặt:
+- .NET 8 SDK
+- Node.js 20+
+- Docker Desktop (cho Database)
+- DBeaver (Công cụ quản lý DB)
+- Git
+
+#### 🛠️ Cách 2: Cài đặt thủ công
 - [.NET 8 SDK](https://dotnet.microsoft.com/download)
 - [Node.js 20+](https://nodejs.org)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop) (cho TimescaleDB)
+- [Docker Desktop](https://www.docker.com/products/docker-desktop)
+- [DBeaver Community](https://dbeaver.io/download/)
 - Python 3.11+ (chỉ cần khi làm AI module – Phase 3)
 
 ### 1. Khởi động Database (TimescaleDB)
