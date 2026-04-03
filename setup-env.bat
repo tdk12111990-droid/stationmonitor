@@ -48,10 +48,23 @@ echo [5/5] Dang cai dat Git...
 winget install --id Git.Git --silent --accept-package-agreements
 if %errorLevel% equ 0 (echo [OK] Git hoan tat.) else (echo [!] Git co the da co san.)
 
+:: 6. Python 3.11 (Bo sung cho AI Module)
+echo.
+echo [6/6] Dang cai dat Python 3.11...
+winget install --id Python.Python.3.11 --silent --accept-package-agreements
+if %errorLevel% equ 0 (echo [OK] Python hoan tat.) else (echo [!] Python co the da co san.)
+
+echo.
+echo [INFO] Dang cai dat cac thu vien Python (Requirements)...
+:: Refresh environment variables for the current session to find pip
+set "PATH=%PATH%;%LOCALAPPDATA%\Programs\Python\Python311;%LOCALAPPDATA%\Programs\Python\Python311\Scripts"
+python -m pip install --upgrade pip
+pip install -r requirements.txt
+
 echo.
 echo  ================================================
 echo   CAI DAT HOAN TAT! 
-echo   Vui long khoi dong lai may de cac thay doi co hieu luc.
+echo   Vui long KHOI DONG LAI MAY de cac thay doi co hieu luc.
 echo  ================================================
 echo.
 pause

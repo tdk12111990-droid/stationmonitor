@@ -64,9 +64,9 @@ function shellPage<T extends { render(): string; mount?(): void; destroy?(): voi
     // Ngăn chặn truy cập nếu chưa đăng nhập
     if (!authService.isAuthenticated()) {
       setTimeout(() => router.navigate('login'), 0);
-      return { render: () => '', mount: () => {} };
+      return { render: () => '', mount: () => { } };
     }
-    
+
     const page = new PageClass();
     return {
       render() {
