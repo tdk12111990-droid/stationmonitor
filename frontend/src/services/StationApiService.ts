@@ -134,6 +134,63 @@ class StationApiService {
     const query = stationId ? `?stationId=${stationId}` : '';
     return apiFetch<SensorPoint[]>(`/points${query}`);
   }
+
+  // ── Rules ─────────────────────────────────────────────────
+  async getRules(): Promise<Rule[]> {
+    return apiFetch<Rule[]>('/rules');
+  }
+
+  async createRule(data: { name: string; condition: string; actions?: string; enabled?: boolean; deviceId?: string }): Promise<Rule> {
+    return apiMutate('POST', '/rules', data);
+  }
+
+  async updateRule(id: string, data: { name?: string; condition?: string; actions?: string; enabled?: boolean }): Promise<Rule> {
+    return apiMutate('PUT', `/rules/${id}`, data);
+  }
+
+  async deleteRule(id: string): Promise<void> {
+    return apiMutate('DELETE', `/rules/${id}`);
+  }
+
+  // ── Alerts ────────────────────────────────────────────────
+  async getAlerts(status?: string, limit = 100): Promise<AlertItem[]> {
+    const q = status ? `?status=${status}&limit=${limit}` : `?limit=${limit}`;
+    return apiFetch<AlertItem[]>(`/alerts${q}`);
+  }
+
+  async ackAlert(id: string, note?: string): Promise<void> {
+    return apiMutate('POST', `/alerts/${id}/ack`, { note });
+  }
+
+  async closeAlert(id: string): Promise<void> {
+    return apiMutate('POST', `/alerts/${id}/close`);
+  }
+}
+
+export interface Rule {
+  id: string;
+  name: string;
+  condition: string;  // JSON: { point, op, value }
+  actions: string;    // JSON: [{ type, level }]
+  enabled: boolean;
+  deviceId?: string;
+  deviceName?: string;
+  createdAt: string;
+}
+
+export interface AlertItem {
+  id: string;
+  source: string;     // rule_engine | ai_detection | manual
+  level: string;      // warning | alarm
+  status: string;     // open | acked | closed
+  message: string;
+  value?: number;
+  deviceId?: string;
+  ruleId?: string;
+  triggeredAt: string;
+  ackedAt?: string;
+  closedAt?: string;
+  ackNote?: string;
 }
 
 export const stationApi = new StationApiService();

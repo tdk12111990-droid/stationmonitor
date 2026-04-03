@@ -30,10 +30,10 @@ class AuthService {
             }
 
             const data = await res.json();
-            const token: string = data.token;
+            const token: string = data.token ?? '';
 
             // Decode payload từ JWT để lấy user info
-            const payload = JSON.parse(atob(token.split('.')[1]));
+            const payload = JSON.parse(atob(token.split('.')[1] ?? ''));
             const user: User = {
                 user_id: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] ?? '',
                 username: payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name'] ?? username,

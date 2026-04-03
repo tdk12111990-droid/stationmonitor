@@ -7,7 +7,6 @@ import {
   loadScadaPoints, getScadaEvents, getScadaHistory,
   type StoredScadaPoint, type ScadaEvent, type ScadaHistoryEntry
 } from '@/services/storage';
-import { evaluateRules } from '@/pages/RuleEnginePage';
 
 type TimeRange = '1H' | '6H' | '1D' | '1W' | '1M' | '1Y';
 
@@ -470,10 +469,6 @@ export class AnalyticsPage {
   private startLivePolling(): void {
     if (this.liveInterval) clearInterval(this.liveInterval);
     this.liveInterval = setInterval(async () => {
-      // Re-fetch current points for rule evaluation
-      const points = await loadScadaPoints();
-      evaluateRules(points);
-      
       this.refreshChartData();
       this.refreshAlertCharts();
     }, 5000);

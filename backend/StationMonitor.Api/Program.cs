@@ -30,6 +30,8 @@ builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>(); // SignalR 
 // ── Background Workers ────────────────────────────────────
 // PlcPollingWorker: đọc PLC S7 mỗi 3 giây
 builder.Services.AddHostedService<PlcPollingWorker>();
+// RuleEvaluationWorker: đánh giá rules mỗi 5 giây
+builder.Services.AddHostedService<RuleEvaluationWorker>();
 
 // ── SignalR ───────────────────────────────────────────────
 // Client kết nối: ws://localhost:5056/ws/realtime

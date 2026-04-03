@@ -15,7 +15,6 @@ import {
   getMaintenanceModeDevices,
   type ScadaEvent,
 } from '@/services/storage';
-import { evaluateRules } from '@/pages/RuleEnginePage';
 
 export class DashboardPage {
   private dotRadii: Record<string, number> = {}; // pointId → radius (px in SVG landscape)
@@ -693,7 +692,6 @@ export class DashboardPage {
       this.updateKpiFromPoints(visiblePoints);
       this.updateAlertLog();
       this._detectAndLogChanges(visiblePoints);
-      evaluateRules(visiblePoints);
     };
 
     // Removed seedDemoData call
