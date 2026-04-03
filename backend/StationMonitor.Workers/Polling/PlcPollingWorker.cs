@@ -1,0 +1,214 @@
+// ============================================================
+// PlcPollingWorker — Đọc dữ liệu từ PLC Siemens S7
+// Chạy nền liên tục, đọc mỗi 3 giây
+//
+// Cấu hình PLC trong DB (Device.Config JSONB):
+// { "ip": "192.168.10.100", "rack": 0, "slot": 1,
+//   "db": 32, "offset": 0, "length": 10 }
+//
+// Mapping DB32 hiện tại:
+//   Offset 0 → Nhiệt độ Pha 1 (Int16, °C)
+//   Offset 2 → Nhiệt độ Pha 3 (Int16, °C)
+//   Offset 4 → Nhiệt độ Pha 2 (Int16, °C)
+//   Offset 8 → Phóng điện PD  (Int16, dB)
+// ============================================================
+
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using S7.Net;
+using StationMonitor.Data;
+using StationMonitor.Data.Entities;
+using StationMonitor.Services;
+
+namespace StationMonitor.Workers.Polling;
+
+public class PlcPollingWorker : BackgroundService
+{
+    private readonly IServiceScopeFactory _scopeFactory;
+    private readonly IRealtimeNotifier _notifier;
+    private readonly ILogger<PlcPollingWorker> _logger;
+
+    // Đọc mỗi 3 giây
+    private const int PollIntervalMs = 3000;
+
+    public PlcPollingWorker(
+        IServiceScopeFactory scopeFactory,
+        IRealtimeNotifier notifier,
+        ILogger<PlcPollingWorker> logger)
+    {
+        _scopeFactory = scopeFactory;
+        _notifier = notifier;
+        _logger = logger;
+    }
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        _logger.LogInformation("[PLC] Worker khởi động");
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                await PollAllPlcDevicesAsync(stoppingToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[PLC] Lỗi polling");
+            }
+
+            await Task.Delay(PollIntervalMs, stoppingToken);
+        }
+    }
+
+    private async Task PollAllPlcDevicesAsync(CancellationToken ct)
+    {
+        using var scope = _scopeFactory.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+        // Lấy tất cả PLC S7 đang online trong DB
+        var plcDevices = await db.Devices
+            .Where(d => d.Type == "plc_s7" && d.Status == "online")
+            .ToListAsync(ct);
+
+        foreach (var device in plcDevices)
+        {
+            await PollSinglePlcAsync(db, device, ct);
+        }
+    }
+
+    private async Task PollSinglePlcAsync(AppDbContext db, Device device, CancellationToken ct)
+    {
+        // Parse config từ JSONB
+        var config = ParseConfig(device.Config);
+        if (config == null)
+        {
+            _logger.LogWarning("[PLC] Device {Name} không có config", device.Name);
+            return;
+        }
+
+        var ip = GetString(config, "ip");
+        var rack   = (short)GetInt(config, "rack");
+        var slot   = (short)GetInt(config, "slot");
+        var dbNumber = GetInt(config, "db");
+        var offset   = GetInt(config, "offset");
+        var length   = GetInt(config, "length");
+
+        Plc? plc = null;
+        try
+        {
+            plc = new Plc(CpuType.S71200, ip, rack, slot);
+            await plc.OpenAsync(ct);
+
+            if (!plc.IsConnected)
+            {
+                _logger.LogWarning("[PLC] Không kết nối được {Ip}", ip);
+                await UpdateDeviceStatusAsync(db, device.Id, "offline");
+                return;
+            }
+
+            // Đọc raw bytes từ Data Block
+            var rawData = await plc.ReadAsync(S7.Net.DataType.DataBlock, dbNumber, offset, S7.Net.VarType.Byte, length, 0, ct);
+            if (rawData is not byte[] bytes)
+            {
+                _logger.LogWarning("[PLC] Đọc DB{Db} thất bại", dbNumber);
+                return;
+            }
+
+            var now = DateTime.UtcNow;
+
+            // Parse 4 điểm đo theo mapping DB32
+            var readings = new List<SensorReading>
+            {
+                MakeReading(device, "nhiet_do_pha_1", ReadInt16(bytes, 0), "°C", now),
+                MakeReading(device, "nhiet_do_pha_3", ReadInt16(bytes, 2), "°C", now),
+                MakeReading(device, "nhiet_do_pha_2", ReadInt16(bytes, 4), "°C", now),
+                MakeReading(device, "phong_dien",     ReadInt16(bytes, 8), "dB", now),
+            };
+
+            // Lưu vào TimescaleDB
+            db.SensorReadings.AddRange(readings);
+            await db.SaveChangesAsync(ct);
+
+            // Push realtime qua SignalR → frontend cập nhật ngay
+            var payload = readings.Select(r => new {
+                pointId = r.PointId,
+                value = r.Value,
+                unit = r.Unit,
+                time = r.Time
+            });
+            await _notifier.SendSensorUpdateAsync(payload);
+
+            _logger.LogDebug("[PLC] {Ip} → P1:{p1}°C P2:{p2}°C P3:{p3}°C PD:{pd}dB",
+                ip,
+                readings[0].Value, readings[2].Value,
+                readings[1].Value, readings[3].Value);
+
+            await UpdateDeviceStatusAsync(db, device.Id, "online");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("[PLC] Lỗi đọc {Ip}: {Msg}", ip, ex.Message);
+            await UpdateDeviceStatusAsync(db, device.Id, "offline");
+        }
+        finally
+        {
+            plc?.Close();
+        }
+    }
+
+    // ── Helpers ───────────────────────────────────────────
+
+    private static SensorReading MakeReading(Device device, string pointId, double value, string unit, DateTime time)
+        => new()
+        {
+            Time = time,
+            StationId = device.StationId,
+            DeviceId = device.Id,
+            PointId = pointId,
+            Value = value,
+            Unit = unit,
+            Quality = 0 // good
+        };
+
+    // Đọc Int16 big-endian từ byte array (chuẩn Siemens)
+    private static double ReadInt16(byte[] data, int offset)
+    {
+        if (offset + 1 >= data.Length) return 0;
+        return (short)((data[offset] << 8) | data[offset + 1]);
+    }
+
+    // JsonElement → string
+    private static string GetString(Dictionary<string, object> config, string key)
+    {
+        if (!config.TryGetValue(key, out var val)) return "";
+        return val is System.Text.Json.JsonElement je ? je.GetString() ?? "" : val.ToString()!;
+    }
+
+    // JsonElement → int
+    private static int GetInt(Dictionary<string, object> config, string key)
+    {
+        if (!config.TryGetValue(key, out var val)) return 0;
+        if (val is System.Text.Json.JsonElement je) return je.GetInt32();
+        return Convert.ToInt32(val);
+    }
+
+    private static Dictionary<string, object>? ParseConfig(string? json)
+    {
+        if (string.IsNullOrEmpty(json)) return null;
+        try { return JsonSerializer.Deserialize<Dictionary<string, object>>(json); }
+        catch { return null; }
+    }
+
+    private static async Task UpdateDeviceStatusAsync(AppDbContext db, Guid deviceId, string status)
+    {
+        var device = await db.Devices.FindAsync(deviceId);
+        if (device != null && device.Status != status)
+        {
+            device.Status = status;
+            await db.SaveChangesAsync();
+        }
+    }
+}

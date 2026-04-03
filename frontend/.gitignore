@@ -1,0 +1,44 @@
+node_modules/
+.idea/
+dist/
+.DS_Store
+*.log
+.env
+.env.local
+.playwright-mcp/
+.vercel
+api/\[domain\]/v1/\[rpc\].js
+api/\[\[...path\]\].js
+.claude/
+.cursor/
+CLAUDE.md
+.env.vercel-backup
+.env.vercel-export
+.agent/
+.factory/
+.windsurf/
+skills/
+ideas/
+docs/internal/
+test-results/
+src-tauri/sidecar/node/*
+!src-tauri/sidecar/node/.gitkeep
+
+# Tauri/Rust
+target/
+src-tauri/target/
+
+# Project specific
+captures/
+bin/*.exe
+bin/*.zip
+bin/*.yaml
+!bin/go2rtc.yaml
+!bin/go2rtc.exe
+
+# AI planning session state (not source code)
+.planning/
+
+# Compiled sebuf gateway bundle (built by scripts/build-sidecar-sebuf.mjs)
+api/[[][[].*.js
+

@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Station Monitor - Đăng Nhập</title>
+    
+    <!-- Đoạn code dưới đây đưa ngay logo SVG siêu nhỏ gọn lên thanh Tab trình duyệt -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM0NGZmODgiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMDI4NGM3IiAvPjwvbGluZWFyR3JhZGllbnQ+PGZpbHRlciBpZD0iZ2xvdyI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMyIgcmVzdWx0PSJjb2xvcmVkQmx1ciIvPjxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iY29sb3JlZEJsdXIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQ1IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ3JhZCkiIHN0cm9rZS13aWR0aD0iNiIgZmlsdGVyPSJ1cmwoI2dsb3cpIi8+PHBhdGggZD0iTTUwIDE1IEw4MCAzNSBMODAgNjUgTDUwIDg1IEwyMCA2NSBMMjAgMzUgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjMiIG9wYWNpdHk9IjAuNSIvPjxwYXRoIGQ9Ik01NSAyNSBMMzUgNTUgTDUwIDU1IEw0NSA3NSBMNjUgNDUgTDUwIDQ1IFoiIGZpbGw9IiM0NGZmODgiIGZpbHRlcj0idXJsKCNnbG93KSIvPjwvc3ZnPg==">
+
+    <style>
+        body, html {
+            margin: 0; padding: 0; height: 100%; 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: url('slide2.jpg') no-repeat center center fixed,
+                        url('slide2.png') no-repeat center center fixed,
+                        #0f172a; 
+            background-size: cover;
+            display: flex; align-items: center; justify-content: center;
+        }
+
+        .overlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(15, 23, 42, 0.6); /* Phủ xanh đen lạnh */
+            z-index: 1;
+        }
+
+        .glass-panel {
+            position: relative; z-index: 2;
+            width: 380px;
+            padding: 40px;
+            background: rgba(255, 255, 255, 0.05); 
+            backdrop-filter: blur(20px); 
+            -webkit-backdrop-filter: blur(20px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1); 
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6); 
+            text-align: center;
+            color: #ffffff;
+        }
+
+        .logo {
+            width: 90px; height: 90px;
+            margin: 0 auto 20px;
+            filter: drop-shadow(0 0 15px rgba(68, 255, 136, 0.5));
+        }
+
+        h2 { 
+            margin: 0 0 5px; font-size: 22px; font-weight: 700; 
+            text-transform: uppercase; letter-spacing: 1px;
+            color: #44ff88; 
+            text-shadow: 0 0 10px rgba(68, 255, 136, 0.5); 
+        }
+        p { margin: 0 0 35px; font-size: 13px; color: #94a3b8; text-transform: uppercase; letter-spacing: 2px;}
+
+        .input-group { margin-bottom: 25px; text-align: left; }
+        .input-group label { display: block; font-size: 12px; margin-bottom: 8px; color: #cbd5e1; font-weight: 600; text-transform: uppercase; }
+        .input-group input {
+            width: 100%; box-sizing: border-box; padding: 14px 15px;
+            background: rgba(0, 0, 0, 0.4); 
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 8px; color: white; font-size: 16px; transition: 0.3s;
+        }
+        .input-group input:focus {
+            outline: none; border-color: #44ff88; background: rgba(0, 0, 0, 0.6);
+            box-shadow: 0 0 12px rgba(68, 255, 136, 0.3);
+        }
+
+        .btn-login {
+            width: 100%; padding: 14px;
+            background: linear-gradient(135deg, #0284c7, #2563eb); 
+            border: none; border-radius: 8px;
+            color: white; font-size: 15px; font-weight: bold; cursor: pointer;
+            text-transform: uppercase; letter-spacing: 1px;
+            transition: 0.3s; margin-top: 10px;
+        }
+        .btn-login:hover {
+            box-shadow: 0 5px 20px rgba(37, 99, 235, 0.6);
+            transform: translateY(-2px); 
+        }
+    </style>
+</head>
+<body>
+    <div class="overlay"></div>
+    <div class="glass-panel">
+        <!-- Logo SVG Công nghệ cao thay vì nét vẽ cơ bản trước đó -->
+        <img src="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMDAgMTAwIj48ZGVmcz48bGluZWFyR3JhZGllbnQgaWQ9ImdyYWQiIHgxPSIwJSIgeTE9IjAlIiB4Mj0iMTAwJSIgeTI9IjEwMCUiPjxzdG9wIG9mZnNldD0iMCUiIHN0b3AtY29sb3I9IiM0NGZmODgiIC8+PHN0b3Agb2Zmc2V0PSIxMDAlIiBzdG9wLWNvbG9yPSIjMDI4NGM3IiAvPjwvbGluZWFyR3JhZGllbnQ+PGZpbHRlciBpZD0iZ2xvdyI+PGZlR2F1c3NpYW5CbHVyIHN0ZERldmlhdGlvbj0iMyIgcmVzdWx0PSJjb2xvcmVkQmx1ciIvPjxmZU1lcmdlPjxmZU1lcmdlTm9kZSBpbj0iY29sb3JlZEJsdXIiLz48ZmVNZXJnZU5vZGUgaW49IlNvdXJjZUdyYXBoaWMiLz48L2ZlTWVyZ2U+PC9maWx0ZXI+PC9kZWZzPjxjaXJjbGUgY3g9IjUwIiBjeT0iNTAiIHI9IjQ1IiBmaWxsPSJub25lIiBzdHJva2U9InVybCgjZ3JhZCkiIHN0cm9rZS13aWR0aD0iNiIgZmlsdGVyPSJ1cmwoI2dsb3cpIi8+PHBhdGggZD0iTTUwIDE1IEw4MCAzNSBMODAgNjUgTDUwIDg1IEwyMCA2NSBMMjAgMzUgWiIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmZmZmIiBzdHJva2Utd2lkdGg9IjMiIG9wYWNpdHk9IjAuNSIvPjxwYXRoIGQ9Ik01NSAyNSBMMzUgNTUgTDUwIDU1IEw0NSA3NSBMNjUgNDUgTDUwIDQ1IFoiIGZpbGw9IiM0NGZmODgiIGZpbHRlcj0idXJsKCNnbG93KSIvPjwvc3ZnPg==" alt="Station Monitor Logo" class="logo">
+        
+        <h2>Hệ Thống Phóng Điện</h2>
+        <p>Station Monitor OS</p>
+
+        <div class="input-group">
+            <label>Tên đăng nhập</label>
+            <input type="text" placeholder="Ví dụ: admin">
+        </div>
+        <div class="input-group">
+            <label>Mật khẩu</label>
+            <input type="password" placeholder="••••••••">
+        </div>
+
+        <button class="btn-login">ĐĂNG NHẬP</button>
+    </div>
+</body>
+</html>
