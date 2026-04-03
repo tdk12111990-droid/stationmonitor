@@ -50,4 +50,8 @@ echo   Backend  : http://localhost:5056
 echo   go2rtc   : http://localhost:1984
 echo  ================================================
 echo.
+echo   Dang mo trinh duyet...
+timeout /t 2 /nobreak >nul
+start http://localhost:5173
+echo.
 pause
