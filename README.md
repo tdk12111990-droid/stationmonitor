@@ -1,6 +1,6 @@
 # StationMonitor – Hệ thống Giám sát Trạm Điện Thông Minh
 
-Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phóng điện (PLC Siemens S7-1200), camera an ninh/nhiệt ảnh (Hikvision), và AI phát hiện xâm nhập (YOLO – Phase 3).
+Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phóng điện (PLC Siemens S7-1200), camera an ninh/nhiệt ảnh (Hikvision), và AI phát hiện xâm nhập (YOLO – Phase 4).
 
 ---
 
@@ -8,75 +8,100 @@ Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phó
 
 ```
 StationMonitor/
-├── backend/        ASP.NET Core 8 API  (port 5056)
-├── frontend/       Vite + TypeScript   (port 5173)
-├── start.bat       Khởi động tất cả service
-├── stop.bat        Dừng tất cả service
-└── requirements.txt  Python deps cho AI module (Phase 3)
+├── backend/          ASP.NET Core 8 API  (port 5056)
+├── frontend/         Vite + TypeScript   (port 5173)
+├── setup-env.bat     Cài đặt môi trường (chạy 1 lần sau khi clone)
+├── start.bat         Khởi động tất cả service
+├── stop.bat          Dừng tất cả service
+└── requirements.txt  Python deps cho AI module (Phase 4)
 ```
 
 ---
 
-## Cài đặt & Chạy
+## 🚀 Clone & Chạy (Người mới bắt đầu)
 
-### Yêu cầu hệ thống (System Requirements)
+> Chỉ cần **2 bước** để chạy được dự án từ đầu.
 
-Để chạy dự án, bạn cần cài đặt các thành phần sau. Bạn có thể cài đặt thủ công hoặc dùng lệnh tự động:
-
-#### 🚀 Cách 1: Cài đặt tự động (Khuyên dùng Windows)
-Chuột phải vào file **`setup-env.bat`** tại thư mục gốc và chọn **"Run as Administrator"**. Lệnh này sẽ tự động tải và cài đặt:
-- .NET 8 SDK
-- Node.js 20+
-- Docker Desktop (cho Database)
-- DBeaver (Công cụ quản lý DB)
-- Git
-
-#### 🛠️ Cách 2: Cài đặt thủ công
-- [.NET 8 SDK](https://dotnet.microsoft.com/download)
-- [Node.js 20+](https://nodejs.org)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop)
-- [DBeaver Community](https://dbeaver.io/download/)
-- Python 3.11+ (chỉ cần khi làm AI module – Phase 3)
-
-### 1. Khởi động Database (TimescaleDB)
+### Bước 1 — Clone code về máy
 ```bash
-docker run -d --name stationmonitor-db \
-  -e POSTGRES_PASSWORD=postgres123 \
-  -e POSTGRES_DB=stationmonitor \
-  -p 5432:5432 \
-  -v D:/docker-data/stationmonitor-db:/var/lib/postgresql/data \
-  timescale/timescaledb:latest-pg16
+git clone https://github.com/tdk12111990-droid/stationmonitor.git
+cd stationmonitor
 ```
 
-### 2. Cài dependencies Frontend
-```bash
-cd frontend
-npm install
-```
+### Bước 2 — Cài đặt môi trường (Chạy 1 lần duy nhất)
+Chuột phải vào **`setup-env.bat`** → chọn **"Run as Administrator"**
 
-### 3. Cài dependencies Backend
-```bash
-cd backend
-dotnet restore
-```
+Script này sẽ tự động:
+- ✅ Kiểm tra và cài .NET 8, Node.js, Docker, Git, DBeaver, Python
+- ✅ Tạo container TimescaleDB (Database) tự động
+- ✅ Cài thư viện Python cho AI module
 
-### 4. Chạy hệ thống
+> ⚠️ Nếu script yêu cầu **khởi động lại máy** (sau khi cài Docker) → Khởi động lại rồi chạy lại `setup-env.bat` một lần nữa.
+
+### Bước 3 — Chạy hệ thống hàng ngày
+Double-click **`start.bat`** — trình duyệt sẽ tự động mở.
+
 ```
-Double-click start.bat
+Tài khoản mặc định:
+  Username: admin
+  Password: Admin@123
 ```
-Hoặc chạy từng service thủ công — xem hướng dẫn chi tiết trong `backend/README.md`.
 
 ---
 
-## Tài khoản mặc định
-| Field | Value |
-|-------|-------|
-| Username | `admin` |
-| Password | `Admin@123` |
+## 🔄 Cập nhật khi có code mới
+
+Khi nhận được thông báo có bản cập nhật mới, chạy lệnh:
+
+```bash
+git pull
+```
+
+Nếu có thay đổi về thư viện (thông báo trong release notes):
+```bash
+# Cập nhật thư viện Frontend
+cd frontend && npm install && cd ..
+
+# Cập nhật thư viện Backend
+cd backend && dotnet restore && cd ..
+```
+
+Sau đó chạy lại `start.bat` như bình thường.
 
 ---
 
-## Tài liệu chi tiết
+## 📤 Đẩy code lên GitHub (Dành cho Developer)
+
+```bash
+# 1. Kiểm tra những gì đã thay đổi
+git status
+
+# 2. Thêm tất cả file đã sửa
+git add .
+
+# 3. Tạo commit với mô tả rõ ràng
+git commit -m "feat: mô tả tính năng mới"
+#  hoặc:
+git commit -m "fix: mô tả lỗi đã sửa"
+#  hoặc:
+git commit -m "docs: cập nhật tài liệu"
+
+# 4. Đẩy lên GitHub
+git push
+```
+
+### Quy ước đặt tên commit:
+| Prefix | Ý nghĩa | Ví dụ |
+|:---|:---|:---|
+| `feat:` | Tính năng mới | `feat: thêm trang báo cáo PDF` |
+| `fix:` | Sửa lỗi | `fix: sửa lỗi camera 153 màn đen` |
+| `docs:` | Cập nhật tài liệu | `docs: thêm hướng dẫn cài đặt` |
+| `refactor:` | Dọn dẹp code | `refactor: tái cấu trúc DashboardPage` |
+| `chore:` | Việc lặt vặt | `chore: cập nhật .gitignore` |
+
+---
+
+## 📚 Tài liệu chi tiết
 
 | Tài liệu | Nội dung |
 |----------|---------|
@@ -84,15 +109,15 @@ Hoặc chạy từng service thủ công — xem hướng dẫn chi tiết trong
 | `backend/docs/progress.md` | Nhật ký tiến độ theo từng Phase |
 | `backend/docs/bugs_and_fixes.md` | Lỗi đã gặp và cách xử lý |
 | `backend/docs/plan_backend.md` | Kế hoạch backend đầy đủ |
-| `frontend/CLAUDE.md` | Kiến trúc frontend, hướng dẫn dev |
+| `frontend/FRONTEND_GUIDE.md` | Kiến trúc frontend, Mobile/PWA strategy |
 
 ---
 
-## Trạng thái các Phase
+## 📊 Trạng thái các Phase
 
 | Phase | Nội dung | Trạng thái |
 |-------|---------|-----------|
 | Phase 1 | Frontend 13 trang, Auth, Router | ✅ Hoàn thành |
 | Phase 2 | Backend API, PLC polling, SignalR, go2rtc, Device CRUD | ✅ Hoàn thành |
-| Phase 3 | Rule Engine alerts, Cloudflare Tunnel (remote access) | 🔄 Đang làm |
-| Phase 4 | AI YOLO pipeline, báo cáo PDF tự động | ⏳ Chưa bắt đầu |
+| Phase 3 | Rule Engine, Alert System, Cloudflare Tunnel | 🔄 Đang làm |
+| Phase 4 | AI YOLO pipeline, báo cáo PDF, Mobile PWA | ⏳ Chưa bắt đầu |

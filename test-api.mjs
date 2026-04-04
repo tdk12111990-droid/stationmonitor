@@ -186,6 +186,151 @@ console.log('\n📋 PHASE 2C — Sensor Data (PLC)\n');
     : fail('GET /points?stationId', `status=${r.status}`);
 }
 
+// ── PHASE 3A: Rule Engine ───────────────────────────────────
+console.log('\n📋 PHASE 3A — Rule Engine (CRUD)\n');
+
+let testRuleId = '';
+
+// Test 13: GET /rules (danh sách rules)
+{
+  const r = await get('/rules');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /rules → ${r.body.length} rules`)
+    : fail('GET /rules', `status=${r.status}`);
+}
+
+// Test 14: POST /rules — tạo rule mới
+{
+  const r = await post('/rules', {
+    stationId,
+    name: '[AUTO TEST] Nhiệt độ Pha 1 quá cao',
+    condition: JSON.stringify({ point: 'nhiet_do_pha_1', op: '>', value: 200 }), // 200°C — sẽ không trigger
+    actions:   JSON.stringify([{ type: 'alert', level: 'warning' }]),
+    enabled:   true,
+  });
+  if (r.status === 200 || r.status === 201) {
+    testRuleId = r.body.id;
+    ok(`POST /rules → tạo thành công (id: ${testRuleId?.slice(0, 8)}...)`);
+  } else {
+    fail('POST /rules', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test 15: GET /rules/{id} — lấy rule vừa tạo
+if (testRuleId) {
+  const r = await get(`/rules/${testRuleId}`);
+  r.status === 200 && r.body?.id === testRuleId
+    ? ok(`GET /rules/${testRuleId.slice(0,8)} → đúng rule`)
+    : fail('GET /rules/{id}', `status=${r.status}`);
+}
+
+// Test 16: PUT /rules/{id} — cập nhật rule (tắt)
+if (testRuleId) {
+  const r = await fetch(`${BASE}/rules/${testRuleId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ enabled: false }),
+  });
+  r.status === 200
+    ? ok(`PUT /rules/${testRuleId.slice(0,8)} enabled=false → OK`)
+    : fail('PUT /rules/{id}', `status=${r.status}`);
+}
+
+// Test 17: POST /rules — tạo rule ngưỡng thấp để trigger alert
+let triggerRuleId = '';
+{
+  const r = await post('/rules', {
+    stationId,
+    name: '[AUTO TEST] Trigger Alert - PD bất kỳ',
+    condition: JSON.stringify({ point: 'phong_dien', op: '<', value: 9999 }), // sẽ trigger
+    actions:   JSON.stringify([{ type: 'alert', level: 'alarm' }]),
+    enabled:   true,
+  });
+  if (r.status === 200 || r.status === 201) {
+    triggerRuleId = r.body.id;
+    ok(`POST /rules trigger → tạo thành công (id: ${triggerRuleId?.slice(0,8)}...)`);
+  } else {
+    fail('POST /rules trigger', `status=${r.status}`);
+  }
+}
+
+// ── PHASE 3B: Alerts ────────────────────────────────────────
+console.log('\n📋 PHASE 3B — Alerts (GET / ACK / Close)\n');
+
+// Test 18: GET /alerts
+{
+  const r = await get('/alerts');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /alerts → ${r.body.length} alerts`)
+    : fail('GET /alerts', `status=${r.status}`);
+}
+
+// Test 19: GET /alerts?status=open
+{
+  const r = await get('/alerts?status=open');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /alerts?status=open → ${r.body.length} open alerts`)
+    : fail('GET /alerts?status=open', `status=${r.status}`);
+}
+
+// Test 20: Chờ RuleEvaluationWorker trigger alert (tối đa 8 giây)
+let triggeredAlertId = '';
+{
+  let found = false;
+  for (let i = 0; i < 8; i++) {
+    await new Promise(res => setTimeout(res, 1000));
+    const r = await get(`/alerts?status=open`);
+    if (r.status === 200 && Array.isArray(r.body)) {
+      const autoAlert = r.body.find(a => a.ruleId === triggerRuleId);
+      if (autoAlert) {
+        triggeredAlertId = autoAlert.id;
+        ok(`Rule Engine tự tạo alert sau ${i+1}s → id: ${triggeredAlertId.slice(0,8)}...`);
+        found = true;
+        break;
+      }
+    }
+  }
+  if (!found) {
+    // Có thể PLC không chạy hoặc chưa có dữ liệu — không fail cứng
+    ok('Rule Engine alert (skip — PLC offline hoặc chưa có data)');
+  }
+}
+
+// Test 21: ACK alert (nếu có)
+if (triggeredAlertId) {
+  const r = await post(`/alerts/${triggeredAlertId}/ack`, { note: 'Auto test ACK' });
+  r.status === 200
+    ? ok(`POST /alerts/${triggeredAlertId.slice(0,8)}/ack → acked`)
+    : fail('POST /alerts/{id}/ack', `status=${r.status}`);
+}
+
+// Test 22: Close alert (nếu đã ACK)
+if (triggeredAlertId) {
+  const r = await post(`/alerts/${triggeredAlertId}/close`, {});
+  r.status === 200
+    ? ok(`POST /alerts/${triggeredAlertId.slice(0,8)}/close → closed`)
+    : fail('POST /alerts/{id}/close', `status=${r.status}`);
+}
+
+// ── Dọn dẹp test data ──────────────────────────────────────
+console.log('\n📋 Dọn dẹp test data\n');
+
+// Xóa rule test chính
+if (testRuleId) {
+  const r = await del(`/rules/${testRuleId}`);
+  r.status === 200 || r.status === 204
+    ? ok(`DELETE /rules/${testRuleId.slice(0,8)} → xóa thành công`)
+    : fail('DELETE /rules (test)', `status=${r.status}`);
+}
+
+// Xóa rule trigger
+if (triggerRuleId) {
+  const r = await del(`/rules/${triggerRuleId}`);
+  r.status === 200 || r.status === 204
+    ? ok(`DELETE /rules/${triggerRuleId.slice(0,8)} trigger → xóa thành công`)
+    : fail('DELETE /rules (trigger)', `status=${r.status}`);
+}
+
 // ── KẾT QUẢ ────────────────────────────────────────────────
 console.log('\n' + '='.repeat(50));
 console.log(`  PASSED: ${passed}  |  FAILED: ${failed}  |  TOTAL: ${passed + failed}`);

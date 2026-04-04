@@ -3,6 +3,7 @@
 // ============================================================
 
 import { sensorService, SensorData } from '@/services/SensorService';
+import { GO2RTC_URL } from '@/utils/env';
 import { getKpiSummary } from '@/services/MockDataService';
 import { stationApi } from '@/services/StationApiService';
 import { router } from '@/router/Router';
@@ -178,7 +179,7 @@ export class DashboardPage {
           <div id="camBody">
             <div style="position:relative;width:100%;aspect-ratio:16/9;background:#000;overflow:hidden;">
               <iframe
-                src="http://localhost:1984/stream.html?src=camera_152_normal&mode=mse"
+                src="${GO2RTC_URL}/stream.html?src=camera_152_normal&mode=mse"
                 style="width:100%;height:calc(100% + 42px);border:none;pointer-events:none;display:block;"
                 id="dash-mini-cam-frame">
               </iframe>

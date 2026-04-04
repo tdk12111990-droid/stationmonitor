@@ -86,33 +86,38 @@
 
 ### Lỗi gặp trong Phase 2 — xem `bugs_and_fixes.md` mục 8-13
 
-## Phase 3 — Quản lý thiết bị + go2rtc + Cảnh báo (TODO)
+## Phase 3 — Quản lý thiết bị + go2rtc + Cảnh báo ✅ (2026-04-04)
 
-### 3A. Trang Quản lý thiết bị (Frontend UI)
-- [ ] Danh sách thiết bị (camera, PLC, cảm biến) theo trạm
-- [ ] Thêm thiết bị mới (form: tên, IP, loại, RTSP path)
-- [ ] Xóa thiết bị → tự hủy stream go2rtc nếu là camera
-- [ ] Sửa cấu hình thiết bị (IP, tên)
-- [ ] Nút Test kết nối → hiện latency + trạng thái
+### 3A. Trang Quản lý thiết bị (Frontend UI) ✅
+- [x] Danh sách thiết bị (camera, PLC, cảm biến) theo trạm
+- [x] Thêm thiết bị mới (form: tên, IP, loại, RTSP path)
+- [x] Xóa thiết bị → tự hủy stream go2rtc nếu là camera
+- [x] Sửa cấu hình thiết bị (IP, tên)
+- [x] Nút Test kết nối → hiện latency + trạng thái
 
-### 3B. go2rtc — Backend quản lý config
-- [ ] Backend sync tất cả camera từ DB → go2rtc khi khởi động
-- [ ] Thêm camera → tự gọi go2rtc REST API POST /api/streams
-- [ ] Xóa camera → tự gọi go2rtc REST API DELETE /api/streams/{id}
-- [ ] Frontend vẫn kết nối trực tiếp go2rtc để xem video (không đổi)
-- [ ] go2rtc URL cấu hình qua env var (dễ đổi localhost → Jetson IP)
+### 3B. go2rtc — Backend quản lý config ✅
+- [x] Backend sync tất cả camera từ DB → go2rtc khi khởi động
+- [x] Thêm camera → tự gọi go2rtc REST API (RegisterCameraStreamAsync)
+- [x] Xóa camera → tự gọi go2rtc REST API (UnregisterCameraStreamAsync)
+- [x] Frontend vẫn kết nối trực tiếp go2rtc để xem video (không đổi)
+- [x] go2rtc URL cấu hình qua `VITE_GO2RTC_URL` trong `frontend/.env`
 - NOTE: Video stream KHÔNG đi qua backend (tránh bottleneck)
 
-### 3C. Rule Engine + Cảnh báo
-- [ ] CRUD Rules (ngưỡng nhiệt độ, PD)
-- [ ] `RuleEvaluationWorker` chạy sau mỗi PLC poll
-- [ ] Alert lifecycle: open → ack → close
-- [ ] SignalR push alert về dashboard realtime
+### 3C. Rule Engine + Cảnh báo ✅
+- [x] CRUD Rules (ngưỡng nhiệt độ, PD) — RulesController.cs
+- [x] `RuleEvaluationWorker` chạy mỗi 5s sau PLC poll
+- [x] Alert lifecycle: open → ack → close
+- [x] SignalR push alert về dashboard realtime
 
-### 3D. Tunnel ra ngoài (xem từ điện thoại)
-- [ ] Cloudflare Tunnel expose backend :5056 và go2rtc :1984
-- [ ] Frontend đổi URL go2rtc theo env var (VITE_GO2RTC_URL)
-- [ ] Test xem camera từ 4G
+### 3D. Tunnel ra ngoài (xem từ điện thoại) ✅
+- [x] `cloudflare-tunnel.bat` — script hỗ trợ Quick Tunnel + Named Tunnel
+- [x] Frontend dùng `VITE_GO2RTC_URL` từ `.env` (không còn hardcode localhost:1984)
+- [ ] Test thực tế xem camera từ 4G (cần cloudflared cài + chạy tunnel)
+
+### Tests Phase 3 ✅ (2026-04-04)
+- `test-api.mjs` — 26 tests PASSED (Phase 1+2+3): Rules CRUD + Alert trigger + ACK + Close
+- `e2e/phase3-rules-alerts.spec.ts` — 10 UI tests: Rule Engine UI + Alerts History UI + go2rtc env URL
+- TypeScript: `npx tsc --noEmit` PASS
 
 ---
 

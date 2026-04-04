@@ -40,6 +40,21 @@ World Monitor's frontend is a high-performance GIS (Geographic Information Syste
     npm run build
     ```
 
+## 📱 Mobile & PWA Strategy (One Brain - Two Outfits)
+The application is designed to provide a native-like experience on iOS and Android without a separate codebase.
+
+### 1. Responsive Design Logic
+- **Shared Logic**: All API communication, SignalR real-time updates, and Auth logic are shared between Desktop and Mobile.
+- **Adaptive UI**: High-density dashboards on desktop automatically transition to swipe-able cards and simplified lists on mobile.
+- **Touch-Friendly**: Interactive elements (buttons, inputs) use specific mobile styling (`min-height: 44px`) for optimal thumb interaction.
+
+### 2. PWA Features (Add to Home Screen)
+- **Standalone Mode**: Manifest configured to hide browser chrome (address bar) when launched from the home screen.
+- **Caching**: Service Workers (Phase 4) will handle offline storage for critical station assets.
+- **iOS Compatibility**: Specifically optimized for Safari WebRTC to ensure zero-latency camera feeds.
+
+---
+
 ## 🎥 Camera Streaming Integration
 The frontend connects to **go2rtc** (port 1984) and the **AI Server** (port 8001) for live video and real-time detection feeds.
 - **Live Stream**: `http://localhost:1984/stream?src=cam_01&mode=webrtc`

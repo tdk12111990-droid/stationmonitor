@@ -152,6 +152,7 @@ export class UserManagementPage {
 
 import { getSystemMetrics } from '@/services/MockDataService';
 import { loadScadaPoints } from '@/services/storage';
+import { GO2RTC_URL } from '@/utils/env';
 
 export class SystemStatusPage {
   private updateInterval?: ReturnType<typeof setInterval>;
@@ -357,7 +358,7 @@ export class MultisitePage {
         <div class="gis-popup" style="width: 240px; color: #fff;">
           <h4 style="margin: 0 0 10px; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 5px;">${s.name}</h4>
           <div class="gis-popup-v3-cam">
-             <iframe src="http://localhost:1984/stream.html?src=${s.cameraSrc}&mode=mse"></iframe>
+             <iframe src="${GO2RTC_URL}/stream.html?src=${s.cameraSrc}&mode=mse"></iframe>
           </div>
           <button class="btn-industrial btn-primary" style="width:100%;" onclick="window.router.navigate('dashboard', { stationId: '${s.id}', stationName: '${s.name}' })">CHI TIẾT TRẠM</button>
         </div>

@@ -1,6 +1,7 @@
 // Realtime Monitor Page
 import { stationApi, CameraDevice } from '@/services/StationApiService';
 import * as signalR from '@microsoft/signalr';
+import { GO2RTC_URL } from '@/utils/env';
 
 export class RealtimeMonitorPage {
   private logs: any[] = [];
@@ -61,7 +62,7 @@ export class RealtimeMonitorPage {
                   <div class="real-stream-container">
                     <!-- go2rtc Adaptive Stream (Auto-match H.264/H.265) -->
                     <iframe 
-                      src="http://localhost:1984/stream.html?src=${deviceId}&mode=mse" 
+                      src="${GO2RTC_URL}/stream.html?src=${deviceId}&mode=mse"
                       style="width:100%; height:100%; border:none; pointer-events: none;" 
                       id="hik-rtc-frame-${deviceId}">
                     </iframe>
@@ -245,7 +246,7 @@ export class RealtimeMonitorPage {
               style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;">
               <!-- iframe cao hơn 44px để cắt thanh controls go2rtc ở dưới -->
               <iframe
-                src="http://localhost:1984/stream.html?src=${go2rtcId}&mode=mse"
+                src="${GO2RTC_URL}/stream.html?src=${go2rtcId}&mode=mse"
                 style="width:100%;height:calc(100% + 44px);border:none;
                   pointer-events:none;display:block;"
                 id="hik-rtc-frame-${d.id}">
@@ -325,7 +326,7 @@ export class RealtimeMonitorPage {
       // Inject a fresh iframe for the modal without controls for cleaner live view
       modalBody.innerHTML = `
         <iframe 
-          src="http://localhost:1984/stream.html?src=${this.currentModalCamId}&mode=mse&controls=0" 
+          src="${GO2RTC_URL}/stream.html?src=${this.currentModalCamId}&mode=mse&controls=0"
           style="width:100%; height:100%; border:none; pointer-events: none;" 
           id="modal-rtc-frame">
         </iframe>
