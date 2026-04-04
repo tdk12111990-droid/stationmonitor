@@ -1,5 +1,7 @@
 # StationMonitor — Hướng dẫn cho Claude Code
 
+> **ĐỌC TRƯỚC:** `MASTER_PLAN.md` — chứa toàn bộ kế hoạch, bugs đã fix, API list, ngữ cảnh quan trọng.
+
 ## Stack & Ports
 - Backend: ASP.NET Core 8, chạy tại `http://localhost:5056`
 - Frontend: Vanilla TypeScript + Vite, chạy tại `http://localhost:5173`
@@ -17,8 +19,8 @@ stop.bat    # Dừng tất cả
 
 ## Test
 ```bash
-node test-api.mjs                          # 14 API tests
-cd frontend && npx playwright test         # 14 UI tests (Playwright)
+node test-api.mjs                          # 35 API tests (Phase 1-4)
+cd frontend && npx playwright test         # E2E UI tests (Playwright)
 cd frontend && npx tsc --noEmit            # TypeScript check
 cd backend && dotnet build StationMonitor.sln
 ```

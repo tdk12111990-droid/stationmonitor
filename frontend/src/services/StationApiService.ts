@@ -135,6 +135,19 @@ class StationApiService {
     return apiFetch<SensorPoint[]>(`/points${query}`);
   }
 
+  async getHistory(
+    deviceId: string,
+    pointId: string,
+    from?: string,
+    to?: string,
+    limit = 500
+  ): Promise<Array<{ time: string; value: number; quality: number }>> {
+    const params = new URLSearchParams({ deviceId, pointId, limit: String(limit) });
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
+    return apiFetch(`/history?${params}`);
+  }
+
   // ── Rules ─────────────────────────────────────────────────
   async getRules(): Promise<Rule[]> {
     return apiFetch<Rule[]>('/rules');
@@ -165,6 +178,59 @@ class StationApiService {
   async closeAlert(id: string): Promise<void> {
     return apiMutate('POST', `/alerts/${id}/close`);
   }
+
+  async getAlertDetail(id: string): Promise<AlertItem & { history: AlertHistoryEntry[] }> {
+    return apiFetch(`/alerts/${id}`);
+  }
+
+  // ── Logs ──────────────────────────────────────────────────
+  async getAuditLogs(action?: string, entityType?: string, limit = 100): Promise<AuditLogEntry[]> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (action) params.set('action', action);
+    if (entityType) params.set('entityType', entityType);
+    return apiFetch(`/logs/audit?${params}`);
+  }
+
+  async getLoginLogs(limit = 100): Promise<LoginLogEntry[]> {
+    return apiFetch(`/logs/login?limit=${limit}`);
+  }
+
+  // ── Users ─────────────────────────────────────────────────
+  async getUsers(): Promise<UserItem[]> {
+    return apiFetch<UserItem[]>('/users');
+  }
+
+  async createUser(data: {
+    username: string; password: string;
+    fullName?: string; email?: string; role?: string;
+  }): Promise<UserItem> {
+    return apiMutate('POST', '/users', data);
+  }
+
+  async updateUser(id: string, data: {
+    fullName?: string; email?: string; role?: string; isActive?: boolean;
+  }): Promise<UserItem> {
+    return apiMutate('PUT', `/users/${id}`, data);
+  }
+
+  async changePassword(id: string, data: {
+    oldPassword?: string; newPassword: string;
+  }): Promise<{ message: string }> {
+    return apiMutate('POST', `/users/${id}/change-password`, data);
+  }
+
+  async deactivateUser(id: string): Promise<{ message: string }> {
+    return apiMutate('DELETE', `/users/${id}`);
+  }
+
+  // ── System Settings ───────────────────────────────────────
+  async getSettings(): Promise<Record<string, string>> {
+    return apiFetch<Record<string, string>>('/settings');
+  }
+
+  async updateSetting(key: string, value: string): Promise<{ key: string; value: string }> {
+    return apiMutate('PUT', `/settings/${key}`, { value });
+  }
 }
 
 export interface Rule {
@@ -191,6 +257,41 @@ export interface AlertItem {
   ackedAt?: string;
   closedAt?: string;
   ackNote?: string;
+}
+
+export interface AlertHistoryEntry {
+  status: string;
+  changedAt: string;
+  note?: string;
+  changedBy?: string;
+}
+
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  entityType?: string;
+  entityId?: string;
+  ipAddress?: string;
+  ts: string;
+  userId?: string;
+}
+
+export interface LoginLogEntry {
+  id: string;
+  username?: string;
+  action: string;
+  ipAddress?: string;
+  ts: string;
+}
+
+export interface UserItem {
+  id: string;
+  username: string;
+  fullName?: string;
+  email?: string;
+  role: string;       // operator | manager | admin
+  isActive: boolean;
+  createdAt: string;
 }
 
 export const stationApi = new StationApiService();

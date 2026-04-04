@@ -1,10 +1,14 @@
 // ============================================================
-// UserManagementPage – D09: Quản lý Người dùng (stub)
+// UserManagementPage – D09: Quản lý Người dùng
+// Kết nối API thật: GET/POST/PUT/DELETE /api/v1/users
 // ============================================================
 
-// TODO: load từ GET /api/v1/users
+import { stationApi, type UserItem } from '@/services/StationApiService';
 
 export class UserManagementPage {
+  private users: UserItem[] = [];
+  private editingUserId: string | null = null;
+
   render(): string {
     return `
     <div class="list-page">
@@ -13,10 +17,13 @@ export class UserManagementPage {
         <button id="addUserBtn" class="btn-industrial btn-primary">+ Thêm tài khoản</button>
       </div>
       <div class="admin-card" style="padding:0">
-        <table class="data-table">
-          <thead><tr><th>Họ tên</th><th>Tên đăng nhập</th><th>Email</th><th>Vai trò</th><th>Trạng thái</th><th>Hành động</th></tr></thead>
-          <tbody>
-            <tr><td colspan="6" style="text-align:center;color:#475569;padding:32px">Chưa có dữ liệu — kết nối backend để tải danh sách người dùng</td></tr>
+        <table class="data-table" id="userTable">
+          <thead><tr>
+            <th>Họ tên</th><th>Tên đăng nhập</th><th>Email</th>
+            <th>Vai trò</th><th>Trạng thái</th><th>Hành động</th>
+          </tr></thead>
+          <tbody id="userTableBody">
+            <tr><td colspan="6" style="text-align:center;color:#475569;padding:32px">Đang tải...</td></tr>
           </tbody>
         </table>
       </div>
@@ -43,21 +50,24 @@ export class UserManagementPage {
       </div>
     </div>
 
+    <!-- Modal: Thêm / Sửa tài khoản -->
     <div id="userModal" class="modal-overlay">
       <div class="modal-content" style="width:520px">
         <div class="modal-header">
-          <h3>THÊM TÀI KHOẢN</h3>
+          <h3 id="userModalTitle">THÊM TÀI KHOẢN</h3>
           <button id="userModalClose" class="modal-close-btn">✕</button>
         </div>
         <div class="modal-body">
+          <div class="form-group" id="usernameGroup">
+            <label>Tên đăng nhập <span style="color:#ef4444">*</span></label>
+            <input id="uf_user" type="text" class="form-input" placeholder="nguyen.va">
+          </div>
           <div class="form-group"><label>Họ tên</label><input id="uf_name" type="text" class="form-input" placeholder="Nguyễn Văn A"></div>
-          <div class="form-group"><label>Tên đăng nhập</label><input id="uf_user" type="text" class="form-input" placeholder="nguyen.va"></div>
           <div class="form-group"><label>Email</label><input id="uf_email" type="email" class="form-input" placeholder="user@station.vn"></div>
-          <div class="form-grid-2">
-            <div class="form-group"><label>Mật khẩu</label><input id="uf_pass" type="password" class="form-input" placeholder="••••••••"></div>
+          <div class="form-grid-2" id="passwordGroup">
+            <div class="form-group"><label>Mật khẩu <span style="color:#ef4444">*</span></label><input id="uf_pass" type="password" class="form-input" placeholder="••••••••"></div>
             <div class="form-group"><label>Xác nhận mật khẩu</label><input id="uf_pass2" type="password" class="form-input" placeholder="••••••••"></div>
           </div>
-
           <div class="form-group" style="margin-top:8px">
             <label>Vai trò</label>
             <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
@@ -66,14 +76,10 @@ export class UserManagementPage {
               <label class="checkbox-label"><input type="radio" name="uf_role" value="admin"> <b>Admin</b> <span style="opacity:.5;margin-left:4px">– Toàn quyền</span></label>
             </div>
           </div>
-
-          <div class="form-group" style="margin-top:8px">
-            <label>Nhận thông báo</label>
-            <div style="display:flex;flex-direction:column;gap:6px;margin-top:4px">
-              <label class="checkbox-label"><input type="checkbox" checked> Push notification</label>
-              <label class="checkbox-label"><input type="checkbox" checked> Email khi CRITICAL</label>
-              <label class="checkbox-label"><input type="checkbox"> SMS khi CRITICAL</label>
-            </div>
+          <div class="form-group" id="isActiveGroup" style="display:none;margin-top:8px">
+            <label class="checkbox-label">
+              <input type="checkbox" id="uf_isActive" checked> Tài khoản đang hoạt động
+            </label>
           </div>
         </div>
         <div class="modal-footer">
@@ -81,69 +87,225 @@ export class UserManagementPage {
           <button id="userModalSave" class="btn-industrial btn-primary">Lưu tài khoản</button>
         </div>
       </div>
+    </div>
+
+    <!-- Modal: Đổi mật khẩu -->
+    <div id="pwModal" class="modal-overlay">
+      <div class="modal-content" style="width:420px">
+        <div class="modal-header">
+          <h3>ĐỔI MẬT KHẨU</h3>
+          <button id="pwModalClose" class="modal-close-btn">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group"><label>Mật khẩu mới <span style="color:#ef4444">*</span></label><input id="pw_new" type="password" class="form-input" placeholder="••••••••"></div>
+          <div class="form-group"><label>Xác nhận mật khẩu mới</label><input id="pw_confirm" type="password" class="form-input" placeholder="••••••••"></div>
+        </div>
+        <div class="modal-footer">
+          <button id="pwModalCancel" class="btn-industrial">Hủy</button>
+          <button id="pwModalSave" class="btn-industrial btn-primary">Đổi mật khẩu</button>
+        </div>
+      </div>
     </div>`;
   }
 
   mount(): void {
-    const modal = document.getElementById('userModal');
-    const closeModal = () => modal?.classList.remove('active');
+    this.loadUsers();
+    this.bindEvents();
+  }
 
-    document.getElementById('addUserBtn')?.addEventListener('click', () => {
-      modal?.classList.add('active');
-    });
-    document.getElementById('userModalClose')?.addEventListener('click', closeModal);
-    document.getElementById('userModalCancel')?.addEventListener('click', closeModal);
+  private async loadUsers(): Promise<void> {
+    try {
+      this.users = await stationApi.getUsers();
+      this.renderTable();
+    } catch (e) {
+      const tbody = document.getElementById('userTableBody');
+      if (tbody) tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#ef4444;padding:32px">Lỗi tải danh sách: ${(e as Error).message}</td></tr>`;
+    }
+  }
 
-    // Save button — validate and add user to table
-    document.getElementById('userModalSave')?.addEventListener('click', () => {
-      const name = (document.getElementById('uf_name') as HTMLInputElement)?.value.trim();
-      const user = (document.getElementById('uf_user') as HTMLInputElement)?.value.trim();
-      const email = (document.getElementById('uf_email') as HTMLInputElement)?.value.trim();
-      const pass = (document.getElementById('uf_pass') as HTMLInputElement)?.value;
-      const pass2 = (document.getElementById('uf_pass2') as HTMLInputElement)?.value;
-      const role = (document.querySelector('input[name="uf_role"]:checked') as HTMLInputElement)?.value || 'operator';
+  private renderTable(): void {
+    const tbody = document.getElementById('userTableBody');
+    if (!tbody) return;
+    if (this.users.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:#475569;padding:32px">Chưa có người dùng nào</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = this.users.map(u => {
+      const roleColor = u.role === 'admin' ? '#ef4444' : u.role === 'manager' ? '#f59e0b' : '#10b981';
+      const roleLabel = u.role === 'admin' ? 'ADMIN' : u.role === 'manager' ? 'MANAGER' : 'OPERATOR';
+      const statusTag = u.isActive
+        ? `<span class="tag tag-success">Hoạt động</span>`
+        : `<span class="tag tag-danger">Vô hiệu</span>`;
+      return `<tr data-user-id="${u.id}">
+        <td><b>${u.fullName || '—'}</b></td>
+        <td><code>${u.username}</code></td>
+        <td>${u.email || '—'}</td>
+        <td><span class="tag" style="background:${roleColor}20;color:${roleColor}">${roleLabel}</span></td>
+        <td>${statusTag}</td>
+        <td style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="btn-industrial btn-sm edit-user-btn" data-id="${u.id}" title="Sửa thông tin">✏</button>
+          <button class="btn-industrial btn-sm change-pw-btn" data-id="${u.id}" title="Đổi mật khẩu">🔑</button>
+          ${u.isActive ? `<button class="btn-industrial btn-sm btn-danger deactivate-btn" data-id="${u.id}" data-name="${u.username}" title="Vô hiệu hóa">🚫</button>` : ''}
+        </td>
+      </tr>`;
+    }).join('');
 
-      if (!name || !user || !email) { alert('Vui lòng điền đầy đủ thông tin!'); return; }
-      if (pass !== pass2) { alert('Mật khẩu xác nhận không khớp!'); return; }
-      if (pass.length < 6) { alert('Mật khẩu phải ít nhất 6 ký tự!'); return; }
-
-      // Add row to table
-      const tbody = document.querySelector('.data-table tbody');
-      if (tbody) {
-        const tr = document.createElement('tr');
-        tr.innerHTML = `
-          <td><b>${name}</b></td>
-          <td><code>${user}</code></td>
-          <td>${email}</td>
-          <td><span class="tag tag-role-${role}">${role.toUpperCase()}</span></td>
-          <td><span class="tag tag-success">🟢 Hoạt động</span></td>
-          <td>
-            <button class="btn-industrial btn-sm">✏</button>
-            <button class="btn-industrial btn-sm btn-danger">🗑</button>
-          </td>`;
-        tbody.appendChild(tr);
-      }
-
-      closeModal();
-      // Show success toast
-      const toast = document.createElement('div');
-      toast.className = 'toast toast-success';
-      toast.textContent = `✅ Đã thêm tài khoản "${name}" thành công!`;
-      document.body.appendChild(toast);
-      requestAnimationFrame(() => toast.classList.add('toast-show'));
-      setTimeout(() => { toast.classList.remove('toast-show'); setTimeout(() => toast.remove(), 300); }, 3000);
-    });
-
-    // Unlock button
-    document.querySelectorAll('.unlock-btn').forEach(btn => {
+    // Bind row action buttons
+    tbody.querySelectorAll('.edit-user-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        const row = (btn as HTMLElement).closest('tr');
-        const tag = row?.querySelector('.tag-danger');
-        if (tag) { tag.classList.replace('tag-danger', 'tag-success'); tag.textContent = '🟢 Hoạt động'; }
-        btn.remove();
+        const id = (btn as HTMLElement).dataset.id!;
+        this.openEditModal(id);
+      });
+    });
+    tbody.querySelectorAll('.change-pw-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        this.openChangePasswordModal(id);
+      });
+    });
+    tbody.querySelectorAll('.deactivate-btn').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = (btn as HTMLElement).dataset.id!;
+        const name = (btn as HTMLElement).dataset.name!;
+        if (!confirm(`Vô hiệu hóa tài khoản "${name}"?`)) return;
+        try {
+          await stationApi.deactivateUser(id);
+          this.showToast(`Đã vô hiệu hóa tài khoản "${name}"`, 'success');
+          await this.loadUsers();
+        } catch (e) {
+          this.showToast(`Lỗi: ${(e as Error).message}`, 'error');
+        }
       });
     });
   }
+
+  private openAddModal(): void {
+    this.editingUserId = null;
+    const titleEl = document.getElementById('userModalTitle');
+    const userGroup = document.getElementById('usernameGroup');
+    const pwGroup = document.getElementById('passwordGroup');
+    const isActiveGroup = document.getElementById('isActiveGroup');
+    if (titleEl) titleEl.textContent = 'THÊM TÀI KHOẢN';
+    if (userGroup) userGroup.style.display = '';
+    if (pwGroup) pwGroup.style.display = '';
+    if (isActiveGroup) isActiveGroup.style.display = 'none';
+    // Clear fields
+    ['uf_user', 'uf_name', 'uf_email', 'uf_pass', 'uf_pass2'].forEach(id => {
+      const el = document.getElementById(id) as HTMLInputElement;
+      if (el) el.value = '';
+    });
+    (document.querySelector('input[name="uf_role"][value="operator"]') as HTMLInputElement)!.checked = true;
+    document.getElementById('userModal')?.classList.add('active');
+  }
+
+  private openEditModal(id: string): void {
+    const user = this.users.find(u => u.id === id);
+    if (!user) return;
+    this.editingUserId = id;
+    const titleEl = document.getElementById('userModalTitle');
+    const userGroup = document.getElementById('usernameGroup');
+    const pwGroup = document.getElementById('passwordGroup');
+    const isActiveGroup = document.getElementById('isActiveGroup');
+    if (titleEl) titleEl.textContent = `SỬA TÀI KHOẢN — ${user.username}`;
+    if (userGroup) userGroup.style.display = 'none'; // không cho sửa username
+    if (pwGroup) pwGroup.style.display = 'none'; // đổi pw qua modal riêng
+    if (isActiveGroup) isActiveGroup.style.display = '';
+    // Fill fields
+    (document.getElementById('uf_name') as HTMLInputElement).value = user.fullName || '';
+    (document.getElementById('uf_email') as HTMLInputElement).value = user.email || '';
+    (document.getElementById('uf_isActive') as HTMLInputElement).checked = user.isActive;
+    const roleRadio = document.querySelector(`input[name="uf_role"][value="${user.role}"]`) as HTMLInputElement;
+    if (roleRadio) roleRadio.checked = true;
+    document.getElementById('userModal')?.classList.add('active');
+  }
+
+  private openChangePasswordModal(id: string): void {
+    this.editingUserId = id;
+    (document.getElementById('pw_new') as HTMLInputElement).value = '';
+    (document.getElementById('pw_confirm') as HTMLInputElement).value = '';
+    document.getElementById('pwModal')?.classList.add('active');
+  }
+
+  private bindEvents(): void {
+    const closeUserModal = () => {
+      document.getElementById('userModal')?.classList.remove('active');
+      this.editingUserId = null;
+    };
+    const closePwModal = () => {
+      document.getElementById('pwModal')?.classList.remove('active');
+    };
+
+    document.getElementById('addUserBtn')?.addEventListener('click', () => this.openAddModal());
+    document.getElementById('userModalClose')?.addEventListener('click', closeUserModal);
+    document.getElementById('userModalCancel')?.addEventListener('click', closeUserModal);
+    document.getElementById('pwModalClose')?.addEventListener('click', closePwModal);
+    document.getElementById('pwModalCancel')?.addEventListener('click', closePwModal);
+
+    // Save user (add or edit)
+    document.getElementById('userModalSave')?.addEventListener('click', async () => {
+      const name  = (document.getElementById('uf_name') as HTMLInputElement).value.trim();
+      const email = (document.getElementById('uf_email') as HTMLInputElement).value.trim();
+      const role  = (document.querySelector('input[name="uf_role"]:checked') as HTMLInputElement)?.value || 'operator';
+
+      if (this.editingUserId) {
+        // Edit mode
+        const isActive = (document.getElementById('uf_isActive') as HTMLInputElement).checked;
+        try {
+          await stationApi.updateUser(this.editingUserId, { fullName: name, email, role, isActive });
+          this.showToast('Cập nhật tài khoản thành công', 'success');
+          closeUserModal();
+          await this.loadUsers();
+        } catch (e) {
+          this.showToast(`Lỗi: ${(e as Error).message}`, 'error');
+        }
+      } else {
+        // Add mode
+        const username = (document.getElementById('uf_user') as HTMLInputElement).value.trim();
+        const pass  = (document.getElementById('uf_pass') as HTMLInputElement).value;
+        const pass2 = (document.getElementById('uf_pass2') as HTMLInputElement).value;
+
+        if (!username) { this.showToast('Vui lòng nhập tên đăng nhập', 'error'); return; }
+        if (pass !== pass2) { this.showToast('Mật khẩu xác nhận không khớp', 'error'); return; }
+        if (pass.length < 6) { this.showToast('Mật khẩu phải ít nhất 6 ký tự', 'error'); return; }
+
+        try {
+          await stationApi.createUser({ username, password: pass, fullName: name, email, role });
+          this.showToast(`Đã thêm tài khoản "${username}" thành công`, 'success');
+          closeUserModal();
+          await this.loadUsers();
+        } catch (e) {
+          this.showToast(`Lỗi: ${(e as Error).message}`, 'error');
+        }
+      }
+    });
+
+    // Change password
+    document.getElementById('pwModalSave')?.addEventListener('click', async () => {
+      if (!this.editingUserId) return;
+      const newPw  = (document.getElementById('pw_new') as HTMLInputElement).value;
+      const confirm2 = (document.getElementById('pw_confirm') as HTMLInputElement).value;
+      if (newPw !== confirm2) { this.showToast('Mật khẩu xác nhận không khớp', 'error'); return; }
+      if (newPw.length < 6) { this.showToast('Mật khẩu phải ít nhất 6 ký tự', 'error'); return; }
+      try {
+        await stationApi.changePassword(this.editingUserId, { newPassword: newPw });
+        this.showToast('Đổi mật khẩu thành công', 'success');
+        closePwModal();
+      } catch (e) {
+        this.showToast(`Lỗi: ${(e as Error).message}`, 'error');
+      }
+    });
+  }
+
+  private showToast(msg: string, type: 'success' | 'error'): void {
+    const t = document.createElement('div');
+    t.className = `toast toast-${type}`;
+    t.textContent = msg;
+    document.body.appendChild(t);
+    setTimeout(() => t.classList.add('toast-show'), 10);
+    setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
+  }
+
+  destroy(): void { /* nothing to cleanup */ }
 }
 
 // ============================================================

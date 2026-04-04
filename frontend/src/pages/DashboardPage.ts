@@ -18,6 +18,7 @@ import {
 } from '@/services/storage';
 
 export class DashboardPage {
+  private stationId: string = '';
   private dotRadii: Record<string, number> = {}; // pointId → radius (px in SVG landscape)
   private pollingInterval?: ReturnType<typeof setInterval>;
   private lastPoints: Map<string, string> = new Map(); // deviceId → status
@@ -377,7 +378,7 @@ export class DashboardPage {
 
     // ── SLD pan / zoom ────────────────────────────────────────────
     const sldViewport = document.getElementById('sldViewport')!;
-    const sldWorld    = document.getElementById('sld-world')!;
+    const sldWorld = document.getElementById('sld-world')!;
     const SLD_W = 792, SLD_H = 612;
     let vx = 0, vy = 0, vs = 1;
 
@@ -387,7 +388,7 @@ export class DashboardPage {
       const r = sldViewport.getBoundingClientRect();
       const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 0.96;
       vs = s;
-      vx = (r.width  - SLD_W * s) / 2;
+      vx = (r.width - SLD_W * s) / 2;
       vy = (r.height - SLD_H * s) / 2;
       applyView();
     };
@@ -399,7 +400,7 @@ export class DashboardPage {
       // Khi đang edit mode và click vào dot → chỉ drag dot, không pan
       if (editUnlocked && (e.target as Element).closest('#dash-dots > g')) return;
       panning = true;
-      panStart  = { x: e.clientX, y: e.clientY };
+      panStart = { x: e.clientX, y: e.clientY };
       panOrigin = { x: vx, y: vy };
       sldViewport.style.cursor = 'grabbing';
     });
@@ -417,7 +418,7 @@ export class DashboardPage {
       e.preventDefault();
       const r = sldViewport.getBoundingClientRect();
       const cx = e.clientX - r.left, cy = e.clientY - r.top;
-      const f  = e.deltaY > 0 ? 0.9 : 1.1;
+      const f = e.deltaY > 0 ? 0.9 : 1.1;
       const ns = Math.max(0.1, Math.min(10, vs * f));
       vx = cx - (cx - vx) * (ns / vs);
       vy = cy - (cy - vy) * (ns / vs);
@@ -429,19 +430,19 @@ export class DashboardPage {
 
     // ── Lock / Unlock chỉnh điểm ──────────────────────────────────
     let editUnlocked = false;
-    const btnLock    = document.getElementById('sld-btn-lock')!;
-    const btnAddVP   = document.getElementById('btnAddVirtualPoint')!;
-    const btnReset   = document.getElementById('btnResetMap')!;
+    const btnLock = document.getElementById('sld-btn-lock')!;
+    const btnAddVP = document.getElementById('btnAddVirtualPoint')!;
+    const btnReset = document.getElementById('btnResetMap')!;
 
     const setEditMode = (on: boolean) => {
       editUnlocked = on;
       if (on) {
         btnLock.textContent = '🔓 Đang chỉnh';
         (btnLock as HTMLElement).style.background = 'rgba(245,158,11,0.35)';
-        (btnLock as HTMLElement).style.color      = '#fbbf24';
+        (btnLock as HTMLElement).style.color = '#fbbf24';
         (btnLock as HTMLElement).style.borderColor = '#d97706';
-        btnAddVP.style.display  = 'inline-block';
-        btnReset.style.display  = 'inline-block';
+        btnAddVP.style.display = 'inline-block';
+        btnReset.style.display = 'inline-block';
         // Dots nổi bật hơn khi edit
         document.querySelectorAll<SVGCircleElement>('#dash-dots circle').forEach(c => {
           c.setAttribute('stroke', '#facc15');
@@ -449,9 +450,9 @@ export class DashboardPage {
         });
       } else {
         btnLock.textContent = '🔒 Khóa';
-        (btnLock as HTMLElement).style.background   = 'rgba(255,255,255,0.07)';
-        (btnLock as HTMLElement).style.color        = '#e2e8f0';
-        (btnLock as HTMLElement).style.borderColor  = 'rgba(255,255,255,0.15)';
+        (btnLock as HTMLElement).style.background = 'rgba(255,255,255,0.07)';
+        (btnLock as HTMLElement).style.color = '#e2e8f0';
+        (btnLock as HTMLElement).style.borderColor = 'rgba(255,255,255,0.15)';
         btnAddVP.style.display = 'none';
         btnReset.style.display = 'none';
         document.querySelectorAll<SVGCircleElement>('#dash-dots circle').forEach(c => {
@@ -466,10 +467,10 @@ export class DashboardPage {
 
     // Color picker
     const BG = { R: 0.059, G: 0.090, B: 0.165 };
-    document.getElementById('sld-color-picker')?.addEventListener('input', function() {
+    document.getElementById('sld-color-picker')?.addEventListener('input', function () {
       const hex = (this as HTMLInputElement).value;
-      const Rl = parseInt(hex.slice(1,3),16)/255, Gl = parseInt(hex.slice(3,5),16)/255, Bl = parseInt(hex.slice(5,7),16)/255;
-      const m = [(BG.R-Rl),0,0,0,Rl, 0,(BG.G-Gl),0,0,Gl, 0,0,(BG.B-Bl),0,Bl, 0,0,0,1,0].join(' ');
+      const Rl = parseInt(hex.slice(1, 3), 16) / 255, Gl = parseInt(hex.slice(3, 5), 16) / 255, Bl = parseInt(hex.slice(5, 7), 16) / 255;
+      const m = [(BG.R - Rl), 0, 0, 0, Rl, 0, (BG.G - Gl), 0, 0, Gl, 0, 0, (BG.B - Bl), 0, Bl, 0, 0, 0, 1, 0].join(' ');
       document.getElementById('sld-color-matrix')?.setAttribute('values', m);
     });
 
@@ -477,26 +478,26 @@ export class DashboardPage {
 
     // ── SVG dot drag + edit panel ─────────────────────────────────
     const SLD_W_LAND = 792, SLD_H_LAND = 612;
-    const editPanel  = document.getElementById('dot-edit-panel')!;
-    const tip        = document.getElementById('sld-tooltip')!;
+    const editPanel = document.getElementById('dot-edit-panel')!;
+    const tip = document.getElementById('sld-tooltip')!;
 
     let activeDot: { g: Element, id: string, startCx: number, startCy: number, mx: number, my: number } | null = null;
     let wasDragging = false;
     let selectedPointId: string | null = null;
 
     const getCircle = (g: Element) => g.querySelector('circle');
-    const getText   = (g: Element) => g.querySelector('text');
+    const getText = (g: Element) => g.querySelector('text');
 
     const showEditPanel = (pointId: string, clientX: number, clientY: number) => {
       selectedPointId = pointId;
-      const r     = sldViewport.getBoundingClientRect();
-      const g     = document.querySelector(`#dash-dots [data-point-id="${pointId}"]`);
-      const circ  = g ? getCircle(g) : null;
-      const cx    = circ ? parseFloat(circ.getAttribute('cx') || '0') : 0;
-      const cy    = circ ? parseFloat(circ.getAttribute('cy') || '0') : 0;
-      const rad   = circ ? parseFloat(circ.getAttribute('r') || '8') : 8;
-      const px    = parseFloat(((cx / SLD_W_LAND) * 100).toFixed(1));
-      const py    = parseFloat(((cy / SLD_H_LAND) * 100).toFixed(1));
+      const r = sldViewport.getBoundingClientRect();
+      const g = document.querySelector(`#dash-dots [data-point-id="${pointId}"]`);
+      const circ = g ? getCircle(g) : null;
+      const cx = circ ? parseFloat(circ.getAttribute('cx') || '0') : 0;
+      const cy = circ ? parseFloat(circ.getAttribute('cy') || '0') : 0;
+      const rad = circ ? parseFloat(circ.getAttribute('r') || '8') : 8;
+      const px = parseFloat(((cx / SLD_W_LAND) * 100).toFixed(1));
+      const py = parseFloat(((cy / SLD_H_LAND) * 100).toFixed(1));
       const point = this.currentPoints.find(p => p.id === pointId);
       (document.getElementById('dep-title') as HTMLElement).textContent = point?.name ?? pointId;
       (document.getElementById('dep-x') as HTMLInputElement).value = String(px);
@@ -504,11 +505,11 @@ export class DashboardPage {
       (document.getElementById('dep-r') as HTMLInputElement).value = String(rad);
 
       let left = clientX - r.left + 12;
-      let top  = clientY - r.top  - 10;
-      if (left + 220 > r.width)  left = clientX - r.left - 225;
-      if (top  + 180 > r.height) top  = clientY - r.top  - 180;
+      let top = clientY - r.top - 10;
+      if (left + 220 > r.width) left = clientX - r.left - 225;
+      if (top + 180 > r.height) top = clientY - r.top - 180;
       editPanel.style.left = left + 'px';
-      editPanel.style.top  = top  + 'px';
+      editPanel.style.top = top + 'px';
       editPanel.style.display = 'block';
       tip.style.display = 'none';
     };
@@ -543,8 +544,8 @@ export class DashboardPage {
       const newCx = Math.max(0, Math.min(SLD_W_LAND, activeDot.startCx + dx));
       const newCy = Math.max(0, Math.min(SLD_H_LAND, activeDot.startCy + dy));
       const circ = getCircle(activeDot.g)!;
-      const txt  = getText(activeDot.g);
-      const r    = parseFloat(circ.getAttribute('r') || '8');
+      const txt = getText(activeDot.g);
+      const r = parseFloat(circ.getAttribute('r') || '8');
       circ.setAttribute('cx', String(newCx));
       circ.setAttribute('cy', String(newCy));
       txt?.setAttribute('x', String(newCx + r + 3));
@@ -575,18 +576,18 @@ export class DashboardPage {
     // Edit panel: inputs sync → SVG live
     const syncFromPanel = () => {
       if (!selectedPointId) return;
-      const g    = document.querySelector(`#dash-dots [data-point-id="${selectedPointId}"]`);
+      const g = document.querySelector(`#dash-dots [data-point-id="${selectedPointId}"]`);
       const circ = g ? getCircle(g) : null;
-      const txt  = g ? getText(g) : null;
+      const txt = g ? getText(g) : null;
       if (!circ) return;
       const px = parseFloat((document.getElementById('dep-x') as HTMLInputElement).value) || 0;
       const py = parseFloat((document.getElementById('dep-y') as HTMLInputElement).value) || 0;
-      const r  = Math.max(4, parseFloat((document.getElementById('dep-r') as HTMLInputElement).value) || 8);
+      const r = Math.max(4, parseFloat((document.getElementById('dep-r') as HTMLInputElement).value) || 8);
       const cx = (px / 100) * SLD_W_LAND;
       const cy = (py / 100) * SLD_H_LAND;
       circ.setAttribute('cx', String(cx));
       circ.setAttribute('cy', String(cy));
-      circ.setAttribute('r',  String(r));
+      circ.setAttribute('r', String(r));
       txt?.setAttribute('x', String(cx + r + 3));
       txt?.setAttribute('y', String(cy + 4));
       this.dotRadii[selectedPointId] = r;
@@ -608,12 +609,12 @@ export class DashboardPage {
         if (!point) return;
         (document.getElementById('vpName') as HTMLInputElement)!.dataset.id = point.id;
         (document.getElementById('vpName') as HTMLInputElement)!.value = point.name;
-        (document.getElementById('vpIp')  as HTMLInputElement)!.value = point.ipAddress;
+        (document.getElementById('vpIp') as HTMLInputElement)!.value = point.ipAddress;
         (document.querySelector(`input[name="vpTypeRadio"][value="${point.type}"]`) as HTMLInputElement).checked = true;
         (document.getElementById('vpStatus') as HTMLSelectElement)!.value = point.status;
         if (point.additionalProperties) {
           (document.getElementById('vpValue') as HTMLInputElement)!.value = String(point.additionalProperties.currentValue ?? '');
-          (document.getElementById('vpUnit')  as HTMLSelectElement)!.value = point.additionalProperties.measureUnit ?? '°C';
+          (document.getElementById('vpUnit') as HTMLSelectElement)!.value = point.additionalProperties.measureUnit ?? '°C';
         }
         document.getElementById('sectionSensor')!.style.display = point.type === 'Sensor' ? 'block' : 'none';
         document.getElementById('sectionCamera')!.style.display = point.type === 'Camera' ? 'block' : 'none';
@@ -635,13 +636,13 @@ export class DashboardPage {
     // Đóng panel khi click ra ngoài
     sldViewport.addEventListener('mousedown', (e) => {
       if (!(e.target as Element).closest('#dot-edit-panel') &&
-          !(e.target as Element).closest('#dash-dots'))
+        !(e.target as Element).closest('#dash-dots'))
         hideEditPanel();
     });
 
     // ── Panel collapse toggles ────────────────────────────────────
     const setupCollapse = (btnId: string, bodyId: string) => {
-      const btn  = document.getElementById(btnId);
+      const btn = document.getElementById(btnId);
       const body = document.getElementById(bodyId);
       if (!btn || !body) return;
       // Nhớ display gốc để restore đúng (flex/block/...)
@@ -657,9 +658,9 @@ export class DashboardPage {
         btn.textContent = isHidden ? '▲' : '▼';
       });
     };
-    setupCollapse('btnCollapseKpi',    'kpiBody');
+    setupCollapse('btnCollapseKpi', 'kpiBody');
     setupCollapse('btnCollapseAlerts', 'alertsBody');
-    setupCollapse('btnCollapseCam',    'camBody');
+    setupCollapse('btnCollapseCam', 'camBody');
 
     document.getElementById('btnFullCam')?.addEventListener('click', () => router.navigate('realtime'));
 
@@ -1028,19 +1029,19 @@ export class DashboardPage {
     container.innerHTML = '';
 
     points.forEach(p => {
-      const isCam        = p.type === 'Camera';
+      const isCam = p.type === 'Camera';
       const isMaintenance = maintenanceDevices.has(p.id);
-      const isAlert      = !isMaintenance && (p.status === 'Warning' || p.status === 'Alarm');
-      const color        = isCam ? '#3b82f6' : isMaintenance ? '#f59e0b' : isAlert ? '#ef4444' : '#10b981';
+      const isAlert = !isMaintenance && (p.status === 'Warning' || p.status === 'Alarm');
+      const color = isCam ? '#3b82f6' : isMaintenance ? '#f59e0b' : isAlert ? '#ef4444' : '#10b981';
 
       const posX = customOverrides[p.id]?.x ?? p.positionX;
       const posY = customOverrides[p.id]?.y ?? p.positionY;
-      const cx   = (posX / 100) * SLD_W;
-      const cy   = (posY / 100) * SLD_H;
-      const r    = customOverrides[p.id]?.r ?? this.dotRadii[p.id] ?? 8;
+      const cx = (posX / 100) * SLD_W;
+      const cy = (posY / 100) * SLD_H;
+      const r = customOverrides[p.id]?.r ?? this.dotRadii[p.id] ?? 8;
 
       const g = document.createElementNS(ns, 'g');
-      g.setAttribute('data-point-id',   p.id);
+      g.setAttribute('data-point-id', p.id);
       g.setAttribute('data-point-type', p.type);
       g.setAttribute('data-point-name', p.name.toLowerCase());
       g.style.cursor = 'move';
@@ -1101,15 +1102,25 @@ export class DashboardPage {
   /** Lấy dữ liệu cảm biến thật từ backend PLC và cập nhật KPI panel */
   private async fetchRealSensorKpi(): Promise<void> {
     try {
-      const points = await stationApi.getLatestPoints();
-      if (!points.length) return;
+      // Đảm bảo có stationId
+      if (!this.stationId) {
+        this.stationId = await stationApi.getFirstStationId() ?? '';
+        if (!this.stationId) return;
+      }
 
+      // 1. Lấy dữ liệu cảm biến (Nhiệt độ, PD)
+      const points = await stationApi.getLatestPoints();
       const temps = points.filter(p =>
         p.pointId === 'nhiet_do_pha_1' ||
         p.pointId === 'nhiet_do_pha_2' ||
         p.pointId === 'nhiet_do_pha_3'
       );
       const pdPoint = points.find(p => p.pointId === 'phong_dien');
+
+      // 2. Lấy danh sách thiết bị thật từ database để tính KPI Online/Total
+      const allDevices = await stationApi.getDevices(this.stationId);
+      const onlineCount = allDevices.filter(d => d.status.toLowerCase() === 'online').length;
+      const totalCount = allDevices.length;
 
       const kpiRows = document.querySelectorAll<HTMLElement>('#floatKpi .kpi-row-item');
       if (!kpiRows.length) return;
@@ -1126,8 +1137,13 @@ export class DashboardPage {
         const v1 = kpiRows[1]?.querySelector('.kpi-val');
         if (v1) v1.textContent = `${pdPoint.value.toFixed(1)} dB`;
       }
-    } catch {
-      // Backend chưa sẵn sàng → giữ giá trị mock
+
+      // Row 2: Thiết bị Online (Real Database Count: 4 devices)
+      const v2 = kpiRows[2]?.querySelector('.kpi-val');
+      if (v2) v2.textContent = `${onlineCount}/${totalCount}`;
+
+    } catch (err) {
+      console.warn('Không thể cập nhật KPI thực tế:', err);
     }
   }
 

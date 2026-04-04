@@ -139,6 +139,26 @@ public class RuleEvaluationWorker : BackgroundService
         };
 
         db.Alerts.Add(alert);
+
+        // Ghi RuleTriggerLog — lưu lịch sử mỗi lần rule kích hoạt
+        db.RuleTriggerLogs.Add(new RuleTriggerLog
+        {
+            RuleId            = rule.Id,
+            DeviceId          = rule.DeviceId,
+            StationId         = rule.StationId,
+            ConditionSnapshot = rule.Condition,
+            ValueAtTrigger    = currentValue,
+            AlertId           = alert.Id,
+        });
+
+        // Ghi AlertHistory — trạng thái đầu tiên khi tạo
+        db.AlertHistories.Add(new AlertHistory
+        {
+            AlertId = alert.Id,
+            Status  = "triggered",
+            Note    = alert.Message,
+        });
+
         await db.SaveChangesAsync(ct);
 
         _logger.LogWarning("[Rules] Alert [{Level}]: {Msg}", level, alert.Message);

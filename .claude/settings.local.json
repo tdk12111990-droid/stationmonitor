@@ -1,0 +1,17 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /d/StationMonitor/backend/StationMonitor.Api/Controllers/*.cs)",
+      "Bash(wc:*)",
+      "Bash(ls -lh /d/StationMonitor/backend/StationMonitor.Data/Entities/*.cs)",
+      "Bash(npx playwright:*)",
+      "Bash(npx:*)",
+      "Bash(node test-api.mjs)",
+      "Bash(dotnet build:*)",
+      "Bash(taskkill /F /PID 17784)",
+      "Bash(taskkill /F /IM \"StationMonitor.Api.exe\")",
+      "Bash(dotnet run:*)",
+      "Bash(echo \"Backend starting PID=$!\")"
+    ]
+  }
+}

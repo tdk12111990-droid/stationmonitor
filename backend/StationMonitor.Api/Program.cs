@@ -6,9 +6,9 @@
 using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using StationMonitor.Api.Hubs;
+using StationMonitor.Api.Middleware;
 using StationMonitor.Data;
 using StationMonitor.Services;
 using StationMonitor.Services.Auth;
@@ -87,6 +87,7 @@ var app = builder.Build();
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<AuditMiddleware>(); // Ghi audit log tự động
 app.MapControllers();
 
 // SignalR endpoint

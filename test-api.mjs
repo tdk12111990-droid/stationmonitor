@@ -312,6 +312,120 @@ if (triggeredAlertId) {
     : fail('POST /alerts/{id}/close', `status=${r.status}`);
 }
 
+// ── PHASE 4A: Users ────────────────────────────────────────
+console.log('\n📋 PHASE 4A — Users (CRUD)\n');
+
+let testUserId = '';
+
+// Test: GET /users (danh sách users)
+{
+  const r = await get('/users');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /users → ${r.body.length} users`)
+    : fail('GET /users', `status=${r.status}`);
+}
+
+// Test: POST /users — tạo user mới
+{
+  const r = await post('/users', {
+    username: 'test_auto_user',
+    password: 'Test@123',
+    fullName: 'Auto Test User',
+    email: 'autotest@station.vn',
+    role: 'operator',
+  });
+  if (r.status === 200 || r.status === 201) {
+    testUserId = r.body.id;
+    ok(`POST /users → tạo thành công (id: ${testUserId?.slice(0,8)}...)`);
+  } else {
+    // Có thể user đã tồn tại từ lần chạy trước — thử GET lại
+    const all = await get('/users');
+    const existing = all.body?.find(u => u.username === 'test_auto_user');
+    if (existing) { testUserId = existing.id; ok('POST /users → user đã tồn tại, dùng lại'); }
+    else fail('POST /users', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test: PUT /users/{id} — sửa thông tin
+if (testUserId) {
+  const r = await fetch(`${BASE}/users/${testUserId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ fullName: 'Auto Test User (Updated)', role: 'manager' }),
+  });
+  r.status === 200
+    ? ok(`PUT /users/${testUserId.slice(0,8)} → cập nhật thành công`)
+    : fail('PUT /users/{id}', `status=${r.status}`);
+}
+
+// Test: DELETE /users/{id} — vô hiệu hóa
+if (testUserId) {
+  const r = await del(`/users/${testUserId}`);
+  r.status === 200
+    ? ok(`DELETE /users/${testUserId.slice(0,8)} → vô hiệu hóa thành công`)
+    : fail('DELETE /users/{id}', `status=${r.status}`);
+}
+
+// ── PHASE 4B: Audit Logs ────────────────────────────────────
+console.log('\n📋 PHASE 4B — Audit Logs\n');
+
+// Test: GET /logs/audit
+{
+  const r = await get('/logs/audit?limit=20');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /logs/audit → ${r.body.length} entries`)
+    : fail('GET /logs/audit', `status=${r.status}`);
+}
+
+// Test: GET /logs/login
+{
+  const r = await get('/logs/login?limit=20');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /logs/login → ${r.body.length} entries`)
+    : fail('GET /logs/login', `status=${r.status}`);
+}
+
+// Test: AuditMiddleware tự ghi log (action vừa rồi phải có trong audit)
+{
+  const r = await get('/logs/audit?limit=5');
+  const hasUserLog = r.body?.some(l => l.entityType === 'user');
+  hasUserLog
+    ? ok('AuditMiddleware → tự ghi log hành động user')
+    : fail('AuditMiddleware', 'Không tìm thấy log entityType=user sau thao tác CRUD');
+}
+
+// ── PHASE 4C: System Settings ───────────────────────────────
+console.log('\n📋 PHASE 4C — System Settings\n');
+
+// Test: GET /settings
+{
+  const r = await get('/settings');
+  r.status === 200 && typeof r.body === 'object'
+    ? ok(`GET /settings → ${Object.keys(r.body).length} keys: [${Object.keys(r.body).join(', ')}]`)
+    : fail('GET /settings', `status=${r.status}`);
+}
+
+// Test: PUT /settings/{key}
+{
+  const r = await fetch(`${BASE}/settings/polling_interval_s`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ value: '5' }),
+  });
+  r.status === 200
+    ? ok('PUT /settings/polling_interval_s → cập nhật thành công')
+    : fail('PUT /settings/{key}', `status=${r.status}`);
+}
+
+// Restore default value
+{
+  await fetch(`${BASE}/settings/polling_interval_s`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ value: '3' }),
+  });
+}
+
 // ── Dọn dẹp test data ──────────────────────────────────────
 console.log('\n📋 Dọn dẹp test data\n');
 

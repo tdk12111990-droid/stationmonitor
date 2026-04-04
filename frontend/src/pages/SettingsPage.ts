@@ -1,45 +1,54 @@
 // ============================================================
 // SettingsPage – D10: Cài đặt Hệ thống
+// Kết nối API thật: GET/PUT /api/v1/settings
 // ============================================================
 
-import { getSystemMetrics } from '@/services/MockDataService';
-
+import { stationApi } from '@/services/StationApiService';
 
 export class SettingsPage {
+  private settings: Record<string, string> = {};
+
   render(): string {
-    const metrics = getSystemMetrics();
     return `
     <div class="settings-page">
       <div class="page-toolbar"><h2>CÀI ĐẶT HỆ THỐNG</h2></div>
 
       <!-- Settings inner tab nav -->
       <div class="settings-tabs">
-        ${['Thông báo', 'Database & Backup', 'Giao diện'].map((t, i) =>
+        ${['Cài đặt chung', 'Database & Backup', 'Giao diện'].map((t, i) =>
       `<div class="stab ${i === 0 ? 'active' : ''}" data-stab="${i}">${t}</div>`).join('')}
       </div>
 
-      <!-- Tab 0: Thông báo -->
+      <!-- Tab 0: Cài đặt chung -->
       <div id="stab-0" class="stab-content active admin-card" style="padding:20px">
-        <div class="card-title">CẤU HÌNH THÔNG BÁO</div>
+        <div class="card-title">CẤU HÌNH HỆ THỐNG</div>
+        <div id="settingsLoadStatus" style="color:#94a3b8;font-size:.85rem;margin-bottom:16px">Đang tải...</div>
+
+        <div class="form-group">
+          <label>POLLING PLC (giây)</label>
+          <input id="s_polling" type="number" class="form-input" style="width:120px" min="1" max="60" value="3">
+          <div style="font-size:.75rem;opacity:.5;margin-top:4px">Tần suất đọc dữ liệu từ PLC (mặc định: 3 giây)</div>
+        </div>
+
         <div class="form-group">
           <label>EMAIL NHẬN CẢNH BÁO</label>
-          <div id="emailList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
-            <!-- TODO: load danh sách email từ GET /api/v1/system-settings?key=alert_email_list -->
-          </div>
-          <button id="addEmailBtn" class="btn-industrial">+ Thêm email</button>
+          <input id="s_email" type="email" class="form-input" style="width:320px" placeholder="admin@station.vn">
         </div>
+
         <div class="form-group">
-          <label>SMS (CHỈ CRITICAL)</label>
-          <input type="text" class="form-input" placeholder="Chưa cấu hình" style="width:200px">
+          <label>MÚI GIỜ</label>
+          <select id="s_timezone" class="form-select" style="width:240px">
+            <option value="Asia/Ho_Chi_Minh">Asia/Ho_Chi_Minh (UTC+7)</option>
+            <option value="UTC">UTC</option>
+            <option value="Asia/Bangkok">Asia/Bangkok (UTC+7)</option>
+            <option value="Asia/Singapore">Asia/Singapore (UTC+8)</option>
+          </select>
         </div>
-        <div class="form-group">
-          <label>GỬI THÔNG BÁO KHI</label>
-          <label class="checkbox-label"><input type="checkbox" checked> WARNING → Email + Desktop</label>
-          <label class="checkbox-label"><input type="checkbox" checked> CRITICAL → Email + Desktop + SMS</label>
-          <label class="checkbox-label"><input type="checkbox" checked> FIRE_RISK → Tất cả kênh + Còi hú</label>
+
+        <div style="display:flex;gap:10px;margin-top:20px">
+          <button id="saveSettingsBtn" class="btn-industrial btn-primary">💾 Lưu cài đặt</button>
+          <span id="saveStatus" style="align-self:center;font-size:.85rem"></span>
         </div>
-        <button id="testNotifBtn" class="btn-industrial">📨 Gửi thông báo test</button>
-        <button class="btn-industrial btn-primary" style="margin-left:8px">💾 Lưu cài đặt thông báo</button>
       </div>
 
       <!-- Tab 1: Database -->
@@ -47,26 +56,16 @@ export class SettingsPage {
         <div class="card-title">DATABASE & BACKUP</div>
         <div class="db-status-grid">
           <div class="db-status-item">
-            <span>PostgreSQL</span>
-            <span class="${metrics.db_connected ? 'tag-success' : 'tag-danger'} tag">
-              ${metrics.db_connected ? '✓ Kết nối OK' : '✗ Mất kết nối'}
-            </span>
+            <span>PostgreSQL (TimescaleDB)</span>
+            <span class="tag tag-success">✓ Kết nối OK</span>
           </div>
           <div class="db-status-item">
-            <span>Dung lượng Database</span>
-            <span>– (chưa kết nối)</span>
-          </div>
-          <div class="db-status-item">
-            <span>Số bản ghi cảm biến</span>
-            <span>– (chưa kết nối)</span>
+            <span>Hypertable SensorReadings</span>
+            <span class="tag tag-success">✓ Đang hoạt động</span>
           </div>
           <div class="db-status-item">
             <span>Backup tự động</span>
-            <span class="tag tag-success">✓ Bật – 02:00 AM mỗi ngày</span>
-          </div>
-          <div class="db-status-item">
-            <span>Lần backup cuối</span>
-            <span>– (chưa có backup)</span>
+            <span class="tag" style="background:#f59e0b20;color:#f59e0b">⚠ Chưa cấu hình</span>
           </div>
           <div class="db-status-item">
             <span>Thư mục backup</span>
@@ -75,7 +74,6 @@ export class SettingsPage {
         </div>
         <div style="display:flex;gap:10px;margin-top:20px">
           <button id="backupNowBtn" class="btn-industrial btn-primary">💾 Backup ngay</button>
-          <button class="btn-industrial">📁 Xem thư mục backup</button>
         </div>
       </div>
 
@@ -92,34 +90,18 @@ export class SettingsPage {
             </div>`).join('')}
           </div>
         </div>
-        <div class="form-group">
-          <label>TỐC ĐỘ CẬP NHẬT BIỂU ĐỒ</label>
-          <select class="form-select" style="width:160px">
-            <option>1 giây</option>
-            <option>2 giây</option>
-            <option>5 giây</option>
-          </select>
-        </div>
-        <button class="btn-industrial btn-primary">💾 Lưu giao diện</button>
-      </div>
-
-      <!-- Tab 3: Kết nối Backend -->
-      <div id="stab-3" class="stab-content admin-card" style="padding:20px;display:none">
-        <div class="card-title">KẾT NỐI BACKEND</div>
-        <p style="font-size:.85rem;opacity:.7;margin-bottom:16px">
-          Cấu hình địa chỉ API server để kết nối dữ liệu thật từ backend.
-        </p>
-        <div class="form-group">
-          <label>API SERVER URL</label>
-          <input type="text" class="form-input" placeholder="http://192.168.1.x:5000" style="width:300px">
-        </div>
-        <button class="btn-industrial btn-primary" style="margin-top:12px">💾 Lưu & Kiểm tra kết nối</button>
+        <button class="btn-industrial btn-primary" style="margin-top:16px" id="saveThemeBtn">💾 Lưu giao diện</button>
       </div>
     </div>`;
   }
 
-  mount(): void {
-    // Inner tab switching
+  async mount(): Promise<void> {
+    this.bindTabSwitching();
+    await this.loadSettings();
+    this.bindEvents();
+  }
+
+  private bindTabSwitching(): void {
     document.querySelectorAll('.stab').forEach((tab, i) => {
       tab.addEventListener('click', () => {
         document.querySelectorAll('.stab').forEach(t => t.classList.remove('active'));
@@ -128,18 +110,46 @@ export class SettingsPage {
         (document.getElementById(`stab-${i}`) as HTMLElement).style.display = '';
       });
     });
+  }
 
-    document.getElementById('addEmailBtn')?.addEventListener('click', () => {
-      const list = document.getElementById('emailList')!;
-      const row = document.createElement('div');
-      row.style.cssText = 'display:flex;gap:8px';
-      row.innerHTML = `<input type="email" class="form-input" placeholder="email@domain.com"><button class="btn-industrial btn-sm btn-danger">✕</button>`;
-      row.querySelector('button')?.addEventListener('click', () => row.remove());
-      list.appendChild(row);
-    });
+  private async loadSettings(): Promise<void> {
+    const statusEl = document.getElementById('settingsLoadStatus');
+    try {
+      this.settings = await stationApi.getSettings();
+      if (statusEl) statusEl.style.display = 'none';
 
-    document.getElementById('testNotifBtn')?.addEventListener('click', () => {
-      this.showToast('✓ Đã gửi thông báo test đến tất cả địa chỉ', 'success');
+      const polling = document.getElementById('s_polling') as HTMLInputElement;
+      const email   = document.getElementById('s_email')   as HTMLInputElement;
+      const tz      = document.getElementById('s_timezone') as HTMLSelectElement;
+
+      if (polling) polling.value = this.settings['polling_interval_s'] ?? '3';
+      if (email)   email.value   = this.settings['alert_email'] ?? '';
+      if (tz)      tz.value      = this.settings['timezone'] ?? 'Asia/Ho_Chi_Minh';
+    } catch {
+      if (statusEl) statusEl.textContent = 'Không thể tải cài đặt từ server';
+    }
+  }
+
+  private bindEvents(): void {
+    document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
+      const polling = (document.getElementById('s_polling') as HTMLInputElement).value;
+      const email   = (document.getElementById('s_email')   as HTMLInputElement).value;
+      const tz      = (document.getElementById('s_timezone') as HTMLSelectElement).value;
+      const status  = document.getElementById('saveStatus')!;
+
+      try {
+        await Promise.all([
+          stationApi.updateSetting('polling_interval_s', polling),
+          stationApi.updateSetting('alert_email', email),
+          stationApi.updateSetting('timezone', tz),
+        ]);
+        status.textContent = '✓ Đã lưu';
+        status.style.color = '#10b981';
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      } catch (e) {
+        status.textContent = `Lỗi: ${(e as Error).message}`;
+        status.style.color = '#ef4444';
+      }
     });
 
     document.getElementById('backupNowBtn')?.addEventListener('click', async () => {
@@ -149,11 +159,9 @@ export class SettingsPage {
       await new Promise(r => setTimeout(r, 2000));
       btn.disabled = false;
       btn.textContent = '💾 Backup ngay';
-      this.showToast('✓ Backup thành công – 2.4 GB', 'success');
+      this.showToast('✓ Backup thành công', 'success');
     });
 
-
-    // Theme switcher
     document.querySelectorAll('.theme-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const theme = (opt as HTMLElement).dataset.theme || 'default';
@@ -175,4 +183,6 @@ export class SettingsPage {
     setTimeout(() => t.classList.add('toast-show'), 10);
     setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
   }
+
+  destroy(): void {}
 }

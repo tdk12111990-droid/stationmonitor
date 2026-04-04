@@ -1,372 +1,227 @@
 // ============================================================
-// AnalyticsPage – D06: Phân tích & Báo cáo (Cấp độ Chuyên sâu)
+// AnalyticsPage — Phân tích dữ liệu sensor từ TimescaleDB
+// Dùng GET /api/v1/points + GET /api/v1/history (backend thật)
 // ============================================================
 
 import Chart from 'chart.js/auto';
-import {
-  loadScadaPoints, getScadaEvents, getScadaHistory,
-  type StoredScadaPoint, type ScadaEvent, type ScadaHistoryEntry
-} from '@/services/storage';
+import { stationApi, type AlertItem } from '@/services/StationApiService';
 
-type TimeRange = '1H' | '6H' | '1D' | '1W' | '1M' | '1Y';
+type TimeRange = '1H' | '6H' | '1D' | '1W' | '1M';
+
+interface SensorMeta {
+  deviceId: string;
+  pointId: string;
+  label: string;
+  unit: string;
+}
 
 export class AnalyticsPage {
   private mainChart: Chart | null = null;
   private alertTypeChart: Chart | null = null;
   private alertFreqChart: Chart | null = null;
-  private scadaPoints: StoredScadaPoint[] = [];
-  private scadaEvents: ScadaEvent[] = [];
-  private selectedSensorIds: Set<string> = new Set();
-  private currentTimeRange: TimeRange = '1D';
-  private isLiveMode: boolean = false;
+
+  private sensors: SensorMeta[] = [];
+  private alerts: AlertItem[] = [];
+  private selectedKeys: Set<string> = new Set(); // "deviceId|pointId"
+  private currentRange: TimeRange = '1D';
   private liveInterval: ReturnType<typeof setInterval> | null = null;
 
   render(): string {
     return `
-    <div class="analytics-container" style="display:flex; height:calc(100vh - 64px); background:var(--admin-bg);">
-      
-      <!-- SIDEBAR: Sensor Selection -->
-      <div class="analytics-sidebar" style="width:280px; border-right:1px solid rgba(255,255,255,0.05); padding:20px; display:flex; flex-direction:column; background:rgba(0,0,0,0.1);">
-        <h3 style="font-size:0.9rem; color:var(--admin-text); opacity:0.6; text-transform:uppercase; margin-bottom:20px; letter-spacing:1px;">Thiết bị giám sát</h3>
-        <div id="sensorListContainer" style="flex:1; overflow-y:auto; margin-bottom:20px;">
-          <!-- Checkboxes populated dynamically -->
-          <div style="padding:10px; color:#94a3b8; font-size:0.8rem;">Đang tải danh sách...</div>
+    <div class="analytics-container" style="display:flex;height:calc(100vh - 64px);background:var(--admin-bg);">
+
+      <!-- SIDEBAR -->
+      <div class="analytics-sidebar" style="width:280px;border-right:1px solid rgba(255,255,255,0.05);padding:20px;display:flex;flex-direction:column;background:rgba(0,0,0,0.1);">
+        <h3 style="font-size:0.9rem;color:var(--admin-text);opacity:0.6;text-transform:uppercase;margin-bottom:20px;letter-spacing:1px;">Điểm đo</h3>
+        <div id="sensorListContainer" style="flex:1;overflow-y:auto;margin-bottom:20px;">
+          <div style="padding:10px;color:#94a3b8;font-size:0.8rem;">Đang tải...</div>
         </div>
-        <div style="padding-top:15px; border-top:1px solid rgba(255,255,255,0.05);">
-          <button id="selectAllSensors" class="btn-industrial" style="width:100%; margin-bottom:8px; font-size:0.75rem;">Chọn tất cả</button>
-          <button id="clearAllSensors" class="btn-industrial" style="width:100%; font-size:0.75rem;">Bỏ chọn hết</button>
+        <div style="padding-top:15px;border-top:1px solid rgba(255,255,255,0.05);">
+          <button id="selectAllSensors" class="btn-industrial" style="width:100%;margin-bottom:8px;font-size:0.75rem;">Chọn tất cả</button>
+          <button id="clearAllSensors" class="btn-industrial" style="width:100%;font-size:0.75rem;">Bỏ chọn hết</button>
         </div>
       </div>
 
-      <!-- MAIN CONTENT -->
-      <div class="analytics-main" style="flex:1; display:flex; flex-direction:column; overflow:hidden;">
-        
+      <!-- MAIN -->
+      <div style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+
         <!-- TOOLBAR -->
-        <div class="analytics-toolbar" style="padding:15px 24px; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center; background:rgba(255,255,255,0.02);">
-          <div style="display:flex; gap:10px;">
-            <button class="range-btn" data-range="1H">1 GIỜ</button>
-            <button class="range-btn active" data-range="1D">1 NGÀY</button>
-            <button class="range-btn" data-range="1W">1 TUẦN</button>
-            <button class="range-btn" data-range="1M">1 THÁNG</button>
-            <button class="range-btn" data-range="1Y">1 NĂM</button>
+        <div style="padding:15px 24px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,0.02);">
+          <div style="display:flex;gap:10px;">
+            ${(['1H','6H','1D','1W','1M'] as TimeRange[]).map(r =>
+              `<button class="range-btn${r === '1D' ? ' active' : ''}" data-range="${r}">${r}</button>`
+            ).join('')}
           </div>
-          <div style="display:flex; align-items:center; gap:15px;">
-            <div style="display:flex; align-items:center; gap:8px;">
-              <span style="font-size:0.75rem; color:#94a3b8; font-weight:600;">LIVE UPDATES</span>
-              <label class="switch-industrial">
-                <input type="checkbox" id="liveToggle">
-                <span class="slider-industrial"></span>
-              </label>
-            </div>
-            <button id="exportData" class="btn-industrial" style="padding:6px 15px; font-size:0.75rem;">📥 Xuất dữ liệu</button>
+          <div style="display:flex;align-items:center;gap:15px;">
+            <span style="font-size:0.75rem;color:#94a3b8;font-weight:600;">LIVE</span>
+            <label class="switch-industrial">
+              <input type="checkbox" id="liveToggle">
+              <span class="slider-industrial"></span>
+            </label>
           </div>
         </div>
 
-        <!-- CHART AREA -->
-        <div style="flex:1; padding:24px; display:flex; flex-direction:column; gap:20px; overflow-y:auto; background:rgba(0,0,0,0.05);">
-          
-          <!-- Top Row: Main Trends -->
-          <div class="admin-card" style="flex:0 0 450px; padding:20px; display:flex; flex-direction:column; background:rgba(0,0,0,0.2); position:relative;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:15px;">
-              <div id="chartTitle" style="font-weight:700; color:var(--admin-text); font-size:1.1rem; text-transform:uppercase; letter-spacing:1px;">Xu hướng thông số thiết bị</div>
-              <div id="chartLegend" style="display:flex; gap:15px; flex-wrap:wrap;"></div>
+        <!-- CHARTS -->
+        <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:20px;overflow-y:auto;background:rgba(0,0,0,0.05);">
+
+          <!-- Main trend chart -->
+          <div class="admin-card" style="flex:0 0 420px;padding:20px;display:flex;flex-direction:column;background:rgba(0,0,0,0.2);">
+            <div style="font-weight:700;color:var(--admin-text);font-size:1rem;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px;">
+              Xu hướng thông số
             </div>
-            <div style="flex:1; min-height:0; position:relative;">
+            <div style="flex:1;min-height:0;position:relative;">
               <canvas id="mainChartCanvas"></canvas>
             </div>
           </div>
 
-          <!-- Bottom Row: Statistics -->
-          <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; flex:0 0 320px;">
-            <!-- Alert Distribution -->
-            <div class="admin-card" style="padding:20px; display:flex; flex-direction:column; background:rgba(0,0,0,0.2);">
-              <div style="font-weight:700; color:var(--admin-text); font-size:0.9rem; margin-bottom:15px; text-transform:uppercase;">Phân tích loại cảnh báo</div>
-              <div style="flex:1; min-height:0; display:flex; align-items:center; justify-content:center;">
+          <!-- Bottom row: alert stats -->
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;flex:0 0 300px;">
+            <div class="admin-card" style="padding:20px;background:rgba(0,0,0,0.2);">
+              <div style="font-weight:700;color:var(--admin-text);font-size:0.9rem;margin-bottom:12px;text-transform:uppercase;">Phân loại cảnh báo</div>
+              <div style="position:relative;height:220px;">
                 <canvas id="alertTypeChartCanvas"></canvas>
               </div>
             </div>
-
-            <!-- Alert Frequency -->
-            <div class="admin-card" style="padding:20px; display:flex; flex-direction:column; background:rgba(0,0,0,0.2);">
-              <div style="font-weight:700; color:var(--admin-text); font-size:0.9rem; margin-bottom:15px; text-transform:uppercase;">Tần suất cảnh báo theo thời gian</div>
-              <div style="flex:1; min-height:0;">
+            <div class="admin-card" style="padding:20px;background:rgba(0,0,0,0.2);">
+              <div style="font-weight:700;color:var(--admin-text);font-size:0.9rem;margin-bottom:12px;text-transform:uppercase;">Tần suất cảnh báo 24h</div>
+              <div style="position:relative;height:220px;">
                 <canvas id="alertFreqChartCanvas"></canvas>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- BOTTOM KPI BAR -->
-        <div class="analytics-status-bar" style="padding:10px 24px; border-top:1px solid rgba(255,255,255,0.05); display:grid; grid-template-columns: repeat(4, 1fr); gap:20px; font-size:0.75rem; background:rgba(0,0,0,0.1);">
-           <div id="kpiAlarm" style="color:#ef4444;">ALARM: 0</div>
-           <div id="kpiWarning" style="color:#f59e0b;">WARNING: 0</div>
-           <div id="kpiEvents">EVENTS (24H): 0</div>
-           <div id="kpiStatus" style="text-align:right; color:#10b981;">● SYSTEM READY</div>
+        <!-- KPI bar -->
+        <div style="padding:10px 24px;border-top:1px solid rgba(255,255,255,0.05);display:grid;grid-template-columns:repeat(4,1fr);gap:20px;font-size:0.75rem;background:rgba(0,0,0,0.1);">
+          <div id="kpiOpen"   style="color:#ef4444;">OPEN: 0</div>
+          <div id="kpiAcked"  style="color:#f59e0b;">ACKED: 0</div>
+          <div id="kpiClosed">CLOSED (24H): 0</div>
+          <div id="kpiStatus" style="text-align:right;color:#10b981;">● LOADING...</div>
         </div>
       </div>
     </div>`;
   }
 
-  mount(): void {
-    this.loadInitialData();
-    this.setupEventListeners();
+  async mount(): Promise<void> {
+    await this.loadAll();
+    this.bindEvents();
   }
 
-  private setupEventListeners(): void {
-    // Range buttons
-    document.querySelectorAll('.range-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const target = e.currentTarget as HTMLButtonElement;
-        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
-        target.classList.add('active');
-        this.currentTimeRange = target.dataset.range as TimeRange;
-        this.refreshChartData();
-      });
-    });
+  // ── Load dữ liệu từ backend ───────────────────────────────
 
-    // Live toggle
-    const liveToggle = document.getElementById('liveToggle') as HTMLInputElement;
-    liveToggle?.addEventListener('change', (e) => {
-      this.isLiveMode = (e.currentTarget as HTMLInputElement).checked;
-      if (this.isLiveMode) {
-        this.startLivePolling();
-      } else {
-        this.stopLivePolling();
-      }
-    });
-
-    // Sidebar buttons
-    document.getElementById('selectAllSensors')?.addEventListener('click', () => {
-      this.selectedSensorIds = new Set(this.scadaPoints.filter(p => p.type === 'Sensor').map(p => p.id));
-      this.syncCheckboxes();
-      this.refreshChartData();
-    });
-
-    document.getElementById('clearAllSensors')?.addEventListener('click', () => {
-      this.selectedSensorIds.clear();
-      this.syncCheckboxes();
-      this.refreshChartData();
-    });
-  }
-
-  private async loadInitialData(): Promise<void> {
+  private async loadAll(): Promise<void> {
     try {
-      const [points, events] = await Promise.all([loadScadaPoints(), getScadaEvents()]);
-      this.scadaPoints = points;
-      this.scadaEvents = events;
-      this.renderSensorList(points);
-      
-      // Auto-select first 3 sensors by default
-      const sensors = points.filter(p => p.type === 'Sensor').slice(0, 3);
-      sensors.forEach(s => this.selectedSensorIds.add(s.id));
+      const [points, alerts] = await Promise.all([
+        stationApi.getLatestPoints(),
+        stationApi.getAlerts(undefined, 200),
+      ]);
+
+      this.alerts = alerts;
+
+      // Chuyển SensorPoint → SensorMeta
+      this.sensors = points.map(p => ({
+        deviceId: p.deviceId,
+        pointId:  p.pointId,
+        label:    this.formatLabel(p.pointId),
+        unit:     p.unit,
+      }));
+
+      this.renderSensorList();
+
+      // Auto-select tất cả (ít điểm, chọn hết luôn)
+      this.selectedKeys = new Set(this.sensors.map(s => this.key(s)));
       this.syncCheckboxes();
-      
-      this.updateKpiBar(points);
-      this.refreshChartData();
-      this.refreshAlertCharts();
+
+      this.updateKpiBar();
+      this.renderAlertCharts();
+      await this.refreshMainChart();
+
     } catch (err) {
-      console.error('[Analytics] Init failed:', err);
+      console.error('[Analytics] load failed:', err);
+      const container = document.getElementById('sensorListContainer');
+      if (container) container.innerHTML = `<div style="color:#ef4444;padding:10px;font-size:0.8rem;">Lỗi tải dữ liệu: ${err}</div>`;
     }
   }
 
-  private async refreshAlertCharts(): Promise<void> {
-    const events = await getScadaEvents();
-    this.scadaEvents = events;
-
-    this.renderAlertTypeChart();
-    this.renderAlertFreqChart(events);
-  }
-
-  private renderAlertTypeChart(): void {
-    const canvas = document.getElementById('alertTypeChartCanvas') as HTMLCanvasElement;
-    if (!canvas) return;
-
-    this.alertTypeChart?.destroy();
-
-    // Group by CURRENT status of all points (not just events)
-    const statusCounts: Record<string, number> = { 'Alarm': 0, 'Warning': 0, 'Normal': 0 };
-    this.scadaPoints.filter(p => p.type === 'Sensor').forEach(p => {
-      const status = p.status;
-      if (status && statusCounts[status] !== undefined) {
-        statusCounts[status]++;
-      }
-    });
-
-    this.alertTypeChart = new Chart(canvas, {
-      type: 'doughnut',
-      data: {
-        labels: ['Báo động (Alarm)', 'Cảnh báo (Warning)', 'Bình thường'],
-        datasets: [{
-          data: [statusCounts['Alarm'], statusCounts['Warning'], statusCounts['Normal']],
-          backgroundColor: ['#ef4444', '#f59e0b', '#10b981'],
-          borderWidth: 0,
-          hoverOffset: 10
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        cutout: '65%',
-        plugins: {
-          legend: { 
-            position: 'right', 
-            labels: { color: '#94a3b8', font: { size: 10 }, usePointStyle: true, padding: 15 } 
-          }
-        }
-      }
-    } as any); // Use any to bypass complex Chart.js type mismatch in mixed environments
-  }
-
-  private renderAlertFreqChart(events: ScadaEvent[]): void {
-    const canvas = document.getElementById('alertFreqChartCanvas') as HTMLCanvasElement;
-    if (!canvas) return;
-
-    this.alertFreqChart?.destroy();
-
-    // Group by hour for the last 24h
-    const now = Date.now();
-    const last24h = now - 24 * 3600000;
-    const bins: Record<number, number> = {};
-    for (let i = 0; i < 24; i++) {
-       const hourTs = new Date(now).setMinutes(0,0,0) - i * 3600000;
-       bins[hourTs] = 0;
-    }
-
-    events.filter(e => e.timestamp > last24h).forEach(e => {
-      const hourTs = new Date(e.timestamp).setMinutes(0,0,0);
-      if (bins[hourTs] !== undefined) bins[hourTs]++;
-    });
-
-    const labels = Object.keys(bins).map(ts => new Date(Number(ts)).getHours() + 'h').reverse();
-    const data = Object.values(bins).reverse();
-
-    this.alertFreqChart = new Chart(canvas, {
-      type: 'bar',
-      data: {
-        labels,
-        datasets: [{
-          label: 'Số sự kiện',
-          data,
-          backgroundColor: 'rgba(56, 189, 248, 0.4)',
-          borderColor: '#38bdf8',
-          borderWidth: 1,
-          borderRadius: 4
-        }]
-      },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } },
-          y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', stepSize: 1 } }
-        },
-        plugins: {
-          legend: { display: false }
-        }
-      }
-    });
-  }
-
-  private renderSensorList(points: StoredScadaPoint[]): void {
-    const container = document.getElementById('sensorListContainer');
-    if (!container) return;
-    
-    const sensors = points.filter(p => p.type === 'Sensor');
-    if (sensors.length === 0) {
-      container.innerHTML = '<div style="color:#64748b; font-size:0.8rem; padding:10px;">Không có thiết bị sensor nào</div>';
+  private async refreshMainChart(): Promise<void> {
+    if (this.selectedKeys.size === 0) {
+      this.mainChart?.destroy();
       return;
     }
 
-    container.innerHTML = sensors.map((s, i) => `
-      <div class="sensor-item" style="display:flex; align-items:center; gap:10px; padding:10px; border-radius:6px; margin-bottom:4px; cursor:pointer; transition:all 0.2s;" onmouseover="this.style.background='rgba(255,255,255,0.05)'" onmouseout="this.style.background='transparent'">
-        <input type="checkbox" class="sensor-checkbox" data-id="${s.id}" ${this.selectedSensorIds.has(s.id) ? 'checked' : ''} style="cursor:pointer">
+    const now = new Date();
+    const from = new Date(now.getTime() - this.rangeMs());
+
+    const selected = this.sensors.filter(s => this.selectedKeys.has(this.key(s)));
+
+    const histories = await Promise.all(
+      selected.map(s =>
+        stationApi.getHistory(s.deviceId, s.pointId, from.toISOString(), now.toISOString())
+      )
+    );
+
+    this.renderMainChart(selected, histories);
+  }
+
+  // ── Render charts ─────────────────────────────────────────
+
+  private renderSensorList(): void {
+    const container = document.getElementById('sensorListContainer');
+    if (!container) return;
+
+    if (this.sensors.length === 0) {
+      container.innerHTML = '<div style="color:#64748b;font-size:0.8rem;padding:10px;">Chưa có dữ liệu sensor.<br>Kiểm tra PLC có đang chạy không.</div>';
+      return;
+    }
+
+    container.innerHTML = this.sensors.map((s, i) => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px;border-radius:6px;margin-bottom:4px;">
+        <input type="checkbox" class="sensor-checkbox"
+          data-key="${this.key(s)}"
+          ${this.selectedKeys.has(this.key(s)) ? 'checked' : ''}
+          style="cursor:pointer">
         <div style="flex:1;">
-          <div style="font-size:0.85rem; color:var(--admin-text); font-weight:600;">${s.name}</div>
-          <div style="font-size:0.7rem; color:#64748b;">${s.id} | ${s.additionalProperties?.measureUnit || '--'}</div>
+          <div style="font-size:0.85rem;color:var(--admin-text);font-weight:600;">${s.label}</div>
+          <div style="font-size:0.7rem;color:#64748b;">${s.unit}</div>
         </div>
-        <div style="width:12px; height:12px; border-radius:50%; background:${this.getColor(i)};"></div>
+        <div style="width:10px;height:10px;border-radius:50%;background:${this.color(i)};"></div>
       </div>
     `).join('');
 
-    // Add event listeners to checkboxes
-    container.querySelectorAll('.sensor-checkbox').forEach(cb => {
-      cb.addEventListener('change', (e) => {
-        const checkbox = e.currentTarget as HTMLInputElement;
-        const id = checkbox.dataset.id!;
-        if (checkbox.checked) this.selectedSensorIds.add(id);
-        else this.selectedSensorIds.delete(id);
-        this.refreshChartData();
+    container.querySelectorAll<HTMLInputElement>('.sensor-checkbox').forEach(cb => {
+      cb.addEventListener('change', () => {
+        const k = cb.dataset.key!;
+        if (cb.checked) this.selectedKeys.add(k);
+        else this.selectedKeys.delete(k);
+        this.refreshMainChart();
       });
     });
   }
 
   private syncCheckboxes(): void {
     document.querySelectorAll<HTMLInputElement>('.sensor-checkbox').forEach(cb => {
-      cb.checked = this.selectedSensorIds.has(cb.dataset.id!);
+      cb.checked = this.selectedKeys.has(cb.dataset.key!);
     });
   }
 
-  private async refreshChartData(): Promise<void> {
-    const overlay = document.getElementById('noDataOverlay');
-    if (this.selectedSensorIds.size === 0) {
-       if (overlay) overlay.style.display = 'flex';
-       this.mainChart?.destroy();
-       return;
-    }
-    if (overlay) overlay.style.display = 'none';
-
-    // Calculate time window
-    const toTs = Date.now();
-    let fromTs = toTs - 24 * 3600000; // Default 1D
-    let resMin = 1; // minutes between points for downsampling
-
-    const range = this.currentTimeRange;
-    switch (range) {
-      case '1H': fromTs = toTs - 3600000; resMin = 1; break;
-      case '6H': fromTs = toTs - 6 * 3600000; resMin = 2; break;
-      case '1D': fromTs = toTs - 24 * 3600000; resMin = 5; break;
-      case '1W': fromTs = toTs - 7 * 24 * 3600000; resMin = 30; break;
-      case '1M': fromTs = toTs - 30 * 24 * 3600000; resMin = 120; break;
-      case '1Y': fromTs = toTs - 365 * 24 * 3600000; resMin = 1440; break;
-    }
-
-    // Fetch history for all selected sensors
-    const sensorIds = Array.from(this.selectedSensorIds);
-    const historyPromises = sensorIds.map(id => getScadaHistory(id, fromTs, toTs));
-    const histories = await Promise.all(historyPromises);
-
-    this.renderMainChart(sensorIds, histories, resMin);
-  }
-
-  private renderMainChart(ids: string[], histories: ScadaHistoryEntry[][], resolutionMin: number): void {
+  private renderMainChart(sensors: SensorMeta[], histories: Array<Array<{ time: string; value: number }>>): void {
     const canvas = document.getElementById('mainChartCanvas') as HTMLCanvasElement;
-    const ctx = canvas?.getContext('2d');
-    if (!ctx) return;
-
+    if (!canvas) return;
     this.mainChart?.destroy();
 
-    const currentRange = this.currentTimeRange;
+    const datasets = sensors.map((s, i) => ({
+      label: `${s.label} (${s.unit})`,
+      data: (histories[i] ?? []).map(h => ({ x: new Date(h.time).getTime(), y: h.value })),
+      borderColor: this.color(i),
+      backgroundColor: this.color(i, 0.08),
+      borderWidth: 2,
+      pointRadius: 0,
+      tension: 0.3,
+      fill: false,
+    }));
 
-    // Prepare datasets
-    const datasets = ids.map((id, index) => {
-      const sensor = this.scadaPoints.find(p => p.id === id);
-      const hist = histories[index] || [];
-      const data = this.downsample(hist, resolutionMin);
-      
-      return {
-        label: sensor?.name || id,
-        data: data.map(h => ({ x: h.timestamp, y: h.value })),
-        borderColor: this.getColor(index),
-        backgroundColor: this.getColor(index, 0.1),
-        borderWidth: 2,
-        pointRadius: resolutionMin > 30 ? 0 : 2,
-        tension: 0.3,
-        fill: false
-      };
-    });
-
-    // Create chart
-    this.mainChart = new Chart(ctx, {
+    const range = this.currentRange;
+    this.mainChart = new Chart(canvas, {
       type: 'line',
       data: { datasets },
       options: {
@@ -374,36 +229,27 @@ export class AnalyticsPage {
         maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         plugins: {
-          legend: { display: true, position: 'top', labels: { color: '#94a3b8', boxWidth: 12, usePointStyle: true } },
+          legend: { labels: { color: '#94a3b8', boxWidth: 12, usePointStyle: true } },
           tooltip: {
-            backgroundColor: 'rgba(15, 23, 42, 0.9)',
+            backgroundColor: 'rgba(15,23,42,0.9)',
             titleColor: '#fff',
             bodyColor: '#94a3b8',
-            borderColor: 'rgba(255,255,255,0.1)',
-            borderWidth: 1,
-            padding: 12,
             callbacks: {
-              title: (items) => {
-                const ts = items[0]?.parsed?.x;
-                return ts ? new Date(ts).toLocaleString('vi-VN') : '';
-              }
+              title: (items: any[]) => new Date(items[0]?.parsed?.x ?? 0).toLocaleString('vi-VN'),
             }
           }
         },
         scales: {
           x: {
             type: 'linear',
-            position: 'bottom',
             grid: { color: 'rgba(255,255,255,0.03)' },
             ticks: {
               color: '#64748b',
-              display: true,
               callback: (val: string | number) => {
-                const date = new Date(Number(val));
-                if (isNaN(date.getTime())) return '';
-                if (currentRange === '1H') return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                if (currentRange === '1D') return date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
-                return date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
+                const d = new Date(Number(val));
+                return range === '1H' || range === '6H'
+                  ? d.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' })
+                  : d.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' });
               }
             }
           },
@@ -413,114 +259,145 @@ export class AnalyticsPage {
           }
         }
       }
-    });
+    } as any);
   }
 
-  private downsample(data: ScadaHistoryEntry[], windowMin: number): ScadaHistoryEntry[] {
-    if (windowMin <= 1 || data.length < 100) return data;
+  private renderAlertCharts(): void {
+    // Donut — phân loại theo level
+    const alarmCount   = this.alerts.filter(a => a.level === 'alarm').length;
+    const warningCount = this.alerts.filter(a => a.level === 'warning').length;
 
-    const windowMs = windowMin * 60 * 1000;
-    const result: ScadaHistoryEntry[] = [];
-    
-    if (data.length === 0) return [];
-
-    let currentBucket: ScadaHistoryEntry[] = [];
-    let bucketStart: number | null = data[0]?.timestamp ?? null;
-
-    data.forEach(p => {
-      if (p.timestamp < (bucketStart ?? 0) + windowMs) {
-        currentBucket.push(p);
-      } else {
-        if (currentBucket.length > 0) {
-          const first = currentBucket[0];
-          if (first) {
-            const avgValue = currentBucket.reduce((sum, b) => sum + b.value, 0) / currentBucket.length;
-            result.push({ 
-              deviceId: first.deviceId,
-              status: first.status, 
-              value: avgValue, 
-              timestamp: (bucketStart ?? 0) + windowMs / 2 
-            });
-          }
+    const donut = document.getElementById('alertTypeChartCanvas') as HTMLCanvasElement;
+    if (donut) {
+      this.alertTypeChart?.destroy();
+      this.alertTypeChart = new Chart(donut, {
+        type: 'doughnut',
+        data: {
+          labels: ['Alarm', 'Warning'],
+          datasets: [{ data: [alarmCount, warningCount], backgroundColor: ['#ef4444', '#f59e0b'], borderWidth: 0 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false, cutout: '65%',
+          plugins: { legend: { position: 'right', labels: { color: '#94a3b8', font: { size: 10 }, usePointStyle: true } } }
         }
-        currentBucket = [p];
-        bucketStart = p.timestamp;
+      } as any);
+    }
+
+    // Bar — tần suất theo giờ trong 24h
+    const now = Date.now();
+    const bins: number[] = Array(24).fill(0);
+    this.alerts
+      .filter(a => new Date(a.triggeredAt).getTime() > now - 86400000)
+      .forEach(a => {
+        const h = new Date(a.triggeredAt).getHours();
+        if (h >= 0 && h < 24) bins[h] = (bins[h] ?? 0) + 1;
+      });
+
+    const bar = document.getElementById('alertFreqChartCanvas') as HTMLCanvasElement;
+    if (bar) {
+      this.alertFreqChart?.destroy();
+      this.alertFreqChart = new Chart(bar, {
+        type: 'bar',
+        data: {
+          labels: Array.from({ length: 24 }, (_, i) => `${i}h`),
+          datasets: [{ label: 'Cảnh báo', data: bins, backgroundColor: 'rgba(56,189,248,0.4)', borderColor: '#38bdf8', borderWidth: 1, borderRadius: 4 }]
+        },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          scales: {
+            x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 9 } } },
+            y: { grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#64748b', stepSize: 1 } }
+          },
+          plugins: { legend: { display: false } }
+        }
+      });
+    }
+  }
+
+  private updateKpiBar(): void {
+    const open   = this.alerts.filter(a => a.status === 'open').length;
+    const acked  = this.alerts.filter(a => a.status === 'acked').length;
+    const closed = this.alerts.filter(a =>
+      a.status === 'closed' && new Date(a.triggeredAt).getTime() > Date.now() - 86400000
+    ).length;
+
+    const el = (id: string, text: string) => { const e = document.getElementById(id); if (e) e.textContent = text; };
+    el('kpiOpen',   `OPEN: ${open}`);
+    el('kpiAcked',  `ACKED: ${acked}`);
+    el('kpiClosed', `CLOSED (24H): ${closed}`);
+
+    const status = document.getElementById('kpiStatus');
+    if (status) {
+      if (open > 0)        { status.textContent = `● ${open} CẢNH BÁO CHƯA XỬ LÝ`; status.style.color = '#ef4444'; }
+      else if (acked > 0)  { status.textContent = `● ${acked} ĐANG XỬ LÝ`;          status.style.color = '#f59e0b'; }
+      else                 { status.textContent = '● HỆ THỐNG BÌNH THƯỜNG';          status.style.color = '#10b981'; }
+    }
+  }
+
+  // ── Events ────────────────────────────────────────────────
+
+  private bindEvents(): void {
+    document.querySelectorAll<HTMLButtonElement>('.range-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.currentRange = btn.dataset.range as TimeRange;
+        this.refreshMainChart();
+      });
+    });
+
+    const liveToggle = document.getElementById('liveToggle') as HTMLInputElement;
+    liveToggle?.addEventListener('change', () => {
+      if (liveToggle.checked) {
+        this.liveInterval = setInterval(() => { this.refreshMainChart(); this.loadAll(); }, 10000);
+      } else {
+        if (this.liveInterval) clearInterval(this.liveInterval);
+        this.liveInterval = null;
       }
     });
 
-    // Handle last bucket
-    if (currentBucket.length > 0 && bucketStart !== null) {
-      const first = currentBucket[0];
-      if (first) {
-        const lastTs = data[data.length - 1]?.timestamp ?? bucketStart;
-        const avgValue = currentBucket.reduce((sum, b) => sum + b.value, 0) / currentBucket.length;
-        result.push({ 
-          deviceId: first.deviceId,
-          status: first.status,
-          value: avgValue, 
-          timestamp: bucketStart + (lastTs - bucketStart) / 2 
-        });
-      }
-    }
+    document.getElementById('selectAllSensors')?.addEventListener('click', () => {
+      this.selectedKeys = new Set(this.sensors.map(s => this.key(s)));
+      this.syncCheckboxes();
+      this.refreshMainChart();
+    });
 
-    return result;
+    document.getElementById('clearAllSensors')?.addEventListener('click', () => {
+      this.selectedKeys.clear();
+      this.syncCheckboxes();
+      this.refreshMainChart();
+    });
   }
 
-  private startLivePolling(): void {
-    if (this.liveInterval) clearInterval(this.liveInterval);
-    this.liveInterval = setInterval(async () => {
-      this.refreshChartData();
-      this.refreshAlertCharts();
-    }, 5000);
+  // ── Helpers ───────────────────────────────────────────────
+
+  private key(s: SensorMeta): string { return `${s.deviceId}|${s.pointId}`; }
+
+  private rangeMs(): number {
+    return { '1H': 3600000, '6H': 21600000, '1D': 86400000, '1W': 604800000, '1M': 2592000000 }[this.currentRange] ?? 86400000;
   }
 
-  private stopLivePolling(): void {
-    if (this.liveInterval) {
-      clearInterval(this.liveInterval);
-      this.liveInterval = null;
-    }
+  private formatLabel(pointId: string): string {
+    return ({
+      nhiet_do_pha_1: 'Nhiệt độ Pha 1',
+      nhiet_do_pha_2: 'Nhiệt độ Pha 2',
+      nhiet_do_pha_3: 'Nhiệt độ Pha 3',
+      phong_dien:     'Phóng điện PD',
+    } as Record<string, string>)[pointId] ?? pointId;
   }
 
-  private getColor(index: number, alpha: number = 1): string {
-    const colors = [
-      `rgba(59, 130, 246, ${alpha})`,   // Blue
-      `rgba(16, 185, 129, ${alpha})`,   // Green
-      `rgba(245, 158, 11, ${alpha})`,   // Amber
-      `rgba(239, 68, 68, ${alpha})`,    // Red
-      `rgba(139, 92, 246, ${alpha})`,   // Purple
-      `rgba(236, 72, 153, ${alpha})`,   // Pink
-      `rgba(6, 182, 212, ${alpha})`,    // Cyan
-      `rgba(132, 204, 22, ${alpha})`,   // Lime
-    ];
-    return colors[index % colors.length] || `rgba(100, 116, 139, ${alpha})`;
-  }
-
-  private updateKpiBar(points: StoredScadaPoint[]): void {
-    const alarm = points.filter(p => p.status === 'Alarm').length;
-    const warn = points.filter(p => p.status === 'Warning').length;
-    
-    const el = (id: string, text: string) => {
-      const e = document.getElementById(id);
-      if (e) e.innerText = text;
-    };
-    
-    el('kpiAlarm', `ALARM: ${alarm}`);
-    el('kpiWarning', `WARNING: ${warn}`);
-    el('kpiEvents', `EVENTS (24H): ${this.scadaEvents.filter(e => e.timestamp > Date.now() - 24 * 3600000).length}`);
-    
-    if (alarm > 0) el('kpiStatus', `● ${alarm} THIẾT BỊ ĐANG BÁO ĐỘNG`);
-    else if (warn > 0) el('kpiStatus', `● ${warn} THIẾT BỊ CÓ CẢNH BÁO`);
-    else el('kpiStatus', `● HỆ THỐNG ĐANG BÌNH THƯỜNG`);
-    
-    const kpiStatus = document.getElementById('kpiStatus');
-    if (kpiStatus) {
-      kpiStatus.style.color = alarm > 0 ? '#ef4444' : (warn > 0 ? '#f59e0b' : '#10b981');
-    }
+  private color(i: number, a = 1): string {
+    return [
+      `rgba(59,130,246,${a})`, `rgba(16,185,129,${a})`,
+      `rgba(245,158,11,${a})`, `rgba(239,68,68,${a})`,
+      `rgba(139,92,246,${a})`, `rgba(6,182,212,${a})`,
+    ][i % 6] ?? `rgba(100,116,139,${a})`;
   }
 
   destroy(): void {
-    this.stopLivePolling();
+    if (this.liveInterval) clearInterval(this.liveInterval);
     this.mainChart?.destroy();
+    this.alertTypeChart?.destroy();
+    this.alertFreqChart?.destroy();
   }
 }
-

@@ -121,12 +121,39 @@
 
 ---
 
-## Phase 4 — AI + Desktop + Mobile (TODO)
+## Phase 4 — Quản lý người dùng + Audit + Cài đặt ✅ (2026-04-04)
+
+### 4A. User Management ✅
+- [x] `UsersController` — CRUD users (GET/POST/PUT/DELETE `/api/v1/users`)
+- [x] Phân quyền: admin/manager/operator, admin-only cho CRUD
+- [x] Vô hiệu hóa user (soft delete — giữ lại audit log)
+- [x] Đổi mật khẩu: admin không cần old password, user thường phải cung cấp
+- [x] Frontend `UserManagementPage` — bảng phân quyền, modal thêm/sửa/đổi mật khẩu
+
+### 4B. Audit Log ✅
+- [x] `AuditMiddleware` — tự động ghi POST/PUT/DELETE vào `AuditLogs`
+- [x] `AuditLogController` — GET `/api/v1/logs/audit` + GET `/api/v1/logs/login`
+- [x] Frontend `AuditLogPage` — 2 tab: Hành động + Đăng nhập
+- [x] Fix: AuditMiddleware trả 500 nếu không bỏ qua /auth/* → đã lọc
+
+### 4C. System Settings ✅
+- [x] `SystemSettingsController` — GET/PUT `/api/v1/settings` (admin-only PUT)
+- [x] Default settings: polling_interval_s=3, alert_email, timezone
+- [x] Frontend `SettingsPage` — load + save từ API thật
+- [x] Fix: refresh token dùng `StationId=userId` vi phạm FK → đổi key `refresh_token_{userId}` + dùng station ID thật
+
+### Tests Phase 4 ✅ (2026-04-04)
+- `test-api.mjs` — 35 tests PASSED (Phase 1+2+3+4): Users CRUD + AuditLog + Settings
+- `e2e/phase4-users-settings.spec.ts` — 11 UI tests: Users + AuditLog + Settings
+- TypeScript: `npx tsc --noEmit` PASS
+
+---
+
+## Phase 5 — AI + Desktop + Mobile (TODO)
 
 - [ ] Python YOLO gRPC sidecar (chạy trên Jetson GPU)
 - [ ] Tauri desktop build (Windows/Linux)
 - [ ] Mobile view qua go2rtc HLS
-- [ ] AuditLog middleware tự động
 
 ## Phase 5 — Production (TODO)
 

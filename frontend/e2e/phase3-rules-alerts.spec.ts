@@ -28,10 +28,22 @@ test.describe('Phase 3A — Rule Engine UI', () => {
   test('3.3 Tạo rule mới → hiện trong bảng → xóa', async ({ page }) => {
     await page.addInitScript(() => { (window as any).confirm = () => true; });
     await loginAsAdmin(page);
+
+    // Dọn sạch rule test cũ còn sót (nếu có) trước khi bắt đầu
+    const token = await page.evaluate(() => localStorage.getItem('station_token'));
+    if (token) {
+      await page.evaluate(async (tok) => {
+        const res = await fetch('http://localhost:5056/api/v1/rules', { headers: { Authorization: `Bearer ${tok}` } });
+        const rules = await res.json();
+        const old = rules.filter((r: any) => r.name?.includes('[Playwright Test] Rule tự động'));
+        for (const r of old) {
+          await fetch(`http://localhost:5056/api/v1/rules/${r.id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${tok}` } });
+        }
+      }, token);
+    }
+
     await navigateTo(page, 'rule-engine');
     await page.waitForSelector('#ruleTableBody');
-
-    const countBefore = await page.locator('#ruleTableBody tr').count();
 
     // Mở modal và điền form
     await page.locator('#btnAddRule').click();
@@ -41,18 +53,23 @@ test.describe('Phase 3A — Rule Engine UI', () => {
     await page.locator('#ruleOpInput').selectOption('>');
     await page.locator('#ruleValueInput').fill('999');
     await page.locator('#ruleLevelInput').selectOption('warning');
-    await page.locator('#ruleModalSave').click();
 
-    // Chờ reload và kiểm tra
-    await page.waitForTimeout(2000);
-    const countAfter = await page.locator('#ruleTableBody tr').count();
-    expect(countAfter).toBeGreaterThan(countBefore);
+    // Lưu và chờ rule xuất hiện
+    await Promise.all([
+      page.waitForResponse(res => res.url().includes('/rules') && res.request().method() === 'POST'),
+      page.locator('#ruleModalSave').click(),
+    ]);
+    await expect(page.locator('#ruleTableBody'))
+      .toContainText('[Playwright Test] Rule tự động', { timeout: 5000 });
 
-    // Xóa rule vừa tạo (nút 🗑 cuối bảng)
-    await page.locator('button.rule-del-btn').last().click();
-    await page.waitForTimeout(2000);
-    const countFinal = await page.locator('#ruleTableBody tr').count();
-    expect(countFinal).toBe(countBefore);
+    // Tìm đúng nút xóa của row chứa tên rule này
+    const targetRow = page.locator('#ruleTableBody tr').filter({ hasText: '[Playwright Test] Rule tự động' });
+    await Promise.all([
+      page.waitForResponse(res => res.url().includes('/rules/') && res.request().method() === 'DELETE'),
+      targetRow.locator('button.rule-del-btn').click(),
+    ]);
+    await expect(page.locator('#ruleTableBody'))
+      .not.toContainText('[Playwright Test] Rule tự động', { timeout: 5000 });
   });
 
   test('3.4 Toggle bật/tắt rule', async ({ page }) => {

@@ -101,7 +101,7 @@ docker info >nul 2>&1
 if %errorlevel% neq 0 (
     echo [!] Docker Desktop chua duoc mo. Dang mo Docker Desktop...
     start "" "C:\Program Files\Docker\Docker\Docker Desktop.exe"
-    echo     Vui long cho Docker khoi dong xong (30-60 giay) roi chay lai file nay.
+    echo     Vui long cho Docker khoi dong xong trong 30-60 giay roi chay lai file nay.
     pause & exit /b
 )
 

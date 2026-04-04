@@ -47,7 +47,12 @@ var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 - GET/POST/PUT/DELETE `/api/v1/rules`
 - GET `/api/v1/alerts`, POST `/api/v1/alerts/{id}/ack`, POST `/api/v1/alerts/{id}/close`
 - GET `/api/v1/points` — sensor readings mới nhất
+- GET/POST/PUT/DELETE `/api/v1/users` — admin only
+- GET `/api/v1/logs/audit`, GET `/api/v1/logs/login`
+- GET `/api/v1/settings`, PUT `/api/v1/settings/{key}` — admin-only PUT
 - SignalR hub: `/ws/realtime`
+- AuditMiddleware: tự ghi POST/PUT/DELETE vào AuditLogs (bỏ qua /auth/)
+- Refresh token: lưu trong SystemSettings với key `refresh_token_{userId}`
 
 ## Docs
 - `docs/bugs_and_fixes.md` — đọc trước khi debug
