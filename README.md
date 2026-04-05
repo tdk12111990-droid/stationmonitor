@@ -8,12 +8,15 @@ Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phó
 
 ```
 StationMonitor/
-├── backend/          ASP.NET Core 8 API  (port 5056)
-├── frontend/         Vite + TypeScript   (port 5173)
-├── setup-env.bat     Cài đặt môi trường (chạy 1 lần sau khi clone)
-├── start.bat         Khởi động tất cả service
-├── stop.bat          Dừng tất cả service
-└── requirements.txt  Python deps cho AI module (Phase 4)
+├── backend/            ASP.NET Core 8 API
+│   └── Dockerfile      Cấu hình đóng gói cho Linux/Jetson
+├── frontend/           Vite + TypeScript
+├── docker-compose.yml  Cấu hình chạy đa dịch vụ (DB, MQTT, API)
+├── setup-env.bat       Cài đặt môi trường (Windows)
+├── deploy-jetson.sh    Cài đặt môi trường (Linux/Jetson)
+├── start.bat           Khởi động tất cả (Windows)
+├── stop.bat            Dừng tất cả (Windows)
+└── requirements.txt    Python deps cho AI module
 ```
 
 ---
@@ -67,6 +70,20 @@ cd backend && dotnet restore && cd ..
 ```
 
 Sau đó chạy lại `start.bat` như bình thường.
+
+---
+
+## 🚢 Triển khai lên Jetson Orin Nano (Linux/ARM64)
+
+Dự án đã được đóng gói sẵn để chạy trên Jetson mà **không cần cài đặt thủ công** từng phần mềm.
+
+1. **Zip** toàn bộ thư mục `StationMonitor` và copy sang Jetson.
+2. Mở Terminal tại thư mục dự án trên Jetson và chạy:
+   ```bash
+   chmod +x deploy-jetson.sh
+   sudo ./deploy-jetson.sh
+   ```
+3. Xem chi tiết tại: [Hướng dẫn Triển khai Jetson](.system_generated/artifacts/walkthrough.md) (Xem trong file `walkthrough.md` nếu đường dẫn lỗi).
 
 ---
 

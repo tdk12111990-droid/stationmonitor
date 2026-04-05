@@ -1,0 +1,78 @@
+# ============================================================
+# StationMonitor - Docker Compose Configuration
+# Mục tiêu: Chạy toàn bộ hệ thống (Backend, DB, MQTT, Streaming)
+# chỉ bằng 1 câu lệnh trên Jetson Orin Nano / Linux.
+# ============================================================
+
+version: '3.8'
+
+services:
+  # 1. Cơ sở dữ liệu: TimescaleDB (PostgreSQL + Time-series)
+  stationmonitor-db:
+    image: timescale/timescaledb:latest-pg16
+    container_name: stationmonitor-db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - POSTGRES_DB=stationmonitor
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./data/pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d stationmonitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # 2. MQTT Broker: Eclipse Mosquitto ( IoT communication )
+  stationmonitor-mqtt:
+    image: eclipse-mosquitto:latest
+    container_name: stationmonitor-mqtt
+    restart: always
+    ports:
+      - "1883:1883"
+      - "9001:9001"
+    volumes:
+      - ./data/mosquitto/config:/mosquitto/config
+      - ./data/mosquitto/data:/mosquitto/data
+      - ./data/mosquitto/log:/mosquitto/log
+
+  # 3. Video Streaming: go2rtc ( RTSP -> Web )
+  stationmonitor-streaming:
+    image: alexxit/go2rtc:latest
+    container_name: stationmonitor-streaming
+    restart: always
+    network_mode: host # Dùng host để nhận luồng multicast/RTSP mượt hơn trên Jetson
+    volumes:
+      - ./frontend/go2rtc.yaml:/config/go2rtc.yaml
+
+  # 4. Backend chính: StationMonitor ASP.NET Core API
+  stationmonitor-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: stationmonitor-backend
+    restart: always
+    depends_on:
+      stationmonitor-db:
+        condition: service_healthy
+      stationmonitor-mqtt:
+        condition: service_started
+    ports:
+      - "5056:8080" # Map 5056 (host) sang 8080 (container)
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      - "ConnectionStrings__Default=Host=stationmonitor-db;Port=5432;Database=stationmonitor;Username=postgres;Password=postgres123"
+      - "Mqtt__Broker=stationmonitor-mqtt"
+      - "Jwt__Key=StationMonitor_SuperSecret_Key_2026_ChangeInProduction!"
+    volumes:
+      - ./data/media:/app/wwwroot/data/media # Lưu ảnh/video AI phát hiện được
+    networks:
+      - sm-network
+
+networks:
+  sm-network:
+    name: stationmonitor-network
+    driver: bridge
