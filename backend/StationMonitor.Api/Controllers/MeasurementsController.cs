@@ -68,6 +68,81 @@ public class MeasurementsController : ControllerBase
     }
 
     /// <summary>
+    /// Xuất dữ liệu lịch sử nhiều điểm đo — cho XLSX export
+    /// Trả về list { PointId, Time, Value } đã lọc theo khoảng thời gian
+    /// intervalMinutes: gộp trung bình theo N phút (0 = raw, max 60)
+    /// </summary>
+    [HttpGet("history/bulk")]
+    public async Task<IActionResult> GetHistoryBulk(
+        [FromQuery] Guid stationId,
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] string? pointIds = null,
+        [FromQuery] int intervalMinutes = 5)
+    {
+        // Validate interval whitelist
+        var allowedIntervals = new[] { 0, 1, 5, 10, 15, 30, 60 };
+        if (!allowedIntervals.Contains(intervalMinutes)) intervalMinutes = 5;
+
+        // Giới hạn range tối đa 90 ngày
+        if ((to - from).TotalDays > 90) from = to.AddDays(-90);
+
+        var selectedPoints = pointIds?.Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+
+        var conn = _db.Database.GetDbConnection();
+        await conn.OpenAsync();
+        await using var cmd = conn.CreateCommand();
+
+        string sql;
+        if (intervalMinutes <= 0)
+        {
+            // Raw data
+            sql = $"""
+                SELECT "PointId", "Time", "Value"
+                FROM "SensorReadings"
+                WHERE "StationId" = '{stationId}'
+                  AND "Time" >= '{from:yyyy-MM-ddTHH:mm:ss}'
+                  AND "Time" <= '{to:yyyy-MM-ddTHH:mm:ss}'
+                ORDER BY "Time", "PointId"
+                LIMIT 50000
+                """;
+        }
+        else
+        {
+            // Time-bucket aggregation (TimescaleDB)
+            sql = $"""
+                SELECT "PointId",
+                       time_bucket('{intervalMinutes} minutes', "Time") AS "Time",
+                       AVG("Value")::float8 AS "Value"
+                FROM "SensorReadings"
+                WHERE "StationId" = '{stationId}'
+                  AND "Time" >= '{from:yyyy-MM-ddTHH:mm:ss}'
+                  AND "Time" <= '{to:yyyy-MM-ddTHH:mm:ss}'
+                GROUP BY "PointId", time_bucket('{intervalMinutes} minutes', "Time")
+                ORDER BY "Time", "PointId"
+                """;
+        }
+
+        cmd.CommandText = sql;
+        await using var reader = await cmd.ExecuteReaderAsync();
+
+        var rows = new List<object>();
+        while (await reader.ReadAsync())
+        {
+            var pid = reader.GetString(0);
+            if (selectedPoints != null && !selectedPoints.Contains(pid)) continue;
+            rows.Add(new
+            {
+                PointId = pid,
+                Time    = reader.GetDateTime(1),
+                Value   = reader.GetDouble(2),
+            });
+        }
+        await conn.CloseAsync();
+        return Ok(rows);
+    }
+
+    /// <summary>
     /// Lịch sử time-series của 1 điểm đo
     /// Dùng cho Analytics page và Alert detail chart
     /// </summary>
@@ -93,5 +168,37 @@ public class MeasurementsController : ControllerBase
             .ToListAsync();
 
         return Ok(data);
+    }
+
+    // GET /api/v1/history/export?deviceId=&pointId=&from=&to= → CSV
+    [HttpGet("history/export")]
+    public async Task<IActionResult> ExportHistory(
+        [FromQuery] Guid? deviceId,
+        [FromQuery] string? pointId,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] Guid? stationId)
+    {
+        var fromTime = from ?? DateTime.UtcNow.AddDays(-7);
+        var toTime   = to   ?? DateTime.UtcNow;
+
+        var q = _db.SensorReadings
+            .Where(r => r.Time >= fromTime && r.Time <= toTime);
+        if (deviceId.HasValue)              q = q.Where(r => r.DeviceId == deviceId.Value);
+        if (!string.IsNullOrEmpty(pointId)) q = q.Where(r => r.PointId  == pointId);
+        if (stationId.HasValue)             q = q.Where(r => r.StationId == stationId.Value);
+
+        var data = await q.OrderBy(r => r.Time).Take(50000)
+            .Select(r => new { r.Time, r.DeviceId, r.PointId, r.Value, r.Unit, r.Quality })
+            .ToListAsync();
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Time,DeviceId,PointId,Value,Unit,Quality");
+        foreach (var r in data)
+            sb.AppendLine($"{r.Time:O},{r.DeviceId},{r.PointId},{r.Value?.ToString("F3") ?? ""},{r.Unit},{r.Quality}");
+
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        return File(bytes, "text/csv", $"history_{DateTime.Now:yyyyMMdd_HHmm}.csv");
     }
 }

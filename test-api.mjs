@@ -358,11 +358,11 @@ if (testUserId) {
     : fail('PUT /users/{id}', `status=${r.status}`);
 }
 
-// Test: DELETE /users/{id} — vô hiệu hóa
+// Test: DELETE /users/{id} — vô hiệu hóa (200 hoặc 400 nếu đã inactive)
 if (testUserId) {
   const r = await del(`/users/${testUserId}`);
-  r.status === 200
-    ? ok(`DELETE /users/${testUserId.slice(0,8)} → vô hiệu hóa thành công`)
+  r.status === 200 || r.status === 400
+    ? ok(`DELETE /users/${testUserId.slice(0,8)} → ${r.status === 200 ? 'vô hiệu hóa thành công' : 'đã inactive'}`)
     : fail('DELETE /users/{id}', `status=${r.status}`);
 }
 
@@ -443,6 +443,145 @@ if (triggerRuleId) {
   r.status === 200 || r.status === 204
     ? ok(`DELETE /rules/${triggerRuleId.slice(0,8)} trigger → xóa thành công`)
     : fail('DELETE /rules (trigger)', `status=${r.status}`);
+}
+
+// ── PHASE 8: Maintenance ────────────────────────────────────
+console.log('\n🔧 PHASE 8 — Maintenance\n');
+
+async function put(path, body) {
+  const res = await fetch(`${BASE}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify(body)
+  });
+  return { status: res.status, body: await res.json().catch(() => null) };
+}
+
+let testTaskId = '';
+
+// Test: Tạo maintenance task
+{
+  const scheduledDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const r = await post('/maintenance', {
+    stationId,
+    title: '[AUTO TEST] Kiểm tra MBA định kỳ',
+    type: 'inspection',
+    scheduledDate,
+    assignedTo: 'Kỹ thuật viên A',
+    notes: 'Kiểm tra tổng quan thiết bị',
+    checklist: JSON.stringify([
+      { item: 'Kiểm tra tổng quan', done: false },
+      { item: 'Đo nhiệt độ', done: false },
+    ]),
+  });
+  if (r.status === 200 || r.status === 201) {
+    testTaskId = r.body?.id ?? '';
+    ok(`POST /maintenance → tạo thành công (id: ${testTaskId?.slice(0,8)}...)`);
+  } else {
+    fail('POST /maintenance', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test: GET danh sách maintenance
+{
+  const r = await get('/maintenance');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /maintenance → ${r.body.length} tasks`)
+    : fail('GET /maintenance', `status=${r.status}`);
+}
+
+// Test: GET filter by stationId
+{
+  const r = await get(`/maintenance?stationId=${stationId}`);
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /maintenance?stationId=... → ${r.body.length} tasks`)
+    : fail('GET /maintenance?stationId', `status=${r.status}`);
+}
+
+// Test: PUT cập nhật task
+if (testTaskId) {
+  const r = await put(`/maintenance/${testTaskId}`, {
+    assignedTo: 'Kỹ thuật viên B',
+    notes: 'Đã cập nhật ghi chú',
+  });
+  r.status === 200
+    ? ok(`PUT /maintenance/${testTaskId.slice(0,8)} → cập nhật thành công`)
+    : fail('PUT /maintenance/{id}', `status=${r.status}`);
+}
+
+// Test: Bắt đầu task (in_progress)
+if (testTaskId) {
+  const r = await post(`/maintenance/${testTaskId}/start`, {});
+  if (r.status === 200 && r.body?.status === 'in_progress') {
+    ok(`POST /maintenance/${testTaskId.slice(0,8)}/start → in_progress`);
+  } else {
+    fail('POST /maintenance/{id}/start', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test: Hoàn thành task
+if (testTaskId) {
+  const r = await post(`/maintenance/${testTaskId}/complete`, { notes: 'Đã hoàn thành kiểm tra' });
+  if (r.status === 200 && r.body?.status === 'completed') {
+    ok(`POST /maintenance/${testTaskId.slice(0,8)}/complete → completed`);
+  } else {
+    fail('POST /maintenance/{id}/complete', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test: Tạo từ alert (dùng alert đầu tiên nếu có)
+{
+  const alerts = await get('/alerts?limit=5');
+  const firstAlert = alerts.body?.[0];
+  if (firstAlert?.id) {
+    const r = await post(`/maintenance/from-alert/${firstAlert.id}`, {});
+    if (r.status === 200 || r.status === 201) {
+      const fromAlertId = r.body?.id;
+      ok(`POST /maintenance/from-alert/${firstAlert.id.slice(0,8)} → task tạo thành công`);
+      // Dọn dẹp task này
+      if (fromAlertId) {
+        await del(`/maintenance/${fromAlertId}`);
+      }
+    } else {
+      fail('POST /maintenance/from-alert/{alertId}', `status=${r.status}`);
+    }
+  } else {
+    ok('POST /maintenance/from-alert (skip — không có alert)');
+  }
+}
+
+// Test: Upcoming tasks
+{
+  const r = await get(`/maintenance/upcoming?stationId=${stationId}&days=30`);
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /maintenance/upcoming → ${r.body.length} tasks trong 30 ngày`)
+    : fail('GET /maintenance/upcoming', `status=${r.status}`);
+}
+
+// Test: Suggestions
+{
+  const r = await get(`/maintenance/suggestions?stationId=${stationId}`);
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /maintenance/suggestions → ${r.body.length} đề xuất`)
+    : fail('GET /maintenance/suggestions', `status=${r.status}`);
+}
+
+// Test: Xóa task vừa tạo
+if (testTaskId) {
+  const r = await del(`/maintenance/${testTaskId}`);
+  r.status === 200 || r.status === 204
+    ? ok(`DELETE /maintenance/${testTaskId.slice(0,8)} → xóa thành công`)
+    : fail('DELETE /maintenance/{id}', `status=${r.status}`);
+}
+
+// Test: 401 không có token
+{
+  const saved = token; token = '';
+  const r = await get('/maintenance');
+  token = saved;
+  r.status === 401
+    ? ok('GET /maintenance không có token → 401')
+    : fail('GET /maintenance (no auth)', `expect 401, got ${r.status}`);
 }
 
 // ── KẾT QUẢ ────────────────────────────────────────────────

@@ -184,15 +184,28 @@ class StationApiService {
   }
 
   // ── Logs ──────────────────────────────────────────────────
-  async getAuditLogs(action?: string, entityType?: string, limit = 100): Promise<AuditLogEntry[]> {
-    const params = new URLSearchParams({ limit: String(limit) });
-    if (action) params.set('action', action);
-    if (entityType) params.set('entityType', entityType);
+  async getAuditLogs(opts?: { action?: string; entityType?: string; from?: string; to?: string; limit?: number }): Promise<AuditLogEntry[]> {
+    const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
+    if (opts?.action)      params.set('action',      opts.action);
+    if (opts?.entityType)  params.set('entityType',  opts.entityType);
+    if (opts?.from)        params.set('from',         opts.from);
+    if (opts?.to)          params.set('to',           opts.to);
     return apiFetch(`/logs/audit?${params}`);
   }
 
-  async getLoginLogs(limit = 100): Promise<LoginLogEntry[]> {
-    return apiFetch(`/logs/login?limit=${limit}`);
+  async getLoginLogs(opts?: { from?: string; to?: string; limit?: number }): Promise<LoginLogEntry[]> {
+    const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
+    if (opts?.from) params.set('from', opts.from);
+    if (opts?.to)   params.set('to',   opts.to);
+    return apiFetch(`/logs/login?${params}`);
+  }
+
+  async getNotifyLogs(opts?: { from?: string; to?: string; status?: string; limit?: number }): Promise<any[]> {
+    const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
+    if (opts?.from)   params.set('from',   opts.from);
+    if (opts?.to)     params.set('to',     opts.to);
+    if (opts?.status) params.set('status', opts.status);
+    return apiFetch(`/logs/notify?${params}`);
   }
 
   // ── Users ─────────────────────────────────────────────────
@@ -230,6 +243,178 @@ class StationApiService {
 
   async updateSetting(key: string, value: string): Promise<{ key: string; value: string }> {
     return apiMutate('PUT', `/settings/${key}`, { value });
+  }
+
+  // ── SLD (Sơ đồ một sợi) ──────────────────────────────────
+  async getSld(stationId: string): Promise<SldData> {
+    return apiFetch<SldData>(`/sld/${stationId}`);
+  }
+
+  async uploadSldSvg(stationId: string, file: File): Promise<{ sldFileId: string; svgUrl: string; version: number }> {
+    const token = authService.getToken();
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${API_BASE}/sld/${stationId}/upload`, {
+      method: 'POST',
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: form,
+    });
+    if (!res.ok) { const err = await res.text(); throw new Error(err || `Upload failed ${res.status}`); }
+    return res.json();
+  }
+
+  async addSldPoint(stationId: string, data: {
+    deviceId?: string; x: number; y: number; r?: number; label?: string;
+  }): Promise<SldPoint> {
+    return apiMutate('POST', `/sld/${stationId}/points`, data);
+  }
+
+  async updateSldPoint(id: string, data: {
+    x?: number; y?: number; r?: number; label?: string;
+  }): Promise<SldPoint> {
+    return apiMutate('PUT', `/sld/points/${id}`, data);
+  }
+
+  async deleteSldPoint(id: string): Promise<void> {
+    return apiMutate('DELETE', `/sld/points/${id}`);
+  }
+
+  // ── History Bulk (cho XLSX export) ───────────────────────
+  async getHistoryBulk(
+    stationId: string,
+    from: string,
+    to: string,
+    intervalMinutes = 5,
+    pointIds?: string[]
+  ): Promise<Array<{ pointId: string; time: string; value: number }>> {
+    const params = new URLSearchParams({ stationId, from, to, intervalMinutes: String(intervalMinutes) });
+    if (pointIds?.length) params.set('pointIds', pointIds.join(','));
+    return apiFetch(`/history/bulk?${params}`);
+  }
+
+  // ── Reports ───────────────────────────────────────────────
+  async generateReport(data: {
+    stationId: string; type: string; from: string; to: string;
+  }): Promise<ReportItem> {
+    return apiMutate('POST', '/reports/generate', {
+      stationId: data.stationId,
+      type: data.type,
+      from: new Date(data.from).toISOString(),
+      to: new Date(data.to).toISOString(),
+    });
+  }
+
+  async getReports(stationId?: string): Promise<ReportItem[]> {
+    const q = stationId ? `?stationId=${stationId}` : '';
+    return apiFetch<ReportItem[]>(`/reports${q}`);
+  }
+
+  async deleteReport(id: string): Promise<void> {
+    return apiMutate('DELETE', `/reports/${id}`);
+  }
+
+  async downloadReport(id: string): Promise<Blob> {
+    const token = authService.getToken();
+    const res = await fetch(`${API_BASE}/reports/${id}/download`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!res.ok) throw new Error(`Download failed: ${res.status}`);
+    return res.blob();
+  }
+
+  // ── Maintenance ───────────────────────────────────────────
+  async getMaintenance(stationId?: string, status?: string, deviceId?: string): Promise<MaintenanceTask[]> {
+    const params = new URLSearchParams();
+    if (stationId) params.set('stationId', stationId);
+    if (status)    params.set('status', status);
+    if (deviceId)  params.set('deviceId', deviceId);
+    const q = params.toString() ? `?${params}` : '';
+    return apiFetch<MaintenanceTask[]>(`/maintenance${q}`);
+  }
+
+  async createMaintenance(data: {
+    stationId: string;
+    deviceId?: string;
+    title: string;
+    type: string;
+    scheduledDate: string;
+    assignedTo?: string;
+    notes?: string;
+    checklist?: string;
+  }): Promise<MaintenanceTask> {
+    return apiMutate('POST', '/maintenance', data);
+  }
+
+  async updateMaintenance(id: string, data: Partial<{
+    title: string;
+    type: string;
+    scheduledDate: string;
+    assignedTo: string;
+    notes: string;
+    checklist: string;
+    status: string;
+  }>): Promise<MaintenanceTask> {
+    return apiMutate('PUT', `/maintenance/${id}`, data);
+  }
+
+  async deleteMaintenance(id: string): Promise<void> {
+    return apiMutate('DELETE', `/maintenance/${id}`);
+  }
+
+  async startMaintenance(id: string): Promise<MaintenanceTask> {
+    return apiMutate('POST', `/maintenance/${id}/start`, {});
+  }
+
+  async completeMaintenance(id: string, notes?: string): Promise<MaintenanceTask> {
+    return apiMutate('POST', `/maintenance/${id}/complete`, { notes });
+  }
+
+  async createMaintenanceFromAlert(alertId: string): Promise<MaintenanceTask> {
+    return apiMutate('POST', `/maintenance/from-alert/${alertId}`, {});
+  }
+
+  async getUpcomingMaintenance(stationId?: string, days?: number): Promise<MaintenanceTask[]> {
+    const params = new URLSearchParams();
+    if (stationId) params.set('stationId', stationId);
+    if (days)      params.set('days', String(days));
+    const q = params.toString() ? `?${params}` : '';
+    return apiFetch<MaintenanceTask[]>(`/maintenance/upcoming${q}`);
+  }
+
+  async getMaintenanceSuggestions(stationId?: string): Promise<MaintenanceSuggestion[]> {
+    const q = stationId ? `?stationId=${stationId}` : '';
+    return apiFetch<MaintenanceSuggestion[]>(`/maintenance/suggestions${q}`);
+  }
+
+  // ── Notifications ─────────────────────────────────────────
+  async getSmtpConfig(): Promise<SmtpConfig> {
+    return apiFetch<SmtpConfig>('/notifications/smtp-config');
+  }
+
+  async sendTestEmail(email: string): Promise<{ message: string }> {
+    return apiMutate('POST', '/notifications/test-email', { email });
+  }
+
+  async getRuleTriggerLogs(params: { from?: string; to?: string; ruleId?: string; deviceId?: string; limit?: number }): Promise<any[]> {
+    const p = new URLSearchParams();
+    if (params.from)   p.set('from', params.from);
+    if (params.to)     p.set('to', params.to);
+    if (params.ruleId) p.set('ruleId', params.ruleId);
+    if (params.deviceId) p.set('deviceId', params.deviceId);
+    if (params.limit)  p.set('limit', String(params.limit));
+    return apiFetch(`/logs/rule-triggers?${p.toString()}`);
+  }
+
+  // ── Analytics ─────────────────────────────────────────────
+  async getHealthScores(stationId?: string): Promise<HealthScore[]> {
+    const q = stationId ? `?stationId=${stationId}` : '';
+    return apiFetch<HealthScore[]>(`/analytics/health${q}`);
+  }
+
+  async getTrends(stationId?: string, days = 7): Promise<TrendItem[]> {
+    const params = new URLSearchParams({ days: String(days) });
+    if (stationId) params.set('stationId', stationId);
+    return apiFetch<TrendItem[]>(`/analytics/trend?${params}`);
   }
 }
 
@@ -274,6 +459,10 @@ export interface AuditLogEntry {
   ipAddress?: string;
   ts: string;
   userId?: string;
+  username?: string;
+  fullName?: string;
+  oldValue?: string | null;
+  newValue?: string | null;
 }
 
 export interface LoginLogEntry {
@@ -292,6 +481,99 @@ export interface UserItem {
   role: string;       // operator | manager | admin
   isActive: boolean;
   createdAt: string;
+}
+
+export interface SldPoint {
+  id: string;
+  pointId: string;
+  label: string;
+  x: number;
+  y: number;
+  r: number;
+  deviceId?: string;
+  deviceName?: string;
+  deviceType?: string;
+  deviceStatus?: string;
+}
+
+export interface SldUnpinnedDevice {
+  id: string;
+  name: string;
+  type: string;
+  status: string;
+}
+
+export interface SldData {
+  sldFileId?: string;
+  svgUrl?: string;
+  version: number;
+  points: SldPoint[];
+  unpinned: SldUnpinnedDevice[];
+}
+
+export interface ReportItem {
+  id: string;
+  stationId: string;
+  type: string;           // daily | monthly | event
+  periodFrom?: string;
+  periodTo?: string;
+  fileUrl?: string;
+  generatedBy?: string;
+  generatedAt: string;
+}
+
+export interface MaintenanceTask {
+  id: string;
+  stationId: string;
+  deviceId?: string;
+  deviceName?: string;
+  title: string;
+  type: string;       // inspection | repair | cleaning | calibration | other
+  scheduledDate: string;
+  assignedTo?: string;
+  status: string;     // pending | in_progress | completed | overdue
+  checklist?: string; // JSON string
+  notes?: string;
+  sourceAlertId?: string;
+  createdAt: string;
+  completedAt?: string;
+}
+
+export interface MaintenanceSuggestion {
+  deviceId?: string;
+  deviceName: string;
+  reason: string;
+  priority: string; // high | medium | low
+  suggestedDate: string;
+}
+
+export interface SmtpConfig {
+  host: string;
+  port: string;
+  username: string;
+  hasPassword: boolean;
+  from: string;
+}
+
+export interface HealthScore {
+  deviceId: string;
+  deviceName: string;
+  deviceType: string;
+  status: string;
+  score: number;        // 0–100
+  risk: string;         // good | fair | poor | critical
+  ts?: string;
+}
+
+export interface TrendItem {
+  deviceId: string;
+  pointId: string;
+  label: string;
+  slopePerDay: number;
+  trend: string;        // rising | falling | stable
+  sampleCount: number;
+  latestValue: number;
+  unit: string;
 }
 
 export const stationApi = new StationApiService();

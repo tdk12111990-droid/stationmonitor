@@ -45,7 +45,6 @@ export class AppShell {
         <div class="sidebar-divider"></div>
         ${this.renderNavItems(ADMIN_NAV)}
         <div style="flex:1"></div>
-        <div class="nav-item" id="navSystemStatus" data-page="system-status" title="Trạng thái hệ thống">🖥</div>
         <div class="nav-item" id="navSettings" data-page="settings" title="Cài đặt">⚙️</div>
         <div class="nav-item nav-item--logout" id="navLogout" title="Đăng xuất">🚪</div>
       </nav>

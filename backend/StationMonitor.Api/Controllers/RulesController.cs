@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationMonitor.Data;
 using StationMonitor.Data.Entities;
+using StationMonitor.Services;
 
 namespace StationMonitor.Api.Controllers;
 
@@ -17,14 +18,23 @@ namespace StationMonitor.Api.Controllers;
 public class RulesController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly PermissionService _permissions;
 
-    public RulesController(AppDbContext db) => _db = db;
+    public RulesController(AppDbContext db, PermissionService permissions)
+    {
+        _db = db;
+        _permissions = permissions;
+    }
 
     // GET /api/v1/rules
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var rules = await _db.Rules
+        var allowed = await _permissions.GetAllowedStationIdsAsync();
+        var q = _db.Rules.AsQueryable();
+        if (allowed != null) q = q.Where(r => allowed.Contains(r.StationId));
+
+        var rules = await q
             .Include(r => r.Device)
             .OrderByDescending(r => r.CreatedAt)
             .Select(r => new {
@@ -99,6 +109,18 @@ public class RulesController : ControllerBase
         _db.Rules.Remove(rule);
         await _db.SaveChangesAsync();
         return NoContent();
+    }
+
+    // PATCH /api/v1/rules/{id}/toggle — bật/tắt rule nhanh
+    [HttpPatch("{id}/toggle")]
+    [Authorize(Roles = "admin,manager")]
+    public async Task<IActionResult> Toggle(Guid id)
+    {
+        var rule = await _db.Rules.FindAsync(id);
+        if (rule == null) return NotFound();
+        rule.Enabled = !rule.Enabled;
+        await _db.SaveChangesAsync();
+        return Ok(new { rule.Id, rule.Enabled });
     }
 }
 

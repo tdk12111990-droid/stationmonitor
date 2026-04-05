@@ -68,9 +68,9 @@ public class PlcPollingWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Lấy tất cả PLC S7 đang online trong DB
+        // Lấy tất cả PLC S7 trong DB để kiểm tra định kỳ
         var plcDevices = await db.Devices
-            .Where(d => d.Type == "plc_s7" && d.Status == "online")
+            .Where(d => d.Type == "plc_s7")
             .ToListAsync(ct);
 
         foreach (var device in plcDevices)

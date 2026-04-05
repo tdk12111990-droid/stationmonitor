@@ -13,6 +13,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StationMonitor.Workers", "S
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StationMonitor.Analytics", "StationMonitor.Analytics\StationMonitor.Analytics.csproj", "{12C41102-C75A-4781-A56F-2BFDDFC29507}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StationMonitor.Tests", "StationMonitor.Tests\StationMonitor.Tests.csproj", "{9965FBB3-1D30-46D7-A92C-9376057101F3}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "StationMonitor.Simulators", "StationMonitor.Simulators\StationMonitor.Simulators.csproj", "{290729AF-E87D-4A07-BA3A-E2BF1D469D7E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -42,5 +46,13 @@ Global
 		{12C41102-C75A-4781-A56F-2BFDDFC29507}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{12C41102-C75A-4781-A56F-2BFDDFC29507}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{12C41102-C75A-4781-A56F-2BFDDFC29507}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9965FBB3-1D30-46D7-A92C-9376057101F3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9965FBB3-1D30-46D7-A92C-9376057101F3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9965FBB3-1D30-46D7-A92C-9376057101F3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9965FBB3-1D30-46D7-A92C-9376057101F3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{290729AF-E87D-4A07-BA3A-E2BF1D469D7E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{290729AF-E87D-4A07-BA3A-E2BF1D469D7E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{290729AF-E87D-4A07-BA3A-E2BF1D469D7E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{290729AF-E87D-4A07-BA3A-E2BF1D469D7E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal

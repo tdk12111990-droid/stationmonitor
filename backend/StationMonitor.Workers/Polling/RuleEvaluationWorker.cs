@@ -81,11 +81,12 @@ public class RuleEvaluationWorker : BackgroundService
 
         foreach (var rule in rules)
         {
-            await EvaluateRuleAsync(db, rule, latestReadings, ct);
+            await EvaluateRuleAsync(scope.ServiceProvider, db, rule, latestReadings, ct);
         }
     }
 
     private async Task EvaluateRuleAsync(
+        IServiceProvider services,
         AppDbContext db,
         Rule rule,
         Dictionary<string, SensorReading> latestReadings,
@@ -103,15 +104,7 @@ public class RuleEvaluationWorker : BackgroundService
         if (reading.Value == null) return;
 
         var currentValue = reading.Value.Value;
-        var triggered = op switch
-        {
-            ">"  => currentValue > threshold,
-            "<"  => currentValue < threshold,
-            ">=" => currentValue >= threshold,
-            "<=" => currentValue <= threshold,
-            "==" => Math.Abs(currentValue - threshold) < 0.001,
-            _    => false
-        };
+        var triggered = RuleEvaluator.Evaluate(currentValue, op, threshold);
 
         if (!triggered) return;
 
@@ -163,6 +156,23 @@ public class RuleEvaluationWorker : BackgroundService
 
         _logger.LogWarning("[Rules] Alert [{Level}]: {Msg}", level, alert.Message);
 
+        // Gửi email thông báo (nếu có alert_email trong settings)
+        var emailSetting = await db.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == "alert_email", ct);
+        var toEmail = emailSetting?.Value?.Trim('"');
+        if (!string.IsNullOrWhiteSpace(toEmail))
+        {
+            var emailSvc = services.GetRequiredService<StationMonitor.Services.EmailNotifyService>();
+            var device   = alert.DeviceId.HasValue
+                ? await db.Devices.FindAsync(new object[] { alert.DeviceId.Value }, ct)
+                : null;
+            _ = emailSvc.SendAlertEmailAsync(
+                toEmail, alert.Level, alert.Message ?? "",
+                device?.Name ?? "Không rõ", alert.Value,
+                alert.Message?.Contains("°C") == true ? "°C" : "dB"
+            ).ContinueWith(t => { /* fire-and-forget, lỗi đã log trong service */ });
+        }
+
         // Push realtime về frontend
         await _notifier.SendAlertAsync(new {
             id          = alert.Id,
@@ -179,31 +189,8 @@ public class RuleEvaluationWorker : BackgroundService
     // ── Helpers ───────────────────────────────────────────
 
     private static (string point, string op, double value)? ParseCondition(string json)
-    {
-        try
-        {
-            var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-            var point = root.GetProperty("point").GetString() ?? "";
-            var op    = root.GetProperty("op").GetString() ?? ">";
-            var value = root.GetProperty("value").GetDouble();
-            return (point, op, value);
-        }
-        catch { return null; }
-    }
+        => RuleEvaluator.ParseCondition(json);
 
     private static string ParseAlertLevel(string actionsJson)
-    {
-        try
-        {
-            var arr = JsonDocument.Parse(actionsJson).RootElement;
-            foreach (var action in arr.EnumerateArray())
-            {
-                if (action.TryGetProperty("level", out var lvl))
-                    return lvl.GetString() ?? "warning";
-            }
-        }
-        catch { }
-        return "warning";
-    }
+        => RuleEvaluator.ParseAlertLevel(actionsJson);
 }

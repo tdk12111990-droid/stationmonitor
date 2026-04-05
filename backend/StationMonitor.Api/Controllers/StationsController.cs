@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationMonitor.Data;
 using StationMonitor.Data.Entities;
+using StationMonitor.Services;
 
 namespace StationMonitor.Api.Controllers;
 
@@ -19,12 +20,21 @@ namespace StationMonitor.Api.Controllers;
 public class StationsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public StationsController(AppDbContext db) => _db = db;
+    private readonly PermissionService _permissions;
+    public StationsController(AppDbContext db, PermissionService permissions)
+    {
+        _db = db;
+        _permissions = permissions;
+    }
 
     [HttpGet]
     public async Task<IActionResult> GetAll()
     {
-        var stations = await _db.Stations
+        var allowed = await _permissions.GetAllowedStationIdsAsync();
+        var q = _db.Stations.AsQueryable();
+        if (allowed != null) q = q.Where(s => allowed.Contains(s.Id));
+
+        var stations = await q
             .OrderBy(s => s.Name)
             .Select(s => new {
                 s.Id, s.Name, s.Code, s.Location, s.Status, s.CreatedAt

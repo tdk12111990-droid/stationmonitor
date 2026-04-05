@@ -10,12 +10,12 @@ export class SettingsPage {
 
   render(): string {
     return `
-    <div class="settings-page">
+    <div class="settings-page" style="overflow-y:auto;height:100%;padding-bottom:40px;">
       <div class="page-toolbar"><h2>CÀI ĐẶT HỆ THỐNG</h2></div>
 
       <!-- Settings inner tab nav -->
       <div class="settings-tabs">
-        ${['Cài đặt chung', 'Database & Backup', 'Giao diện'].map((t, i) =>
+        ${['Cài đặt chung', 'Thông báo', 'Database & Backup', 'Giao diện'].map((t, i) =>
       `<div class="stab ${i === 0 ? 'active' : ''}" data-stab="${i}">${t}</div>`).join('')}
       </div>
 
@@ -51,8 +51,68 @@ export class SettingsPage {
         </div>
       </div>
 
-      <!-- Tab 1: Database -->
+      <!-- Tab 1: Thông báo -->
       <div id="stab-1" class="stab-content admin-card" style="padding:20px;display:none">
+        <div class="card-title">CẤU HÌNH THÔNG BÁO EMAIL</div>
+
+        <!-- SMTP config -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;margin-bottom:20px;">
+          <div style="font-size:0.72rem;font-weight:700;color:#94a3b8;margin-bottom:12px;text-transform:uppercase;">Cấu hình SMTP</div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+            <div class="form-group" style="margin:0">
+              <label>SMTP HOST</label>
+              <input id="s_smtp_host" type="text" class="form-input" placeholder="smtp.gmail.com" value="smtp.gmail.com">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>PORT</label>
+              <input id="s_smtp_port" type="number" class="form-input" style="width:100px" placeholder="587" value="587">
+            </div>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+            <div class="form-group" style="margin:0">
+              <label>USERNAME</label>
+              <input id="s_smtp_user" type="text" class="form-input" placeholder="Username Mailtrap">
+            </div>
+            <div class="form-group" style="margin:0">
+              <label>PASSWORD</label>
+              <input id="s_smtp_pass" type="password" class="form-input" placeholder="Password Mailtrap">
+            </div>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>FROM (địa chỉ gửi)</label>
+            <input id="s_smtp_from" type="text" class="form-input" style="width:340px" placeholder="StationMonitor &lt;noreply@station.vn&gt;">
+          </div>
+
+          <div style="margin-top:14px;padding:10px 14px;background:rgba(56,189,248,0.08);border:1px solid rgba(56,189,248,0.2);border-radius:6px;font-size:0.72rem;color:#7dd3fc;">
+            💡 <b>Dùng Gmail:</b> Host <code style="background:rgba(0,0,0,.2);padding:1px 4px;border-radius:3px;">smtp.gmail.com</code> · Port <code style="background:rgba(0,0,0,.2);padding:1px 4px;border-radius:3px;">587</code><br>
+            Username = địa chỉ Gmail · Password = <b>App Password</b> (không phải mật khẩu Gmail thường).<br>
+            Lấy App Password: <b>myaccount.google.com → Bảo mật → Xác minh 2 bước → Mật khẩu ứng dụng</b> → chọn "Thư" → tạo → copy mã 16 ký tự.
+          </div>
+
+          <div style="display:flex;gap:10px;margin-top:14px;align-items:center;">
+            <button id="saveSmtpBtn" class="btn-industrial btn-primary">💾 Lưu SMTP</button>
+            <span id="smtpSaveStatus" style="font-size:.82rem;"></span>
+          </div>
+        </div>
+
+        <!-- Test email -->
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;">
+          <div style="font-size:0.72rem;font-weight:700;color:#94a3b8;margin-bottom:12px;text-transform:uppercase;">Test gửi email</div>
+          <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+            <input id="s_test_email" type="email" class="form-input" style="width:280px"
+              placeholder="test@example.com">
+            <button id="testEmailBtn" class="btn-industrial btn-primary">📧 Gửi test</button>
+            <span id="testEmailStatus" style="font-size:.82rem;"></span>
+          </div>
+          <div style="font-size:0.72rem;color:#64748b;margin-top:8px;">
+            Nhập email để nhận thử. Email test sẽ vào Mailtrap Inbox (không gửi thật).
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab 2: Database -->
+      <div id="stab-2" class="stab-content admin-card" style="padding:20px;display:none">
         <div class="card-title">DATABASE & BACKUP</div>
         <div class="db-status-grid">
           <div class="db-status-item">
@@ -77,8 +137,8 @@ export class SettingsPage {
         </div>
       </div>
 
-      <!-- Tab 2: Giao diện -->
-      <div id="stab-2" class="stab-content admin-card" style="padding:20px;display:none">
+      <!-- Tab 3: Giao diện -->
+      <div id="stab-3" class="stab-content admin-card" style="padding:20px;display:none">
         <div class="card-title">CÀI ĐẶT GIAO DIỆN</div>
         <div class="form-group">
           <label>THEME</label>
@@ -98,6 +158,7 @@ export class SettingsPage {
   async mount(): Promise<void> {
     this.bindTabSwitching();
     await this.loadSettings();
+    await this.loadSmtpConfig();
     this.bindEvents();
   }
 
@@ -130,6 +191,20 @@ export class SettingsPage {
     }
   }
 
+  private async loadSmtpConfig(): Promise<void> {
+    try {
+      const cfg = await stationApi.getSmtpConfig();
+      (document.getElementById('s_smtp_host') as HTMLInputElement).value = cfg.host;
+      (document.getElementById('s_smtp_port') as HTMLInputElement).value = cfg.port;
+      (document.getElementById('s_smtp_user') as HTMLInputElement).value = cfg.username;
+      (document.getElementById('s_smtp_from') as HTMLInputElement).value = cfg.from;
+      // password không hiển thị lại vì lý do bảo mật, chỉ hint
+      if (cfg.hasPassword) {
+        (document.getElementById('s_smtp_pass') as HTMLInputElement).placeholder = '(đã lưu)';
+      }
+    } catch { /* backend mới hoặc chưa config */ }
+  }
+
   private bindEvents(): void {
     document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
       const polling = (document.getElementById('s_polling') as HTMLInputElement).value;
@@ -149,6 +224,55 @@ export class SettingsPage {
       } catch (e) {
         status.textContent = `Lỗi: ${(e as Error).message}`;
         status.style.color = '#ef4444';
+      }
+    });
+
+    // ── Tab Thông báo ──────────────────────────────────────────
+    document.getElementById('saveSmtpBtn')?.addEventListener('click', async () => {
+      const host   = (document.getElementById('s_smtp_host') as HTMLInputElement).value.trim();
+      const port   = (document.getElementById('s_smtp_port') as HTMLInputElement).value.trim();
+      const user   = (document.getElementById('s_smtp_user') as HTMLInputElement).value.trim();
+      const pass   = (document.getElementById('s_smtp_pass') as HTMLInputElement).value.trim();
+      const from   = (document.getElementById('s_smtp_from') as HTMLInputElement).value.trim();
+      const status = document.getElementById('smtpSaveStatus')!;
+
+      try {
+        const updates: Promise<any>[] = [
+          stationApi.updateSetting('smtp_host', host),
+          stationApi.updateSetting('smtp_port', port),
+          stationApi.updateSetting('smtp_from', from),
+        ];
+        if (user) updates.push(stationApi.updateSetting('smtp_username', user));
+        if (pass) updates.push(stationApi.updateSetting('smtp_password', pass));
+        await Promise.all(updates);
+        status.textContent = '✓ Đã lưu SMTP';
+        status.style.color = '#10b981';
+      } catch (e) {
+        status.textContent = `Lỗi: ${(e as Error).message}`;
+        status.style.color = '#ef4444';
+      }
+      setTimeout(() => { status.textContent = ''; }, 4000);
+    });
+
+    document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
+      const email  = (document.getElementById('s_test_email') as HTMLInputElement).value.trim();
+      const status = document.getElementById('testEmailStatus')!;
+      const btn    = document.getElementById('testEmailBtn') as HTMLButtonElement;
+      if (!email) { status.textContent = 'Nhập email trước'; status.style.color = '#f59e0b'; return; }
+
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang gửi...';
+      status.textContent = '';
+      try {
+        const res = await stationApi.sendTestEmail(email);
+        status.textContent = '✓ ' + res.message;
+        status.style.color = '#10b981';
+      } catch (e) {
+        status.textContent = '✗ ' + (e as Error).message;
+        status.style.color = '#ef4444';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📧 Gửi test';
       }
     });
 

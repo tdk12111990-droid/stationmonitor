@@ -27,6 +27,7 @@ public class AppDbContext : DbContext
     public DbSet<SystemSettings> SystemSettings => Set<SystemSettings>();
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<SyncQueue> SyncQueues => Set<SyncQueue>();
+    public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,5 +58,6 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<SyncQueue>().Property(x => x.Payload).HasColumnType("jsonb");
         modelBuilder.Entity<SystemSettings>().Property(x => x.Value).HasColumnType("jsonb");
         modelBuilder.Entity<RuleTriggerLog>().Property(x => x.ConditionSnapshot).HasColumnType("jsonb");
+        modelBuilder.Entity<MaintenanceTask>().Property(x => x.Checklist).HasColumnType("jsonb");
     }
 }

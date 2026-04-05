@@ -20,6 +20,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationMonitor.Data;
 using StationMonitor.Data.Entities;
+using StationMonitor.Services;
 using StationMonitor.Services.Devices;
 
 namespace StationMonitor.Api.Controllers;
@@ -31,11 +32,13 @@ public class DevicesController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly DeviceService _deviceService;
+    private readonly PermissionService _permissions;
 
-    public DevicesController(AppDbContext db, DeviceService deviceService)
+    public DevicesController(AppDbContext db, DeviceService deviceService, PermissionService permissions)
     {
         _db = db;
         _deviceService = deviceService;
+        _permissions = permissions;
     }
 
     /// <summary>
@@ -45,6 +48,11 @@ public class DevicesController : ControllerBase
     [HttpGet("stations/{stationId}/devices")]
     public async Task<IActionResult> GetByStation(Guid stationId, [FromQuery] string? type)
     {
+        // Kiểm tra operator có được xem trạm này không
+        var allowed = await _permissions.GetAllowedStationIdsAsync();
+        if (allowed != null && !allowed.Contains(stationId))
+            return Forbid();
+
         var query = _db.Devices.Where(d => d.StationId == stationId);
         if (!string.IsNullOrEmpty(type))
             query = query.Where(d => d.Type.Contains(type));

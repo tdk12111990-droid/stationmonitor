@@ -31,7 +31,6 @@ import { MaintenancePage } from '@/pages/MaintenancePage';
 import { SettingsPage } from '@/pages/SettingsPage';
 import {
   UserManagementPage,
-  SystemStatusPage,
   MultisitePage,
 } from '@/pages/OtherPages';
 import { ReportsPage } from '@/pages/ReportsPage';
@@ -108,7 +107,6 @@ router
   .register('alerts-history', shellPage('alerts-history', AlertsHistoryPage))
   .register('analytics', shellPage('analytics', AnalyticsPage))
   .register('reports', shellPage('reports', ReportsPage))
-  .register('system-status', shellPage('system-status', SystemStatusPage))
   .register('device-management', shellPage('device-management', DeviceManagementPage))
   .register('user-management', shellPage('user-management', UserManagementPage))
   .register('settings', shellPage('settings', SettingsPage))

@@ -5,6 +5,7 @@
 // ============================================================
 
 import { stationApi, Device } from '@/services/StationApiService';
+import { confirmDialog } from '@/utils/confirm';
 
 const TYPE_LABELS: Record<string, string> = {
   plc_s7:         '⚙️ PLC S7-1200',
@@ -251,7 +252,13 @@ export class DeviceManagementPage {
       btn.addEventListener('click', async () => {
         const id = (btn as HTMLElement).dataset.id!;
         const device = this.devices.find(d => d.id === id);
-        if (!confirm(`Xóa thiết bị "${device?.name}"?\n${device?.type.startsWith('camera') ? '⚠️ Stream go2rtc cũng sẽ bị xóa.' : ''}`)) return;
+        const isCamera = device?.type.startsWith('camera');
+        if (!await confirmDialog({
+          title: 'Xóa thiết bị',
+          message: `Xóa thiết bị "${device?.name}"?${isCamera ? '\nStream go2rtc cũng sẽ bị xóa.' : ''}`,
+          confirmText: 'Xóa thiết bị',
+          danger: true,
+        })) return;
         try {
           await stationApi.deleteDevice(id);
           this.devices = this.devices.filter(d => d.id !== id);

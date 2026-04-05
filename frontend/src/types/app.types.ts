@@ -126,7 +126,6 @@ export type PageId =
     | 'alerts-history'
     | 'analytics'
     | 'reports'
-    | 'system-status'
     | 'device-management'
     | 'user-management'
     | 'settings'

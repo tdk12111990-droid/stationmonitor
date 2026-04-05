@@ -149,6 +149,163 @@
 
 ---
 
+## Phase 5 — Dashboard SLD + SLD Editor ✅ (2026-04-05)
+
+### Backend
+- [x] `SldController` — GET/POST upload SVG, POST/PUT/DELETE points
+- [x] `app.UseStaticFiles()` serve `wwwroot/sld/*.svg`
+- [x] EF entities: `SldFile`, `SldPoint`
+
+### Frontend
+- [x] `DashboardPage` viết lại hoàn toàn — SLD full-screen, pan/zoom, floating panels
+- [x] Device Drawer slide trái (Edit mode), drag-drop node từ drawer → SVG
+- [x] Click node → panel chỉnh X/Y/R/Label (live preview)
+- [x] `utils/confirm.ts` — custom confirm modal thay `window.confirm()` toàn bộ 6 files
+
+### Tests
+- `test-api.mjs` — 35 tests PASSED
+- TypeScript: `npx tsc --noEmit` PASS
+
+---
+
+## AnalyticsPage v2 ✅ (2026-04-05)
+
+- [x] 6 tab: Tổng quan · Nhiệt độ · Phóng điện · Tương quan · Cảnh báo · Sức khỏe
+- [x] Tách °C và dB — không bao giờ cùng trục Y
+- [x] Threshold động từ Rules: `parseThresholds()` → map pointId → [{value,level,op}]
+- [x] `valColor()`, `tempCellColor()` dùng ngưỡng từ rules thay hardcode
+- [x] Heatmap fix: `border-collapse:separate`, cell `width:22px`
+- [x] Correlation tab: Pearson r, scatter, dual-axis
+- [x] Health tab: score bars, risk table
+
+---
+
+## Phase 6 — Reports PDF ✅ (2026-04-05)
+
+### Backend
+- [x] `GET /api/v1/history/bulk` — TimescaleDB `time_bucket`, nhiều điểm đo
+- [x] `ReportsController` — generate, list, download, delete
+- [x] `ReportGeneratorService` — QuestPDF tạo PDF: KPI, bảng thống kê, danh sách alert
+- [x] `ReportSchedulerWorker` — Hangfire `RecurringJob` tự tạo daily report lúc 00:05
+- [x] Package: QuestPDF 2024.3.0, Hangfire.AspNetCore 1.8.9, Hangfire.PostgreSql 1.20.9
+- [x] PDF lưu vào `wwwroot/reports/{id}.pdf`
+
+### Frontend
+- [x] `ReportsPage` viết lại hoàn toàn — 2 tab
+  - Tab 1: Xuất dữ liệu XLSX (SheetJS) — 3 sheet, xem trước + biểu đồ
+  - Tab 2: Báo cáo phân tích PDF — preview HTML + download từ server
+- [x] `chartjs-adapter-date-fns` — fix lỗi time scale Chart.js
+
+---
+
+## Phase 8 — Maintenance Tracking ✅ (2026-04-05)
+
+### Backend
+- [x] Entity `MaintenanceTask` — 11 fields, Checklist dạng JSONB
+- [x] Migration `AddMaintenanceTask` — applied thành công
+- [x] `MaintenanceController` — 9 endpoints:
+  - `GET /api/v1/maintenance` — list, filter stationId/status/deviceId
+  - `POST /api/v1/maintenance` — tạo task
+  - `PUT /api/v1/maintenance/{id}` — cập nhật
+  - `DELETE /api/v1/maintenance/{id}` — admin/manager
+  - `POST /api/v1/maintenance/{id}/start` → in_progress
+  - `POST /api/v1/maintenance/{id}/complete` → completed, auto-close reminder alerts
+  - `POST /api/v1/maintenance/from-alert/{alertId}` — tạo từ alert
+  - `GET /api/v1/maintenance/upcoming` — task trong N ngày tới
+  - `GET /api/v1/maintenance/suggestions` — đề xuất thống kê (>3 alarm/7d, quá hạn, chưa bảo trì 30d)
+- [x] `MaintenanceReminderWorker` (mỗi 1h):
+  - Auto-mark overdue tasks
+  - Tạo Alert Source="maintenance" theo giai đoạn: 7d trước → warning, 1d trước → warning, hôm nay → alarm (mỗi 4h), quá hạn → alarm (1 lần/ngày)
+  - Chống spam: check `[MT:{taskId}]` marker trước khi tạo alert mới
+  - Auto-close reminder alerts khi task complete
+
+### Frontend
+- [x] `MaintenancePage` viết lại hoàn toàn — dark theme
+  - Stats 4 ô: Tổng / Đang chờ / Đang làm / Quá hạn
+  - Panel đề xuất (stat-based, placeholder cho AI sau)
+  - Filter tabs: Tất cả / Đang chờ / Đang làm / Quá hạn / Hoàn thành
+  - Bảng task + expand checklist inline, progress bar
+  - Modal tạo/sửa với checklist động theo loại bảo trì
+
+### Tests
+- `test-api.mjs` — **46/46 tests PASSED** (Phase 1+2+3+4+8)
+- TypeScript: `npx tsc --noEmit` PASS
+- Build: `dotnet build StationMonitor.sln` PASS (0 errors)
+
+---
+
+## Phase 9 — Early Warning + Health Score + Analytics API ✅ (2026-04-05)
+
+### Backend
+- [x] `EarlyWarningWorker` (mỗi 30 phút):
+  - Linear regression (OLS) trên dữ liệu 7 ngày cho mỗi cặp (DeviceId, PointId)
+  - Ngưỡng: nhiệt độ >0.5°C/ngày, PD >0.3 dB/ngày → tạo Alert Source="early_warning"
+  - Dedup: marker `[EW:{pointId}:{deviceId}]` — không tạo lại trong 12h
+  - Push SignalR realtime khi tạo alert
+- [x] `HealthScoreWorker` (mỗi 1 giờ):
+  - Điểm 0–100 mỗi thiết bị: base 100 - alarm penalty - warning penalty - threshold penalty - offline penalty
+  - Lưu vào SystemSettings key: `health_{deviceId}` (JSONB: score, risk, deviceName, ts)
+  - Risk levels: good (≥80) · fair (≥60) · poor (≥40) · critical (<40)
+- [x] `AnalyticsController`:
+  - `GET /api/v1/analytics/health?stationId=` — trả điểm sức khỏe + risk cho mỗi thiết bị
+  - `GET /api/v1/analytics/trend?stationId=&days=` — tính slope/ngày on-demand, trả trend (rising/falling/stable)
+
+### Frontend
+- [x] `StationApiService`: thêm `getHealthScores()`, `getTrends()`, interface `HealthScore`, `TrendItem`
+- [x] `DashboardPage` health widget:
+  - Panel "Sức khỏe hệ thống" dưới KPI, collapse được
+  - Hiển thị score + risk label + progress bar màu động mỗi 2 phút
+  - Tự định vị ngay dưới KPI panel (positionHealthWidget)
+- [x] `DashboardPage` SLD node nâng cấp:
+  - Tooltip hover: hiển thị giá trị cảm biến realtime (từ cache `this.sensors`, cập nhật mỗi 5s)
+  - Click popup (view mode): panel dữ liệu + mini SVG sparkline 1 giờ qua
+  - Edit mode: click vẫn mở edit panel như cũ
+- [x] `AnalyticsPage` tab Sức khỏe nâng cấp:
+  - Dùng API `getHealthScores()` thay tính cục bộ, fallback về tính từ alerts nếu API chưa có
+  - Bảng xu hướng 7 ngày từ `getTrends()`: slope/ngày + trend icon
+
+### Build
+- `dotnet build StationMonitor.sln` PASS (0 errors)
+- `npx tsc --noEmit` PASS
+
+---
+
+## Phase 7 — Email Notifications ✅ (2026-04-05)
+
+### Backend
+- [x] `EmailNotifyService` (MailKit 4.3.0): `SendAlertEmailAsync()` + `SendTestEmailAsync()`
+  - HTML email với màu sắc theo level (alarm=đỏ, warning=vàng)
+  - Config SMTP qua `appsettings.json` section `"Smtp"`
+  - Default: Mailtrap sandbox (`sandbox.smtp.mailtrap.io:2525`)
+- [x] `NotificationsController`:
+  - `GET /api/v1/notifications/smtp-config` — đọc cấu hình hiện tại
+  - `POST /api/v1/notifications/test-email` — gửi email test
+- [x] `RuleEvaluationWorker`: tích hợp gửi email khi tạo alert mới (fire-and-forget)
+  - Đọc `alert_email` từ SystemSettings → gửi nếu có
+- [x] `appsettings.json`: thêm section `"Smtp"` với Mailtrap defaults
+
+### Phase 11 quick wins ✅
+- [x] `PATCH /api/v1/rules/{id}/toggle` — bật/tắt rule nhanh (admin/manager)
+- [x] `GET /api/v1/alerts/export` — xuất CSV cảnh báo (filter: status/from/to)
+- [x] `GET /api/v1/history/export` — xuất CSV lịch sử cảm biến (filter: deviceId/pointId/from/to)
+- [x] Bỏ `SystemStatusPage` — page dùng mock data cũ, không còn cần thiết
+
+### Frontend
+- [x] `SettingsPage`: thêm tab "Thông báo" (tab 1)
+  - Form SMTP: host/port/username/password/from
+  - Load config từ `GET /notifications/smtp-config`
+  - Lưu SMTP: ghi vào SystemSettings (smtp_host/port/username/password/from)
+  - Nút "Gửi test": gọi `POST /notifications/test-email`
+  - Hint Mailtrap (link + hướng dẫn lấy credentials)
+
+### Setup test email (Mailtrap)
+1. Đăng ký miễn phí tại https://mailtrap.io
+2. Vào Inbox → SMTP Settings → lấy Username + Password
+3. Vào Settings → tab Thông báo → điền Username/Password → Lưu SMTP
+4. Nhập email → Gửi test → kiểm tra Mailtrap Inbox
+
+---
+
 ## Phase 5 — AI + Desktop + Mobile (TODO)
 
 - [ ] Python YOLO gRPC sidecar (chạy trên Jetson GPU)

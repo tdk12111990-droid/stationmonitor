@@ -7,31 +7,68 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Hangfire;
+using Hangfire.PostgreSql;
 using StationMonitor.Api.Hubs;
 using StationMonitor.Api.Middleware;
 using StationMonitor.Data;
 using StationMonitor.Services;
 using StationMonitor.Services.Auth;
+using StationMonitor.Services.Camera;
 using StationMonitor.Services.Devices;
+using StationMonitor.Services.Reports;
 using StationMonitor.Workers.Polling;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// ── QuestPDF license ──────────────────────────────────────
+QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
 // ── Database ──────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
+// ── Hangfire ──────────────────────────────────────────────
+builder.Services.AddHangfire(config =>
+    config.UsePostgreSqlStorage(c =>
+        c.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));
+builder.Services.AddHangfireServer();
+
 // ── Services ──────────────────────────────────────────────
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<AuthService>();
+builder.Services.AddScoped<EmailNotifyService>();
+builder.Services.AddScoped<PermissionService>();
 builder.Services.AddScoped<DeviceService>();
+builder.Services.AddScoped<ReportGeneratorService>();
+builder.Services.AddScoped<ReportSchedulerWorker>();
 builder.Services.AddHttpClient(); // cho DeviceService gọi go2rtc API
 builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>(); // SignalR push
+builder.Services.AddScoped<OnvifService>();
+builder.Services.AddScoped<HikvisionIsapiService>();
+builder.Services.AddScoped<AutoDiscoveryService>();
 
 // ── Background Workers ────────────────────────────────────
 // PlcPollingWorker: đọc PLC S7 mỗi 3 giây
 builder.Services.AddHostedService<PlcPollingWorker>();
 // RuleEvaluationWorker: đánh giá rules mỗi 5 giây
 builder.Services.AddHostedService<RuleEvaluationWorker>();
+// MaintenanceReminderWorker: nhắc nhở lịch bảo trì mỗi 1 giờ
+builder.Services.AddHostedService<MaintenanceReminderWorker>();
+// EarlyWarningWorker: phát hiện xu hướng tăng bất thường (linear regression, mỗi 30 phút)
+builder.Services.AddHostedService<EarlyWarningWorker>();
+// HealthScoreWorker: tính điểm sức khỏe 0-100 mỗi thiết bị (mỗi 1 giờ)
+builder.Services.AddHostedService<HealthScoreWorker>();
+// StorageMonitorWorker: theo dõi dung lượng ổ đĩa, cảnh báo khi < 10%
+builder.Services.AddHostedService<StorageMonitorWorker>();
+// ModbusTcpWorker: đọc thiết bị Modbus TCP (FC3 holding registers)
+builder.Services.AddHostedService<ModbusTcpWorker>();
+// ModbusRtuWorker: đọc thiết bị Modbus RTU qua cổng serial
+builder.Services.AddHostedService<ModbusRtuWorker>();
+// MqttSubscriberWorker: nhận dữ liệu IoT qua MQTT broker
+builder.Services.AddHostedService<MqttSubscriberWorker>();
+// Iec104Worker: kết nối IEC 60870-5-104 (skeleton)
+builder.Services.AddHostedService<Iec104Worker>();
 
 // ── SignalR ───────────────────────────────────────────────
 // Client kết nối: ws://localhost:5056/ws/realtime
@@ -84,6 +121,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
+// Serve static files (SVG diagrams) từ wwwroot/
+app.UseStaticFiles();
+
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -92,6 +132,15 @@ app.MapControllers();
 
 // SignalR endpoint
 app.MapHub<RealtimeHub>("/ws/realtime");
+
+// Hangfire dashboard (admin only in production)
+app.UseHangfireDashboard("/hangfire");
+
+// Đăng ký recurring job: tạo báo cáo ngày lúc 00:05 hàng ngày
+RecurringJob.AddOrUpdate<ReportSchedulerWorker>(
+    "daily-report",
+    worker => worker.GenerateDailyAsync(),
+    "5 0 * * *");  // 00:05 mỗi ngày
 
 // ── Startup Tasks ─────────────────────────────────────────
 using (var scope = app.Services.CreateScope())

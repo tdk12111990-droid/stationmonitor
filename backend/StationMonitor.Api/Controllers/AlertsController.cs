@@ -10,6 +10,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationMonitor.Data;
 using StationMonitor.Data.Entities;
+using StationMonitor.Services;
 using System.Security.Claims;
 
 namespace StationMonitor.Api.Controllers;
@@ -20,14 +21,22 @@ namespace StationMonitor.Api.Controllers;
 public class AlertsController : ControllerBase
 {
     private readonly AppDbContext _db;
+    private readonly PermissionService _permissions;
 
-    public AlertsController(AppDbContext db) => _db = db;
+    public AlertsController(AppDbContext db, PermissionService permissions)
+    {
+        _db = db;
+        _permissions = permissions;
+    }
 
     // GET /api/v1/alerts?status=open&limit=50
     [HttpGet]
     public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int limit = 100)
     {
         var q = _db.Alerts.AsQueryable();
+
+        var allowed = await _permissions.GetAllowedStationIdsAsync();
+        if (allowed != null) q = q.Where(a => allowed.Contains(a.StationId));
 
         if (!string.IsNullOrEmpty(status))
             q = q.Where(a => a.Status == status);
@@ -122,6 +131,45 @@ public class AlertsController : ControllerBase
         await _db.SaveChangesAsync();
         return Ok(new { alert.Id, alert.Status, alert.ClosedAt });
     }
+
+    // GET /api/v1/alerts/export?status=&from=&to= → CSV
+    [HttpGet("export")]
+    public async Task<IActionResult> Export(
+        [FromQuery] string? status,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to)
+    {
+        var q = _db.Alerts.AsQueryable();
+        if (!string.IsNullOrEmpty(status)) q = q.Where(a => a.Status == status);
+        if (from.HasValue) q = q.Where(a => a.TriggeredAt >= from.Value);
+        if (to.HasValue)   q = q.Where(a => a.TriggeredAt <= to.Value);
+        var alerts = await q.OrderByDescending(a => a.TriggeredAt).ToListAsync();
+
+        // Lấy tên thiết bị
+        var deviceIds = alerts.Where(a => a.DeviceId.HasValue).Select(a => a.DeviceId!.Value).Distinct().ToList();
+        var deviceNames = await _db.Devices
+            .Where(d => deviceIds.Contains(d.Id))
+            .ToDictionaryAsync(d => d.Id, d => d.Name);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Id,Source,Level,Status,Message,Value,Device,TriggeredAt,AckedAt,ClosedAt");
+        foreach (var a in alerts)
+        {
+            var devName = a.DeviceId.HasValue && deviceNames.TryGetValue(a.DeviceId.Value, out var n) ? n : "";
+            sb.AppendLine(string.Join(",",
+                a.Id, Esc(a.Source), Esc(a.Level), Esc(a.Status),
+                Esc(a.Message), a.Value?.ToString("F2") ?? "",
+                Esc(devName), a.TriggeredAt.ToString("O"),
+                a.AckedAt?.ToString("O") ?? "", a.ClosedAt?.ToString("O") ?? ""));
+        }
+
+        var bytes = System.Text.Encoding.UTF8.GetPreamble()
+            .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
+        return File(bytes, "text/csv", $"alerts_{DateTime.Now:yyyyMMdd_HHmm}.csv");
+    }
+
+    private static string Esc(string? v) =>
+        v == null ? "" : $"\"{v.Replace("\"", "\"\"")}\"";
 }
 
 public class AckRequest

@@ -4,6 +4,7 @@
 // ============================================================
 
 import { stationApi, type AlertItem } from '@/services/StationApiService';
+import { confirmDialog } from '@/utils/confirm';
 
 export class AlertsHistoryPage {
   private alerts: AlertItem[] = [];
@@ -140,7 +141,7 @@ export class AlertsHistoryPage {
     // Close buttons
     document.querySelectorAll('.btn-close-alert').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Đóng alert này?')) return;
+        if (!await confirmDialog({ title: 'Đóng cảnh báo', message: 'Xác nhận đóng alert này?', confirmText: 'Đóng alert' })) return;
         await stationApi.closeAlert((btn as HTMLElement).dataset.id!);
         await this.loadAlerts();
       });

@@ -11,7 +11,19 @@
       "Bash(taskkill /F /PID 17784)",
       "Bash(taskkill /F /IM \"StationMonitor.Api.exe\")",
       "Bash(dotnet run:*)",
-      "Bash(echo \"Backend starting PID=$!\")"
+      "Bash(echo \"Backend starting PID=$!\")",
+      "Bash(grep -l \"Sld\\\\|SldFile\\\\|SldPoint\" D:/StationMonitor/backend/StationMonitor.Data/Entities/*.cs)",
+      "Bash(npm install:*)",
+      "Bash(curl -s http://localhost:5056/api/v1/stations -H \"Authorization: Bearer test\")",
+      "Bash(curl:*)",
+      "Bash(node -e \"fetch\\('http://localhost:5056/api/v1/stations'\\).then\\(r=>console.log\\('HTTP',r.status\\)\\).catch\\(e=>console.log\\('ERR',e.message\\)\\)\")",
+      "Bash(grep -n \"EarlyWarning\\\\|HealthScore\\\\|analytics\\\\|health\\\\|trend\" \"D:/StationMonitor/backend/StationMonitor.Api/Controllers/\"*.cs)",
+      "Bash(dotnet add:*)",
+      "Bash(grep -v \"^$\")",
+      "Bash(dotnet test:*)",
+      "Bash(dotnet sln:*)",
+      "Bash(dotnet script:*)",
+      "Read(//c/Users/DELL/.nuget/packages/fluentmodbus/5.2.0/lib//**)"
     ]
   }
 }

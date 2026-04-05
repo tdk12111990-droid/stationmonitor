@@ -4,6 +4,7 @@
 // ============================================================
 
 import { stationApi, type Rule } from '@/services/StationApiService';
+import { confirmDialog } from '@/utils/confirm';
 
 const POINT_OPTIONS = [
   { value: 'nhiet_do_pha_1', label: 'Nhiệt độ Pha 1 (°C)' },
@@ -148,7 +149,7 @@ export class RuleEnginePage {
 
     document.querySelectorAll('.rule-del-btn').forEach(btn => {
       btn.addEventListener('click', async () => {
-        if (!confirm('Xóa rule này?')) return;
+        if (!await confirmDialog({ message: 'Xóa rule này?', confirmText: 'Xóa rule', danger: true })) return;
         await stationApi.deleteRule((btn as HTMLElement).dataset.id!);
         await this.loadRules();
       });

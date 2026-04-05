@@ -4,6 +4,7 @@
 // ============================================================
 
 import { stationApi, type UserItem } from '@/services/StationApiService';
+import { confirmDialog } from '@/utils/confirm';
 
 export class UserManagementPage {
   private users: UserItem[] = [];
@@ -167,7 +168,7 @@ export class UserManagementPage {
       btn.addEventListener('click', async () => {
         const id = (btn as HTMLElement).dataset.id!;
         const name = (btn as HTMLElement).dataset.name!;
-        if (!confirm(`Vô hiệu hóa tài khoản "${name}"?`)) return;
+        if (!await confirmDialog({ title: 'Vô hiệu hóa tài khoản', message: `Vô hiệu hóa tài khoản "${name}"?`, confirmText: 'Vô hiệu hóa', danger: true })) return;
         try {
           await stationApi.deactivateUser(id);
           this.showToast(`Đã vô hiệu hóa tài khoản "${name}"`, 'success');
@@ -308,105 +309,9 @@ export class UserManagementPage {
   destroy(): void { /* nothing to cleanup */ }
 }
 
-// ============================================================
-// SystemStatusPage – D07: Trạng thái Hệ thống  
-// ============================================================
 
-import { getSystemMetrics } from '@/services/MockDataService';
-import { loadScadaPoints } from '@/services/storage';
+
 import { GO2RTC_URL } from '@/utils/env';
-
-export class SystemStatusPage {
-  private updateInterval?: ReturnType<typeof setInterval>;
-
-  render(): string {
-    const m = getSystemMetrics();
-    const pct = (v: number, max: number) => Math.round(v / max * 100);
-    return `
-    <div class="status-page" style="display:flex;flex-direction:column;gap:20px">
-      <div class="page-toolbar"><h2>TRẠNG THÁI HỆ THỐNG</h2></div>
-
-      <!-- Resource row -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-        ${[
-        { label: 'CPU', value: m.cpu_percent, max: 100, unit: '%', color: m.cpu_percent > 80 ? '#ef4444' : '#10b981' },
-        { label: 'RAM', value: m.ram_used_gb, max: m.ram_total_gb, unit: `GB / ${m.ram_total_gb} GB`, color: '#3b82f6' },
-        { label: 'Disk', value: m.disk_used_gb, max: m.disk_total_gb, unit: `GB / ${m.disk_total_gb} GB`, color: '#8b5cf6' },
-      ].map(r => `
-        <div class="admin-card" style="padding:20px">
-          <div class="card-title">${r.label}</div>
-          <div class="progress-bar-wrap">
-            <div class="progress-bar" style="width:${pct(r.value, r.max)}%;background:${r.color}"></div>
-          </div>
-          <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:.85rem">
-            <span style="color:${r.color};font-weight:700">${pct(r.value, r.max)}%</span>
-            <span style="opacity:.5">${r.value} ${r.unit}</span>
-          </div>
-        </div>`).join('')}
-      </div>
-
-      <!-- Connectivity -->
-      <div class="admin-card" style="padding:20px">
-        <div class="card-title">KẾT NỐI</div>
-        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
-          ${[
-        { label: 'PostgreSQL Database', ok: m.db_connected, note: 'localhost:5432' },
-        { label: 'Convex Cloud', ok: m.cloud_connected, note: 'production.convex.cloud' },
-        { label: 'Lần đồng bộ cuối', ok: true, note: '2 phút trước' },
-      ].map(c => `
-          <div style="display:flex;align-items:center;gap:12px;padding:12px;background:rgba(255,255,255,0.03);border-radius:8px">
-            <span style="font-size:1.5rem">${c.ok ? '✅' : '❌'}</span>
-            <div>
-              <div style="font-weight:600;font-size:.9rem">${c.label}</div>
-              <div style="font-size:.75rem;opacity:.5">${c.note}</div>
-            </div>
-          </div>`).join('')}
-        </div>
-      </div>
-
-      <!-- Device Heartbeats -->
-      <div class="admin-card" style="padding:20px">
-        <div class="card-title" id="healthTitle">HEARTBEAT THIẾT BỊ (Đang tải...)</div>
-        <div id="healthDevicesList" style="display:flex;flex-direction:column;gap:8px">
-          <div style="padding:10px;text-align:center;color:#94a3b8;font-size:13px">Đang tải tín hiệu SCADA...</div>
-        </div>
-      </div>
-    </div>`;
-  }
-
-  mount(): void {
-    loadScadaPoints().then(points => {
-      const title = document.getElementById('healthTitle');
-      const list = document.getElementById('healthDevicesList');
-      if (!title || !list) return;
-
-      const onCount = points.filter(p => p.status === 'Normal').length;
-      title.textContent = `HEARTBEAT THIẾT BỊ (${onCount}/${points.length} online)`;
-
-      if (points.length === 0) {
-        list.innerHTML = '<div style="padding:10px;color:#94a3b8;text-align:center">Không có thiết bị kết nối.</div>';
-        return;
-      }
-
-      list.innerHTML = points.map(p => {
-        const isNormal = p.status === 'Normal';
-        const pCol = isNormal ? '#10b981' : p.status === 'Warning' ? '#f59e0b' : '#ef4444';
-        return `
-          <div style="display:flex;align-items:center;gap:12px;padding:10px;background:rgba(255,255,255,0.03);border-radius:6px;border-left:3px solid ${pCol}">
-            <span style="color:${pCol}">${isNormal ? '🟢' : '🔴'}</span>
-            <span style="flex:1;font-weight:600">${p.name} <span class="tag ${isNormal ? 'tag-success' : 'tag-danger'}" style="margin-left:8px;font-size:10px">${p.status}</span></span>
-            <span style="font-size:.75rem;opacity:.5">IP: ${p.ipAddress || 'N/A'}</span>
-            <span style="font-size:.75rem;opacity:.5">IP: ${p.ipAddress || 'N/A'}</span>
-          </div>`;
-      }).join('');
-    });
-
-    // TODO: cập nhật CPU/RAM từ GET /api/v1/system/metrics
-  }
-
-  destroy(): void { if (this.updateInterval) clearInterval(this.updateInterval); }
-}
-
 
 // ============================================================
 // MultisitePage – D13: Tổng quan Đa trạm (stub)
