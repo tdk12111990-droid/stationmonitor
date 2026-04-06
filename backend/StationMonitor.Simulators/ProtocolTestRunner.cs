@@ -19,6 +19,8 @@ public static class ProtocolTestRunner
     private static int _pass = 0;
     private static int _fail = 0;
 
+    public static int FailCount => _fail;
+
     public static async Task RunAllAsync(string filter = "all")
     {
         _pass = 0; _fail = 0;

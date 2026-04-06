@@ -350,3 +350,238 @@ streams:
 ```
 
 **Quy tắc:** `go2rtc_id` trong DB phải trùng với key trong `go2rtc.yaml` và là gì frontend dùng để embed iframe (`stream.html?src=<go2rtc_id>`).
+
+---
+
+## 21. CS9051: `file` class không dùng được trong method signature (Phase 11)
+
+**Triệu chứng:**
+```
+error CS9051: 'file' types cannot be used as type arguments.
+```
+
+**Nguyên nhân:** Các config DTOs dùng `file sealed class ModbusTcpConfig` — loại `file`-local không thể xuất hiện trong method signature của class khác.
+
+**Cách sửa:** Đổi tất cả config DTOs sang `internal sealed class`:
+```csharp
+// SAI
+file sealed class ModbusTcpConfig { ... }
+
+// ĐÚNG
+internal sealed class ModbusTcpConfig { ... }
+```
+
+**Quy tắc:** Dùng `file` chỉ khi class không bao giờ xuất hiện trong method signature bên ngoài file đó (thực tế rất hiếm trong Workers vì config được truyền qua helpers).
+
+---
+
+## 22. CS8652: Span<T> không dùng được trong async method (Phase 11)
+
+**Triệu chứng:**
+```
+error CS8652: The feature 'ref structs in iterators/async methods' is not available in C# 12.
+```
+
+**Nguyên nhân:** `FluentModbus.ModbusTcpClient.ReadHoldingRegisters()` trả về `Span<byte>`. Không thể dùng `Span<T>` (ref struct) trong async method hay bất kỳ method chứa `await`.
+
+**Cách sửa:** Tách phần đọc Modbus ra khỏi async context vào 1 sync method riêng:
+```csharp
+// Sync helper — KHÔNG async, không có await
+private static List<(string pointId, double value, string unit)> ReadAllRegisters(
+    string ip, int port, byte unitId, List<RegisterConfig> registers)
+{
+    var client = new ModbusTcpClient();
+    client.Connect(new IPEndPoint(IPAddress.Parse(ip), port));
+    var bytes = client.ReadHoldingRegisters(unitId, 0, 16); // Span<byte>
+    // ... xử lý bytes ở đây
+    return result;
+}
+
+// Async method gọi sync helper
+private async Task PollDeviceAsync(...)
+{
+    var readings = ReadAllRegisters(ip, port, unitId, registers); // OK — sync
+    await SaveReadingsAsync(readings, ct); // await chỉ khi không có Span
+}
+```
+
+**Quy tắc:** Bất kỳ thao tác nào liên quan đến `Span<T>` phải nằm trong non-async method.
+
+---
+
+## 23. FluentModbus Connect() API thay đổi giữa các version (Phase 11)
+
+**Triệu chứng:**
+```
+error CS1503: Argument 1: cannot convert from 'string' to 'System.Net.EndPoint'
+```
+
+**Nguyên nhân:** FluentModbus 5.2.0 thay đổi `ModbusTcpClient.Connect()` — không còn nhận `(string ip, int port)`.
+
+**Cách sửa:**
+```csharp
+// SAI (API cũ)
+client.Connect(cfg.Ip, cfg.Port);
+
+// ĐÚNG (FluentModbus 5.2.0+)
+client.Connect(new IPEndPoint(IPAddress.Parse(cfg.Ip), cfg.Port));
+```
+
+---
+
+## 24. ModbusRtuClient không có property DataBits (Phase 11)
+
+**Triệu chứng:**
+```
+error CS0117: 'ModbusRtuClient' does not contain a definition for 'DataBits'
+```
+
+**Nguyên nhân:** `FluentModbus.ModbusRtuClient` chỉ expose `BaudRate`, `Parity`, `StopBits` — không có `DataBits`.
+
+**Cách sửa:** Xóa dòng `client.DataBits = ...`. Mặc định 8 data bits đã đủ cho Modbus RTU.
+
+**Cách dùng đúng:**
+```csharp
+var client = new ModbusRtuClient();
+client.BaudRate = cfg.BaudRate;
+client.Parity = Enum.Parse<Parity>(cfg.Parity);
+client.StopBits = Enum.Parse<StopBits>(cfg.StopBits);
+client.Connect(cfg.Port); // COM3, COM4, ...
+```
+
+---
+
+## 25. FluentModbus Server API thay đổi hoàn toàn (Phase 11)
+
+**Triệu chứng:** `ModbusTcpServer` không còn nhận callback kiểu `Action<ModbusRequestEventArgs>`, API hoàn toàn khác.
+
+**Nguyên nhân:** FluentModbus 5.x thay đổi server API so với 4.x.
+
+**Cách sửa:** Không dùng FluentModbus server. Viết raw TCP server với `TcpListener`:
+```csharp
+var listener = new TcpListener(IPAddress.Any, port);
+listener.Start();
+while (!ct.IsCancellationRequested)
+{
+    var client = await listener.AcceptTcpClientAsync(ct);
+    _ = HandleClientAsync(client, ct);
+}
+```
+Tự parse Modbus TCP frame (MBAP header + PDU) và trả response theo spec.
+
+**Lợi ích:** Không phụ thuộc version library, dễ debug, hiểu rõ protocol.
+
+---
+
+## 26. Device.IsActive không tồn tại (Phase 11)
+
+**Triệu chứng:**
+```
+error CS1061: 'Device' does not contain a definition for 'IsActive'
+```
+
+**Nguyên nhân:** Entity `Device` dùng `Status` (string) thay vì `IsActive` (bool).
+
+**Cách sửa:**
+```csharp
+// SAI
+.Where(d => d.IsActive)
+
+// ĐÚNG
+.Where(d => d.Status != "maintenance")
+// hoặc để poll tất cả thiết bị active
+.Where(d => d.Status == "active" || d.Status == "online" || d.Status == "offline")
+```
+
+---
+
+## 27. SensorReading.PointId là string — không có DataPoints entity (Phase 11)
+
+**Triệu chứng:**
+```
+error CS1061: 'AppDbContext' does not contain a definition for 'DataPoints'
+```
+
+**Nguyên nhân:** Thiết kế ban đầu dùng `SensorReading.PointId` là string, không có bảng `DataPoints` riêng.
+
+**Cách sửa:**
+```csharp
+// SAI — DataPoints không tồn tại
+var point = await db.DataPoints.FirstOrDefaultAsync(p => p.Id == pointId);
+
+// ĐÚNG — lưu trực tiếp với PointId là string
+db.SensorReadings.Add(new SensorReading
+{
+    StationId = stationId,
+    DeviceId = deviceId,
+    PointId = pointIdString,   // string trực tiếp từ config
+    Value = value,
+    Unit = unit,
+    Time = DateTime.UtcNow
+});
+```
+
+---
+
+## 28. Math.Min(ushort, int) ambiguous — CS0121 (Phase 11)
+
+**Triệu chứng:**
+```
+error CS0121: The call is ambiguous between 'Math.Min(short, short)' and 'Math.Min(ushort, ushort)'
+```
+
+**Nguyên nhân:** Khi một operand là `ushort` và operand kia là `int` literal, compiler không biết chọn overload nào.
+
+**Cách sửa:**
+```csharp
+// SAI — ambiguous
+var count = Math.Min(length, 250);
+
+// ĐÚNG — cast rõ ràng
+var count = Math.Min((int)length, 250);
+```
+
+---
+
+## 29. Program.cs top-level statements không return int trực tiếp (Phase 11)
+
+**Triệu chứng:**
+```
+error CS0126: An object of a type convertible to 'int' is required
+error CS0161: not all code paths return a value
+```
+
+**Nguyên nhân:** C# top-level statements có kiểu return là `Task` hoặc `void`, không thể dùng `return 1;` trực tiếp với `Environment.ExitCode`.
+
+**Cách sửa:** Wrap logic vào `static async Task<int> MainAsync()`:
+```csharp
+// Program.cs top-level
+return await MainAsync(args);
+
+static async Task<int> MainAsync(string[] args)
+{
+    // ... logic
+    return 0; // hoặc return 1 khi lỗi
+}
+```
+
+---
+
+## 30. SystemSettings.Value là string không phải JsonElement (Phase 11)
+
+**Triệu chứng:**
+```
+InvalidOperationException: Cannot get the value of a token type 'String' as a type 'Object'
+```
+
+**Nguyên nhân:** `SystemSettings.Value` là `string` thuần, không phải `JsonElement`. Code cũ kiểm tra `if (setting.Value is JsonElement je)`.
+
+**Cách sửa:**
+```csharp
+// SAI — Value không phải JsonElement
+if (setting.Value is JsonElement je) { ... }
+
+// ĐÚNG — dùng thẳng string Value
+var configJson = setting?.Value ?? "";
+var config = JsonSerializer.Deserialize<MqttConfig>(configJson);
+```

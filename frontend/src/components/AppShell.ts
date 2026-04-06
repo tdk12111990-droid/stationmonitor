@@ -34,8 +34,10 @@ export class AppShell {
   render(contentId: PageId): string {
     this.activeNavId = contentId;
     const user = authService.getUser()!;
+    const savedTheme = localStorage.getItem('station-theme') || 'dark';
+    const themeClass = savedTheme !== 'default' ? `theme-${savedTheme}` : '';
     return `
-    <div class="app-shell admin-container">
+    <div class="app-shell admin-container ${themeClass}">
       <!-- Sidebar -->
       <nav class="sidebar-nav" id="sidebarNav">
         <div class="sidebar-logo" style="padding: 8px;">

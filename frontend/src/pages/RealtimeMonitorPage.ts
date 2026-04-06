@@ -324,12 +324,12 @@ export class RealtimeMonitorPage {
       const data = await res.json();
       const shelf = document.getElementById('primaryRecentCaptures');
       if (shelf && data.captures) {
-         shelf.innerHTML = data.captures.map((f: string) => `
+        shelf.innerHTML = data.captures.map((f: string) => `
           <div class="recent-capture-item" style="flex:0 0 120px;height:85px">
             <img src="http://127.0.0.1:46123/api/captures/${f}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:2px solid #0ea5e9" onclick="window.open(this.src,'_blank')">
           </div>`).join('');
       }
-    } catch {}
+    } catch { }
   }
 
   private async handleCapture(_btn: HTMLElement) {

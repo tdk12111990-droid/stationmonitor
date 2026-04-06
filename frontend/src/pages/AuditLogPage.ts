@@ -74,69 +74,70 @@ export class AuditLogPage {
     </div>
 
     <style>
-      .audit-log-wrapper { 
-        background: #f1f5f9; min-height: 100vh; padding: 20px; 
+      .audit-log-wrapper {
+        background: var(--admin-bg); min-height: 100%; padding: 20px;
         display: flex; justify-content: center;
       }
-      .audit-log-container { 
-        width: 100%; max-width: 1200px; 
+      .audit-log-container {
+        width: 100%; max-width: 1200px;
       }
-      
-      /* Toolbar Sáng */
-      .audit-toolbar { 
-        display: flex; justify-content: space-between; align-items: flex-end; 
-        background: #ffffff; padding: 24px; border-radius: 12px;
-        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.05);
-        margin-bottom: 20px; border: 1px solid #e2e8f0;
+
+      /* Toolbar */
+      .audit-toolbar {
+        display: flex; justify-content: space-between; align-items: flex-end;
+        background: var(--admin-card-bg); padding: 24px; border-radius: 12px;
+        box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.2);
+        margin-bottom: 20px; border: 1px solid var(--admin-border);
       }
-      .toolbar-left h2 { margin: 0 0 16px 0; font-size: 1.5rem; color: #1e293b; font-weight: 800; }
+      .toolbar-left h2 { margin: 0 0 16px 0; font-size: 1.5rem; color: var(--admin-text); font-weight: 800; }
       .toolbar-select-group { display: flex; gap: 16px; }
       .select-wrapper { display: flex; flex-direction: column; gap: 6px; }
-      .select-wrapper label { font-size: 0.65rem; font-weight: 800; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-      
-      .audit-select { 
-        background: #f8fafc; border: 1px solid #cbd5e1; color: #1e293b; 
+      .select-wrapper label { font-size: 0.65rem; font-weight: 800; color: var(--admin-text); opacity: 0.5; text-transform: uppercase; letter-spacing: 0.5px; }
+
+      .audit-select {
+        background: var(--admin-bg); border: 1px solid var(--admin-border); color: var(--admin-text);
         padding: 10px 14px; border-radius: 8px; width: 220px; font-size: 0.9rem;
         cursor: pointer; font-weight: 500;
       }
-      .audit-select:focus { border-color: #2563eb; outline: none; box-shadow: 0 0 0 3px rgba(37,99,235,0.1); }
+      .audit-select:focus { border-color: var(--admin-accent); outline: none; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
 
-      /* Table Sáng & Scrolling */
-      .audit-card { background: #ffffff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1); padding: 0 !important; }
+      /* Table & Scrolling */
+      .audit-card { background: var(--admin-card-bg); border-radius: 12px; border: 1px solid var(--admin-border); box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.2); padding: 0 !important; }
       .audit-table-scroll-body { max-height: 65vh; overflow-y: auto; }
-      
+
       .audit-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
-      .audit-table th { 
-        background: #f8fafc; color: #475569; font-size: 0.7rem; text-transform: uppercase; 
-        padding: 14px 16px; border-bottom: 1px solid #e2e8f0; text-align: left; font-weight: 700;
+      .audit-table th {
+        background: var(--admin-bg); color: var(--admin-text); opacity: 0.6; font-size: 0.7rem; text-transform: uppercase;
+        padding: 14px 16px; border-bottom: 1px solid var(--admin-border); text-align: left; font-weight: 700;
       }
-      .audit-table td { 
-        padding: 14px 16px; border-bottom: 1px solid #f1f5f9; 
-        color: #334155; font-size: 0.85rem; word-break: break-word;
+      .audit-table th { opacity: 1; color: var(--admin-text); }
+      .audit-table td {
+        padding: 14px 16px; border-bottom: 1px solid var(--admin-border);
+        color: var(--admin-text); font-size: 0.85rem; word-break: break-word; opacity: 0.85;
       }
       .audit-table tr:last-child td { border-bottom: none; }
-      .audit-table tr:hover td { background: #f1f5f9; }
+      .audit-table tr:hover td { background: rgba(255,255,255,0.03); opacity: 1; }
 
-      /* Badge màu sáng */
-      .tag-all { background: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
-      .tag-audit { background: #fef3c7; color: #92400e; }
-      .tag-login { background: #dcfce7; color: #166534; }
-      .tag-notify { background: #ede9fe; color: #5b21b6; }
-      .tag-trigger { background: #fee2e2; color: #991b1b; }
+      /* Badge */
+      .tag-all { background: rgba(59,130,246,0.2); color: #60a5fa; padding: 3px 8px; border-radius: 4px; font-size: 0.7rem; font-weight: 600; }
+      .tag-audit { background: rgba(245,158,11,0.2); color: #fbbf24; }
+      .tag-login { background: rgba(16,185,129,0.2); color: #34d399; }
+      .tag-notify { background: rgba(139,92,246,0.2); color: #a78bfa; }
+      .tag-trigger { background: rgba(239,68,68,0.2); color: #f87171; }
 
-      .audit-detail-row { background: #f8fafc !important; }
-      .log-diff-box { 
-        display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px; 
-        background: #ffffff; border-radius: 8px; border: 1px solid #e2e8f0;
+      .audit-detail-row { background: var(--admin-bg) !important; }
+      .log-diff-box {
+        display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px;
+        background: var(--admin-card-bg); border-radius: 8px; border: 1px solid var(--admin-border);
       }
-      .diff-item b { display: block; margin-bottom: 8px; font-size: 0.65rem; color: #64748b; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; }
-      .diff-content { font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: #1e293b; }
+      .diff-item b { display: block; margin-bottom: 8px; font-size: 0.65rem; color: var(--admin-text); opacity: 0.5; border-bottom: 1px solid var(--admin-border); padding-bottom: 4px; }
+      .diff-content { font-family: monospace; font-size: 0.75rem; white-space: pre-wrap; color: var(--admin-text); }
 
-      .audit-footer { display: flex; justify-content: space-between; margin-top: 20px; color: #94a3b8; font-size: 0.75rem; }
-      
-      .expanding-btn { color: #2563eb; cursor: pointer; border: 1px solid #e2e8f0; background: white; padding: 2px 8px; border-radius: 4px; }
-      .expanding-btn:hover { background: #f1f5f9; }
-      
+      .audit-footer { display: flex; justify-content: space-between; margin-top: 20px; color: var(--admin-text); opacity: 0.5; font-size: 0.75rem; }
+
+      .expanding-btn { color: var(--admin-accent); cursor: pointer; border: 1px solid var(--admin-border); background: var(--admin-bg); padding: 2px 8px; border-radius: 4px; color: var(--admin-text); }
+      .expanding-btn:hover { background: rgba(255,255,255,0.05); }
+
       .hidden { display: none; }
 
       /* Column fixed widths */

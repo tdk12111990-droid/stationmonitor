@@ -189,7 +189,7 @@ export class AnalyticsPage {
   private async loadAll(): Promise<void> {
     const [stations, alerts, rules] = await Promise.all([
       stationApi.getStations(),
-      stationApi.getAlerts(undefined, 500),
+      stationApi.getAlerts(undefined, undefined, undefined, 500),
       stationApi.getRules().catch(() => [] as Rule[]),
     ]);
     this.stationId = stations[0]?.id ?? '';

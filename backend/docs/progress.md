@@ -318,3 +318,110 @@
 - [ ] Reports PDF (QuestPDF)
 - [ ] Cloud sync (backup lên Supabase)
 - [ ] Monitoring Jetson CPU/GPU/Temp
+
+---
+
+## Phase 11 — Protocol + Hạ tầng ✅ (2026-04-05)
+
+### Quality Infrastructure
+- `DataQualityPipeline` — Range check → Spike detect (3σ) → Deadband suppression → Moving average window
+  - State per pointId: `_lastValue` dict, `_avgWindow` Queue<double>
+  - Returns `QualityResult { IsValid, Value, Reason }`
+- `CircuitBreaker` — Closed → Open → HalfOpen → Closed
+  - Threshold failures → Open, timeout → HalfOpen probe, 1 success → Closed
+  - Methods: `IsAllowed()`, `RecordSuccess()`, `RecordFailure()`
+- `RetryHelper` — `ExecuteAsync(action, maxRetries, baseDelay, logger, context, ct)`
+  - Exponential backoff: `delay * 2^(attempt-1) + jitter(0-500ms)`
+
+### Protocol Workers
+- `ModbusTcpWorker` — FC3 holding registers, circuit breaker, **sync helper** để tránh Span-in-async
+  - Device filter: `d.Type == "modbus_tcp" && d.Status != "maintenance"`
+  - Config JSON: `{ ip, port, unit_id, poll_interval_ms, registers: [{address, point_id, scale, unit}] }`
+  - `Connect(new IPEndPoint(IPAddress.Parse(ip), port))` — FluentModbus 5.2.0 API
+- `ModbusRtuWorker` — shared client per port, SemaphoreSlim mutex
+  - Set `BaudRate`/`Parity`/`StopBits` thành properties trước, rồi `Connect(portName)`
+  - Không có `DataBits` property trên `ModbusRtuClient`
+- `MqttSubscriberWorker` — subscribe broker, auto-register device mới vào DB
+  - Config từ `SystemSettings.Key == "mqtt_config"` (JSON string)
+  - Payload: `{ device_id, point_id, value, unit }`
+  - Config class phải `internal` (không dùng `file` modifier — CS9051)
+- `Iec104Worker` — skeleton: TCP connect, STARTDT, General Interrogation
+  - Filter: `d.Type == "iec104" && d.Status != "maintenance"`
+
+### Camera Services
+- `OnvifService` — WS-Discovery UDP multicast 239.255.255.250:3702, GetSnapshotUri SOAP, PTZ
+- `HikvisionIsapiService` — Snapshot JPEG, PTZ continuous, event multipart stream, device info
+
+### Discovery & Testing
+- `AutoDiscoveryService` — ping sweep (parallel) → port scan (502/102/2404/1883/80/554) → Modbus handshake probe → ONVIF
+- `ProtocolConnectionTester` — `TestAsync(protocol, configJson, ct)` → `ProtocolTestResult`
+  - Supports: modbus_tcp, modbus_rtu, s7, iec104, ping
+  - **sync** `ReadModbusRegisters()` để tránh Span<T> in async
+- `ProtocolController` — 5 endpoints, `[Authorize(Roles = "admin,manager")]`
+
+### Infrastructure Additions
+- `PermissionService` — Operator filter theo `User.StationIds[]`
+- `StorageMonitorWorker` — cảnh báo disk < 10% (alarm), < 5% (critical), dedup 6h/12h
+- `RuleTriggerLog` — ghi log khi rule trigger trong `RuleEvaluationWorker`
+- `AuditLogController` mở rộng — username join, filter from/to, tabs notify + rule-triggers
+- `PATCH /api/v1/rules/{id}/toggle`, `GET /api/v1/alerts/export`, `GET /api/v1/history/export`
+
+### Simulators (Project riêng — KHÔNG ghi DB)
+- `StationMonitor.Simulators` — console app, không ref Api/Data projects
+- `ModbusTcpSimulator` — raw TcpListener (không dùng FluentModbus server — API thay đổi), 7 registers, big-endian
+- `MqttSimulator` — MQTTnet 4.3.7.1207, 6 sensor points, publish mỗi 5s
+- `Iec104Simulator` — TCP server, STARTDT con (0x0B), GI response, spontaneous update mỗi 5s
+- `ProtocolTestRunner` — 19/19 PASS, test ports 15020 + 12404 (tránh xung đột 502/2404)
+
+### Tests
+- `StationMonitor.Tests` — 47/47 unit tests PASS
+- Protocol self-tests — 19/19 PASS (không cần DB, không cần phần cứng)
+- `test-protocol.mjs` — 13 API test cases
+
+### Key bugs fixed (Phase 11)
+- CS9051: `file` class không dùng được trong method signature → đổi sang `internal`
+- CS8652: Span<T> không cross async/await → extract sync helper method
+- FluentModbus `Connect()` signature: phải dùng `IPEndPoint`, không phải `(string, int)`
+- `ModbusRtuClient.DataBits` không tồn tại — xóa
+- `Device.IsActive` không tồn tại → dùng `d.Status != "maintenance"`
+- `ModbusTcpServer` API FluentModbus 5.2.0 thay đổi → rewrite với raw TcpListener
+- `SensorReading.PointId` là `string`, không có `DataPoints` entity
+- `Math.Min(ushort, int)` ambiguous → cast explicit
+
+---
+
+## Phase 10 — Cloud Sync Supabase ✅ (2026-04-06)
+
+### Đã làm
+
+#### Supabase
+- Project: `https://nezuteiwukcheqpzitcn.supabase.co`
+- Bảng `alerts` + `maintenance_tasks` với RLS (anon SELECT, service_role INSERT/UPDATE)
+- Script: `D:\StationMonitor\supabase_setup.sql`
+
+#### Backend
+- `StationMonitor.Services/SupabaseService.cs` — HttpClient REST API wrapper
+- `StationMonitor.Workers/Polling/CloudSyncWorker.cs` — sync mỗi 5 phút, batch 50, retry 3 lần
+- `StationMonitor.Api/Controllers/SyncController.cs` — status + trigger endpoints
+- `StationMonitor.Workers/Polling/RuleEvaluationWorker.cs` — hook thêm SyncQueue khi tạo Alert
+- `appsettings.json` — section `Supabase`: Url, ServiceKey, AnonKey
+
+#### Frontend
+- `SettingsPage.ts` — tab "Cloud Sync" (tab thứ 5)
+- `StationApiService.ts` — `getSyncStatus()`, `triggerSync()`, interface `SyncStatus`
+
+#### API mới
+- `GET /api/v1/sync/status` → `{ isConfigured, pendingCount, sentCount, failedCount, lastSyncAt, supabaseUrl }`
+- `POST /api/v1/sync/trigger` (admin) → reset failed items, trigger sync sớm
+
+### Cách test
+```bash
+# 1. Xem trạng thái
+curl -H "Authorization: Bearer <token>" http://localhost:5056/api/v1/sync/status
+
+# 2. Trigger sync ngay
+curl -X POST -H "Authorization: Bearer <token>" http://localhost:5056/api/v1/sync/trigger
+
+# 3. Kiểm tra Supabase
+# → supabase.com/dashboard/project/nezuteiwukcheqpzitcn/editor → bảng alerts
+```

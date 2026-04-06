@@ -15,7 +15,7 @@ export class SettingsPage {
 
       <!-- Settings inner tab nav -->
       <div class="settings-tabs">
-        ${['Cài đặt chung', 'Thông báo', 'Database & Backup', 'Giao diện'].map((t, i) =>
+        ${['Cài đặt chung', 'Thông báo', 'Database & Backup', 'Giao diện', 'Cloud Sync'].map((t, i) =>
       `<div class="stab ${i === 0 ? 'active' : ''}" data-stab="${i}">${t}</div>`).join('')}
       </div>
 
@@ -137,6 +137,51 @@ export class SettingsPage {
         </div>
       </div>
 
+      <!-- Tab 4: Cloud Sync -->
+      <div id="stab-4" class="stab-content admin-card" style="padding:20px;display:none">
+        <div class="card-title">CLOUD SYNC — SUPABASE</div>
+
+        <div id="syncStatusBox" style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px;">
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#38bdf8" id="sync_pending">—</div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:4px">CHỜ SYNC</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#10b981" id="sync_sent">—</div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:4px">ĐÃ SYNC</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;text-align:center">
+            <div style="font-size:1.6rem;font-weight:700;color:#ef4444" id="sync_failed">—</div>
+            <div style="font-size:0.72rem;color:#94a3b8;margin-top:4px">LỖI</div>
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:16px;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+            <span style="font-size:0.72rem;font-weight:700;color:#94a3b8;text-transform:uppercase">Trạng thái kết nối</span>
+            <span id="sync_status_badge" class="tag">Đang tải...</span>
+          </div>
+          <div style="font-size:0.82rem;color:#64748b">
+            <div>Supabase URL: <code id="sync_url" style="color:#7dd3fc">—</code></div>
+            <div style="margin-top:6px">Lần sync cuối: <span id="sync_last" style="color:#94a3b8">—</span></div>
+            <div style="margin-top:6px;font-size:0.72rem;color:#475569">
+              Tự động sync mỗi 5 phút. Sync Alerts và Maintenance Tasks lên Supabase cloud.
+            </div>
+          </div>
+        </div>
+
+        <div style="display:flex;gap:10px;align-items:center;">
+          <button id="syncNowBtn" class="btn-industrial btn-primary">⬆ Sync ngay</button>
+          <button id="refreshSyncBtn" class="btn-industrial">↻ Làm mới</button>
+          <span id="syncActionStatus" style="font-size:.82rem;"></span>
+        </div>
+
+        <div style="margin-top:20px;padding:12px 16px;background:rgba(56,189,248,0.06);border:1px solid rgba(56,189,248,0.15);border-radius:8px;font-size:0.72rem;color:#7dd3fc;">
+          <b>Dùng cho mobile app:</b> Anon key để mobile đọc data từ Supabase không cần VPN vào trạm.<br>
+          Anon key: <code id="sync_anon_hint" style="color:#94a3b8;font-size:0.68rem;">sb_publishable_****</code>
+        </div>
+      </div>
+
       <!-- Tab 3: Giao diện -->
       <div id="stab-3" class="stab-content admin-card" style="padding:20px;display:none">
         <div class="card-title">CÀI ĐẶT GIAO DIỆN</div>
@@ -159,7 +204,39 @@ export class SettingsPage {
     this.bindTabSwitching();
     await this.loadSettings();
     await this.loadSmtpConfig();
+    await this.loadSyncStatus();
     this.bindEvents();
+    this.applyActiveTheme();
+  }
+
+  private applyActiveTheme(): void {
+    const saved = localStorage.getItem('station-theme') || 'dark';
+    document.querySelectorAll('.theme-option').forEach(o => {
+      o.classList.toggle('active', (o as HTMLElement).dataset.theme === saved);
+    });
+  }
+
+  private async loadSyncStatus(): Promise<void> {
+    try {
+      const data = await stationApi.getSyncStatus();
+      const badge = document.getElementById('sync_status_badge')!;
+      if (data.isConfigured) {
+        badge.textContent = '✓ Đã kết nối';
+        badge.style.background = 'rgba(16,185,129,0.15)';
+        badge.style.color = '#10b981';
+      } else {
+        badge.textContent = '✗ Chưa cấu hình';
+        badge.style.background = 'rgba(239,68,68,0.15)';
+        badge.style.color = '#ef4444';
+      }
+      const el = (id: string) => document.getElementById(id);
+      if (el('sync_pending')) el('sync_pending')!.textContent = String(data.pendingCount ?? 0);
+      if (el('sync_sent')) el('sync_sent')!.textContent = String(data.sentCount ?? 0);
+      if (el('sync_failed')) el('sync_failed')!.textContent = String(data.failedCount ?? 0);
+      if (el('sync_url')) el('sync_url')!.textContent = data.supabaseUrl ?? '—';
+      if (el('sync_last')) el('sync_last')!.textContent = data.lastSyncAt
+        ? new Date(data.lastSyncAt).toLocaleString('vi-VN') : 'Chưa có';
+    } catch { /* bỏ qua nếu chưa có endpoint */ }
   }
 
   private bindTabSwitching(): void {
@@ -180,12 +257,12 @@ export class SettingsPage {
       if (statusEl) statusEl.style.display = 'none';
 
       const polling = document.getElementById('s_polling') as HTMLInputElement;
-      const email   = document.getElementById('s_email')   as HTMLInputElement;
-      const tz      = document.getElementById('s_timezone') as HTMLSelectElement;
+      const email = document.getElementById('s_email') as HTMLInputElement;
+      const tz = document.getElementById('s_timezone') as HTMLSelectElement;
 
       if (polling) polling.value = this.settings['polling_interval_s'] ?? '3';
-      if (email)   email.value   = this.settings['alert_email'] ?? '';
-      if (tz)      tz.value      = this.settings['timezone'] ?? 'Asia/Ho_Chi_Minh';
+      if (email) email.value = this.settings['alert_email'] ?? '';
+      if (tz) tz.value = this.settings['timezone'] ?? 'Asia/Ho_Chi_Minh';
     } catch {
       if (statusEl) statusEl.textContent = 'Không thể tải cài đặt từ server';
     }
@@ -208,9 +285,9 @@ export class SettingsPage {
   private bindEvents(): void {
     document.getElementById('saveSettingsBtn')?.addEventListener('click', async () => {
       const polling = (document.getElementById('s_polling') as HTMLInputElement).value;
-      const email   = (document.getElementById('s_email')   as HTMLInputElement).value;
-      const tz      = (document.getElementById('s_timezone') as HTMLSelectElement).value;
-      const status  = document.getElementById('saveStatus')!;
+      const email = (document.getElementById('s_email') as HTMLInputElement).value;
+      const tz = (document.getElementById('s_timezone') as HTMLSelectElement).value;
+      const status = document.getElementById('saveStatus')!;
 
       try {
         await Promise.all([
@@ -229,11 +306,11 @@ export class SettingsPage {
 
     // ── Tab Thông báo ──────────────────────────────────────────
     document.getElementById('saveSmtpBtn')?.addEventListener('click', async () => {
-      const host   = (document.getElementById('s_smtp_host') as HTMLInputElement).value.trim();
-      const port   = (document.getElementById('s_smtp_port') as HTMLInputElement).value.trim();
-      const user   = (document.getElementById('s_smtp_user') as HTMLInputElement).value.trim();
-      const pass   = (document.getElementById('s_smtp_pass') as HTMLInputElement).value.trim();
-      const from   = (document.getElementById('s_smtp_from') as HTMLInputElement).value.trim();
+      const host = (document.getElementById('s_smtp_host') as HTMLInputElement).value.trim();
+      const port = (document.getElementById('s_smtp_port') as HTMLInputElement).value.trim();
+      const user = (document.getElementById('s_smtp_user') as HTMLInputElement).value.trim();
+      const pass = (document.getElementById('s_smtp_pass') as HTMLInputElement).value.trim();
+      const from = (document.getElementById('s_smtp_from') as HTMLInputElement).value.trim();
       const status = document.getElementById('smtpSaveStatus')!;
 
       try {
@@ -255,9 +332,9 @@ export class SettingsPage {
     });
 
     document.getElementById('testEmailBtn')?.addEventListener('click', async () => {
-      const email  = (document.getElementById('s_test_email') as HTMLInputElement).value.trim();
+      const email = (document.getElementById('s_test_email') as HTMLInputElement).value.trim();
       const status = document.getElementById('testEmailStatus')!;
-      const btn    = document.getElementById('testEmailBtn') as HTMLButtonElement;
+      const btn = document.getElementById('testEmailBtn') as HTMLButtonElement;
       if (!email) { status.textContent = 'Nhập email trước'; status.style.color = '#f59e0b'; return; }
 
       btn.disabled = true;
@@ -286,6 +363,31 @@ export class SettingsPage {
       this.showToast('✓ Backup thành công', 'success');
     });
 
+    // ── Tab Cloud Sync ──────────────────────────────────────────
+    document.getElementById('syncNowBtn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('syncNowBtn') as HTMLButtonElement;
+      const status = document.getElementById('syncActionStatus')!;
+      btn.disabled = true;
+      btn.textContent = '⏳ Đang kích hoạt...';
+      try {
+        const res = await stationApi.triggerSync();
+        status.textContent = '✓ ' + res.message;
+        status.style.color = '#10b981';
+        setTimeout(() => this.loadSyncStatus(), 2000);
+      } catch (e) {
+        status.textContent = '✗ ' + (e as Error).message;
+        status.style.color = '#ef4444';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '⬆ Sync ngay';
+        setTimeout(() => { status.textContent = ''; }, 5000);
+      }
+    });
+
+    document.getElementById('refreshSyncBtn')?.addEventListener('click', async () => {
+      await this.loadSyncStatus();
+    });
+
     document.querySelectorAll('.theme-option').forEach(opt => {
       opt.addEventListener('click', () => {
         const theme = (opt as HTMLElement).dataset.theme || 'default';
@@ -308,5 +410,5 @@ export class SettingsPage {
     setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
   }
 
-  destroy(): void {}
+  destroy(): void { }
 }

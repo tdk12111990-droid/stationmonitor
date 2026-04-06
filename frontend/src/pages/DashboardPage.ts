@@ -282,8 +282,8 @@ export class DashboardPage {
     await this.refreshAlerts();
 
     // Polling
-    this.kpiInterval    = setInterval(() => this.refreshKpi(), 5000);
-    this.alertInterval  = setInterval(() => this.refreshAlerts(), 15000);
+    this.kpiInterval = setInterval(() => this.refreshKpi(), 5000);
+    this.alertInterval = setInterval(() => this.refreshAlerts(), 15000);
     this.healthInterval = setInterval(() => this.refreshHealth(), 120000); // mỗi 2 phút
     await this.refreshHealth();
     this.positionHealthWidget();
@@ -416,7 +416,7 @@ export class DashboardPage {
           <div style="font-size:0.62rem;color:#475569;margin-top:4px;">Click để xem chi tiết</div>`;
         const vp = document.getElementById('sldViewport')!.getBoundingClientRect();
         tip.style.left = (e.clientX - vp.left + 14) + 'px';
-        tip.style.top  = (e.clientY - vp.top  - 12) + 'px';
+        tip.style.top = (e.clientY - vp.top - 12) + 'px';
         tip.style.display = 'block';
       });
       g.addEventListener('mouseleave', () => {
@@ -466,7 +466,7 @@ export class DashboardPage {
       item.addEventListener('dragstart', (e: Event) => {
         const de = e as DragEvent;
         const el = item as HTMLElement;
-        de.dataTransfer!.setData('deviceId',   el.dataset['deviceId']   ?? '');
+        de.dataTransfer!.setData('deviceId', el.dataset['deviceId'] ?? '');
         de.dataTransfer!.setData('deviceName', el.dataset['deviceName'] ?? '');
         de.dataTransfer!.setData('deviceType', el.dataset['deviceType'] ?? '');
         el.style.opacity = '0.4';
@@ -490,7 +490,7 @@ export class DashboardPage {
       if (!this.editMode) return;
       e.preventDefault();
 
-      const deviceId   = e.dataTransfer!.getData('deviceId');
+      const deviceId = e.dataTransfer!.getData('deviceId');
       const deviceName = e.dataTransfer!.getData('deviceName');
       if (!deviceId || !this.stationId) return;
 
@@ -567,7 +567,7 @@ export class DashboardPage {
         const nx = parseFloat(circ.getAttribute('cx')!);
         const ny = parseFloat(circ.getAttribute('cy')!);
         // Lưu vị trí mới lên API
-        await stationApi.updateSldPoint(active.pointId, { x: nx, y: ny }).catch(() => {});
+        await stationApi.updateSldPoint(active.pointId, { x: nx, y: ny }).catch(() => { });
         // Cập nhật local state
         const pt = this.sldPoints.find(p => p.id === active!.pointId);
         if (pt) { pt.x = nx; pt.y = ny; }
@@ -647,7 +647,7 @@ export class DashboardPage {
         this.renderSldPoints(this.sldPoints);
         await this.reloadDrawer();
         this.hideDotPanel();
-      } catch {}
+      } catch { }
     });
   }
 
@@ -669,9 +669,9 @@ export class DashboardPage {
     (document.getElementById('dep-r') as HTMLInputElement).value = String(pt.r);
 
     let left = clientX - viewport.left + 12;
-    let top  = clientY - viewport.top  - 10;
-    if (left + 220 > viewport.width)  left = clientX - viewport.left - 225;
-    if (top  + 280 > viewport.height) top  = clientY - viewport.top  - 280;
+    let top = clientY - viewport.top - 10;
+    if (left + 220 > viewport.width) left = clientX - viewport.left - 225;
+    if (top + 280 > viewport.height) top = clientY - viewport.top - 280;
     panel.style.left = left + 'px'; panel.style.top = top + 'px';
     panel.style.display = 'block';
   }
@@ -693,15 +693,15 @@ export class DashboardPage {
     if (!pt) return;
 
     const panel = document.getElementById('dot-data-panel')!;
-    const body  = document.getElementById('ddp-body')!;
+    const body = document.getElementById('ddp-body')!;
     (document.getElementById('ddp-title') as HTMLElement).textContent = pt.label;
 
     // Position
     const viewport = document.getElementById('sldViewport')!.getBoundingClientRect();
     let left = clientX - viewport.left + 14;
-    let top  = clientY - viewport.top  - 12;
-    if (left + 240 > viewport.width)  left = clientX - viewport.left - 245;
-    if (top  + 240 > viewport.height) top  = clientY - viewport.top  - 240;
+    let top = clientY - viewport.top - 12;
+    if (left + 240 > viewport.width) left = clientX - viewport.left - 245;
+    if (top + 240 > viewport.height) top = clientY - viewport.top - 240;
     panel.style.left = left + 'px'; panel.style.top = top + 'px';
     panel.style.display = 'block';
 
@@ -735,14 +735,14 @@ export class DashboardPage {
       nhiet_do_pha_1: 'Nhiệt độ Pha 1',
       nhiet_do_pha_2: 'Nhiệt độ Pha 2',
       nhiet_do_pha_3: 'Nhiệt độ Pha 3',
-      phong_dien:     'Phóng điện (PD)',
+      phong_dien: 'Phóng điện (PD)',
     };
     return map[pointId] ?? pointId;
   }
 
   private async loadSparkline(containerId: string, deviceId: string, pointId: string): Promise<void> {
     try {
-      const to   = new Date().toISOString();
+      const to = new Date().toISOString();
       const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
       const data = await stationApi.getHistory(deviceId, pointId, from, to, 60);
 
@@ -854,7 +854,7 @@ export class DashboardPage {
       const r = viewport.getBoundingClientRect();
       const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 0.96;
       this.vs = s;
-      this.vx = (r.width  - SLD_W * s) / 2;
+      this.vx = (r.width - SLD_W * s) / 2;
       this.vy = (r.height - SLD_H * s) / 2;
       apply();
     };
@@ -897,7 +897,7 @@ export class DashboardPage {
   // ── Collapse toggles ─────────────────────────────────────────
   private initCollapse(): void {
     const setup = (btnId: string, bodyId: string) => {
-      const btn  = document.getElementById(btnId);
+      const btn = document.getElementById(btnId);
       const body = document.getElementById(bodyId);
       if (!btn || !body) return;
       btn.addEventListener('click', () => {
@@ -921,8 +921,8 @@ export class DashboardPage {
     const BG = { R: 0.059, G: 0.090, B: 0.165 };
     document.getElementById('sld-color-picker')?.addEventListener('input', function () {
       const hex = (this as HTMLInputElement).value;
-      const R = parseInt(hex.slice(1,3),16)/255, G = parseInt(hex.slice(3,5),16)/255, B = parseInt(hex.slice(5,7),16)/255;
-      const m = [BG.R-R,0,0,0,R, 0,BG.G-G,0,0,G, 0,0,BG.B-B,0,B, 0,0,0,1,0].join(' ');
+      const R = parseInt(hex.slice(1, 3), 16) / 255, G = parseInt(hex.slice(3, 5), 16) / 255, B = parseInt(hex.slice(5, 7), 16) / 255;
+      const m = [BG.R - R, 0, 0, 0, R, 0, BG.G - G, 0, 0, G, 0, 0, BG.B - B, 0, B, 0, 0, 0, 1, 0].join(' ');
       document.getElementById('sld-color-matrix')?.setAttribute('values', m);
     });
   }
@@ -933,20 +933,20 @@ export class DashboardPage {
       const [points, devices, alerts] = await Promise.all([
         stationApi.getLatestPoints(this.stationId),
         this.stationId ? stationApi.getDevices(this.stationId) : Promise.resolve([]),
-        stationApi.getAlerts('open', 100),
+        stationApi.getAlerts('open', undefined, undefined, 100),
       ]);
 
       this.sensors = points;
 
       const temps = points.filter(p => p.pointId.startsWith('nhiet_do'));
-      const pd    = points.find(p => p.pointId === 'phong_dien');
+      const pd = points.find(p => p.pointId === 'phong_dien');
       const online = devices.filter(d => d.status === 'online').length;
 
       const rows = document.querySelectorAll<HTMLElement>('#floatKpi .kpi-row-item');
       const val = (i: number) => rows[i]?.querySelector('.kpi-val');
 
       if (temps.length) val(0)!.textContent = Math.max(...temps.map(p => p.value)).toFixed(1);
-      if (pd)           val(1)!.textContent = `${pd.value.toFixed(1)}`;
+      if (pd) val(1)!.textContent = `${pd.value.toFixed(1)}`;
       val(2)!.textContent = `${online}/${devices.length}`;
       val(3)!.textContent = String(alerts.length);
 
@@ -973,13 +973,13 @@ export class DashboardPage {
     const listEl = document.getElementById('dashAlertList');
     if (!listEl) return;
     try {
-      const alerts = await stationApi.getAlerts(undefined, 8);
+      const alerts = await stationApi.getAlerts(undefined, undefined, undefined, 8);
       if (alerts.length === 0) {
         listEl.innerHTML = '<div style="color:#94a3b8;font-size:12px;text-align:center;padding:20px;">Hệ thống ổn định</div>';
         return;
       }
       const levelColor = (l: string) => l === 'alarm' ? '#ef4444' : '#f59e0b';
-      const statusBg   = (s: string) => s === 'open' ? '#fef2f2' : s === 'acked' ? '#fffbeb' : '#f0fdf4';
+      const statusBg = (s: string) => s === 'open' ? '#fef2f2' : s === 'acked' ? '#fffbeb' : '#f0fdf4';
       listEl.innerHTML = alerts.map(a => `
         <div style="padding:6px 8px;border-left:3px solid ${levelColor(a.level)};
           background:${statusBg(a.status)};border-radius:0 4px 4px 0;margin-bottom:5px;">
@@ -990,21 +990,21 @@ export class DashboardPage {
           <div style="font-size:0.68rem;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${a.message}</div>
           <span style="font-size:0.62rem;font-weight:700;color:${levelColor(a.level)};">${a.status.toUpperCase()}</span>
         </div>`).join('');
-    } catch {}
+    } catch { }
   }
 
   // ── Filter dots ──────────────────────────────────────────────
   private applyDotFilter(): void {
     const thermal = (document.querySelector('[data-filter="thermal"]') as HTMLInputElement)?.checked;
-    const pd      = (document.querySelector('[data-filter="pd"]')      as HTMLInputElement)?.checked;
-    const camera  = (document.querySelector('[data-filter="camera"]')  as HTMLInputElement)?.checked;
+    const pd = (document.querySelector('[data-filter="pd"]') as HTMLInputElement)?.checked;
+    const camera = (document.querySelector('[data-filter="camera"]') as HTMLInputElement)?.checked;
 
     document.querySelectorAll<SVGGElement>('#dash-dots [data-device-type]').forEach(g => {
       const type = g.dataset['deviceType'] ?? '';
       let show = false;
-      if (camera  && type.startsWith('camera')) show = true;
+      if (camera && type.startsWith('camera')) show = true;
       if (thermal && type === 'plc_s7') show = true;
-      if (pd      && type === 'plc_s7') show = true;
+      if (pd && type === 'plc_s7') show = true;
       if (!type) show = true; // điểm không gắn thiết bị
       g.style.display = show ? '' : 'none';
     });
@@ -1077,11 +1077,11 @@ export class DashboardPage {
   }
 
   private positionHealthWidget(): void {
-    const kpi    = document.getElementById('floatKpi');
+    const kpi = document.getElementById('floatKpi');
     const health = document.getElementById('floatHealth');
     if (!kpi || !health) return;
     const kpiBottom = kpi.getBoundingClientRect().bottom;
-    const vpTop     = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
+    const vpTop = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
     health.style.top = (kpiBottom - vpTop + 8) + 'px';
   }
 

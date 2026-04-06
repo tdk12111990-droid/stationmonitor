@@ -165,10 +165,18 @@ class StationApiService {
     return apiMutate('DELETE', `/rules/${id}`);
   }
 
+  async toggleRule(id: string): Promise<{ id: string; enabled: boolean }> {
+    return apiMutate('PATCH', `/rules/${id}/toggle`, {});
+  }
+
   // ── Alerts ────────────────────────────────────────────────
-  async getAlerts(status?: string, limit = 100): Promise<AlertItem[]> {
-    const q = status ? `?status=${status}&limit=${limit}` : `?limit=${limit}`;
-    return apiFetch<AlertItem[]>(`/alerts${q}`);
+  async getAlerts(status?: string, from?: string, to?: string, limit = 200): Promise<AlertItem[]> {
+    const params = new URLSearchParams();
+    if (status) params.set('status', status);
+    if (from)   params.set('from', from);
+    if (to)     params.set('to', to);
+    params.set('limit', String(limit));
+    return apiFetch<AlertItem[]>(`/alerts?${params.toString()}`);
   }
 
   async ackAlert(id: string, note?: string): Promise<void> {
@@ -416,6 +424,15 @@ class StationApiService {
     if (stationId) params.set('stationId', stationId);
     return apiFetch<TrendItem[]>(`/analytics/trend?${params}`);
   }
+
+  // ── Cloud Sync ────────────────────────────────────────────
+  async getSyncStatus(): Promise<SyncStatus> {
+    return apiFetch<SyncStatus>('/sync/status');
+  }
+
+  async triggerSync(): Promise<{ message: string }> {
+    return apiMutate('POST', '/sync/trigger');
+  }
 }
 
 export interface Rule {
@@ -574,6 +591,15 @@ export interface TrendItem {
   sampleCount: number;
   latestValue: number;
   unit: string;
+}
+
+export interface SyncStatus {
+  isConfigured: boolean;
+  pendingCount: number;
+  sentCount: number;
+  failedCount: number;
+  lastSyncAt?: string;
+  supabaseUrl?: string;
 }
 
 export const stationApi = new StationApiService();

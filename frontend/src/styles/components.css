@@ -214,9 +214,14 @@
     padding: 10px 14px;
     border-radius: 8px;
     border: 1px solid var(--admin-border, #1e293b);
-    background: rgba(255, 255, 255, .04);
+    background: #0f172a; /* Solid dark background for better dropdown visibility */
     color: var(--admin-text, #e2e8f0);
     font-size: .85rem;
+}
+
+.form-select option {
+    background: #1e293b;
+    color: #e2e8f0;
 }
 
 .form-input:focus,

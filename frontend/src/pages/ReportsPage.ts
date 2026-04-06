@@ -20,14 +20,14 @@ const POINTS = [
   { id: 'nhiet_do_pha_1', label: 'Nhiệt độ Pha 1', unit: '°C', color: '#3b82f6' },
   { id: 'nhiet_do_pha_2', label: 'Nhiệt độ Pha 2', unit: '°C', color: '#10b981' },
   { id: 'nhiet_do_pha_3', label: 'Nhiệt độ Pha 3', unit: '°C', color: '#f59e0b' },
-  { id: 'phong_dien',     label: 'Phóng điện PD',  unit: 'dB',  color: '#a855f7' },
+  { id: 'phong_dien', label: 'Phóng điện PD', unit: 'dB', color: '#a855f7' },
 ];
 
 export class ReportsPage {
   private stationId = '';
   private alerts: AlertItem[] = [];
   private previewChart: Chart | null = null;   // Tab 1 export chart
-  private inlineChart:  Chart | null = null;   // Tab 2 report inline chart
+  private inlineChart: Chart | null = null;   // Tab 2 report inline chart
   private lastReportHtml = '';
   private isGenerating = false;
   private isExporting = false;
@@ -189,10 +189,10 @@ export class ReportsPage {
               <label style="font-size:0.75rem;color:#94a3b8;font-weight:600;">Loại báo cáo</label>
               <div style="display:flex;flex-direction:column;gap:4px;">
                 ${[
-                  ['daily',   '📅', 'Báo cáo hàng ngày'],
-                  ['monthly', '📆', 'Báo cáo hàng tháng'],
-                  ['event',   '⚡', 'Báo cáo sự cố'],
-                ].map(([val, icon, lbl]) => `
+        ['daily', '📅', 'Báo cáo hàng ngày'],
+        ['monthly', '📆', 'Báo cáo hàng tháng'],
+        ['event', '⚡', 'Báo cáo sự cố'],
+      ].map(([val, icon, lbl]) => `
                   <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
                     padding:8px 10px;border-radius:6px;border:1px solid ${val === 'daily' ? '#2563eb' : '#334155'};
                     background:${val === 'daily' ? 'rgba(37,99,235,0.1)' : 'transparent'};
@@ -222,12 +222,12 @@ export class ReportsPage {
             <div style="display:flex;flex-direction:column;gap:6px;">
               <label style="font-size:0.75rem;color:#94a3b8;font-weight:600;">Nội dung</label>
               ${[
-                ['rp-chk-stats',   'Thống kê cảnh báo (KPI)'],
-                ['rp-chk-trend',   'Biểu đồ xu hướng nhiệt độ'],
-                ['rp-chk-alerts',  'Danh sách sự kiện'],
-                ['rp-chk-pd',      'Phân tích phóng điện PD'],
-                ['rp-chk-sensor',  'Bảng thống kê cảm biến'],
-              ].map(([id, lbl]) => `
+        ['rp-chk-stats', 'Thống kê cảnh báo (KPI)'],
+        ['rp-chk-trend', 'Biểu đồ xu hướng nhiệt độ'],
+        ['rp-chk-alerts', 'Danh sách sự kiện'],
+        ['rp-chk-pd', 'Phân tích phóng điện PD'],
+        ['rp-chk-sensor', 'Bảng thống kê cảm biến'],
+      ].map(([id, lbl]) => `
                 <label style="display:flex;align-items:center;gap:8px;cursor:pointer;
                   font-size:0.78rem;color:#cbd5e1;padding:3px 0;">
                   <input type="checkbox" id="${id}" checked style="accent-color:#2563eb;">
@@ -283,10 +283,10 @@ export class ReportsPage {
     try {
       const [stations, alerts] = await Promise.all([
         stationApi.getStations(),
-        stationApi.getAlerts(undefined, 500),
+        stationApi.getAlerts(undefined, undefined, undefined, 500),
       ]);
       this.stationId = stations[0]?.id ?? '';
-      this.alerts    = alerts;
+      this.alerts = alerts;
     } catch { /* ignore if backend offline */ }
 
     this.bindTabs();
@@ -348,13 +348,13 @@ export class ReportsPage {
       this.setInfo('Chưa kết nối backend', 'error');
       return;
     }
-    const from  = (document.getElementById('ex-from') as HTMLInputElement).value;
-    const to    = (document.getElementById('ex-to')   as HTMLInputElement).value;
-    const intv  = (document.getElementById('ex-interval') as HTMLSelectElement).value;
+    const from = (document.getElementById('ex-from') as HTMLInputElement).value;
+    const to = (document.getElementById('ex-to') as HTMLInputElement).value;
+    const intv = (document.getElementById('ex-interval') as HTMLSelectElement).value;
     const points = this.getSelectedPoints();
 
     if (!points.length) { this.setInfo('Chọn ít nhất 1 cảm biến', 'error'); return; }
-    if (!from || !to)   { this.setInfo('Chọn đầy đủ ngày', 'error'); return; }
+    if (!from || !to) { this.setInfo('Chọn đầy đủ ngày', 'error'); return; }
 
     const previewBtn = document.getElementById('ex-preview-btn') as HTMLButtonElement;
     previewBtn.disabled = true;
@@ -412,10 +412,10 @@ export class ReportsPage {
       return `<tr style="background:${bg};">
         <td style="padding:6px 12px;color:#94a3b8;white-space:nowrap;border-bottom:1px solid #1e293b;">${timeStr}</td>
         ${POINTS.map(p => {
-          const v = row[p.id];
-          const txt = v !== null && v !== undefined ? (v as number).toFixed(1) : '—';
-          return `<td style="padding:6px 12px;text-align:right;color:${v !== null ? p.color : '#334155'};border-bottom:1px solid #1e293b;">${txt}</td>`;
-        }).join('')}
+        const v = row[p.id];
+        const txt = v !== null && v !== undefined ? (v as number).toFixed(1) : '—';
+        return `<td style="padding:6px 12px;text-align:right;color:${v !== null ? p.color : '#334155'};border-bottom:1px solid #1e293b;">${txt}</td>`;
+      }).join('')}
       </tr>`;
     }).join('');
   }
@@ -444,17 +444,21 @@ export class ReportsPage {
 
     this.previewChart = new Chart(canvas.getContext('2d')!, {
       type: 'line',
-      data: { datasets: datasets.map(ds => ({
-        ...ds,
-        yAxisID: ds.label.includes('dB') ? 'yPd' : 'yTemp',
-      })) },
+      data: {
+        datasets: datasets.map(ds => ({
+          ...ds,
+          yAxisID: ds.label.includes('dB') ? 'yPd' : 'yTemp',
+        }))
+      },
       options: {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { labels: { color: '#94a3b8', boxWidth: 12, font: { size: 10 } } } },
         scales: {
-          x: { type: 'time', time: { tooltipFormat: 'dd/MM HH:mm' },
+          x: {
+            type: 'time', time: { tooltipFormat: 'dd/MM HH:mm' },
             ticks: { color: '#64748b', maxTicksLimit: 8 },
-            grid: { color: 'rgba(51,65,85,0.3)' } },
+            grid: { color: 'rgba(51,65,85,0.3)' }
+          },
           yTemp: {
             display: hasTemp, position: 'left',
             ticks: { color: '#3b82f6' }, grid: { color: 'rgba(51,65,85,0.3)' },
@@ -489,9 +493,9 @@ export class ReportsPage {
     try {
       if (!this.stationId) throw new Error('Chưa kết nối backend');
 
-      const from   = (document.getElementById('ex-from') as HTMLInputElement).value;
-      const to     = (document.getElementById('ex-to') as HTMLInputElement).value;
-      const intv   = (document.getElementById('ex-interval') as HTMLSelectElement).value;
+      const from = (document.getElementById('ex-from') as HTMLInputElement).value;
+      const to = (document.getElementById('ex-to') as HTMLInputElement).value;
+      const intv = (document.getElementById('ex-interval') as HTMLSelectElement).value;
       const points = this.getSelectedPoints();
       const inclAlerts = (document.getElementById('ex-alerts') as HTMLInputElement)?.checked;
 
@@ -562,7 +566,7 @@ export class ReportsPage {
       // ── Sheet 3: Cảnh báo (nếu chọn) ──────────────────
       if (inclAlerts && this.alerts.length) {
         const fromMs = new Date(from).getTime();
-        const toMs   = new Date(to).getTime();
+        const toMs = new Date(to).getTime();
         const filtered = this.alerts.filter(a => {
           const t = new Date(a.triggeredAt).getTime();
           return t >= fromMs && t <= toMs;
@@ -583,7 +587,7 @@ export class ReportsPage {
 
       // ── Download ───────────────────────────────────────
       const fromDate = from.split('T')[0]?.replace(/-/g, '') ?? '';
-      const toDate   = to.split('T')[0]?.replace(/-/g, '') ?? '';
+      const toDate = to.split('T')[0]?.replace(/-/g, '') ?? '';
       XLSX.writeFile(wb, `SensorData_${fromDate}-${toDate}.xlsx`);
     } catch (err) {
       this.setInfo(`Lỗi xuất XLSX: ${err}`, 'error');
@@ -623,7 +627,7 @@ export class ReportsPage {
     const today = new Date();
     const isoDate = (d: Date) => d.toISOString().split('T')[0]!;
     const fromEl = document.getElementById('rp-from') as HTMLInputElement;
-    const toEl   = document.getElementById('rp-to') as HTMLInputElement;
+    const toEl = document.getElementById('rp-to') as HTMLInputElement;
     toEl.value = isoDate(today);
     if (type === 'daily') {
       const d = new Date(today); d.setDate(d.getDate() - 1);
@@ -659,7 +663,7 @@ export class ReportsPage {
     try {
       const type = (document.querySelector('input[name="rp-type"]:checked') as HTMLInputElement)?.value ?? 'daily';
       const from = (document.getElementById('rp-from') as HTMLInputElement).value;
-      const to   = (document.getElementById('rp-to') as HTMLInputElement).value;
+      const to = (document.getElementById('rp-to') as HTMLInputElement).value;
 
       if (!from || !to) throw new Error('Chọn đầy đủ ngày');
       if (new Date(from) > new Date(to)) throw new Error('Ngày bắt đầu phải trước ngày kết thúc');
@@ -667,7 +671,7 @@ export class ReportsPage {
 
       const [histRaw, alertsInRange, report] = await Promise.all([
         stationApi.getHistoryBulk(this.stationId, `${from}T00:00`, `${to}T23:59`, 60),
-        stationApi.getAlerts(undefined, 500),
+        stationApi.getAlerts(undefined, undefined, undefined, 500),
         stationApi.generateReport({
           stationId: this.stationId, type, from: `${from}T00:00:00`, to: `${to}T23:59:59`,
         }),
@@ -726,8 +730,8 @@ export class ReportsPage {
       event: 'BÁO CÁO SỰ CỐ',
     };
 
-    const alarmCount  = alerts.filter(a => a.level === 'alarm').length;
-    const warnCount   = alerts.filter(a => a.level === 'warning').length;
+    const alarmCount = alerts.filter(a => a.level === 'alarm').length;
+    const warnCount = alerts.filter(a => a.level === 'warning').length;
     const closedCount = alerts.filter(a => a.status === 'closed').length;
 
     // Sensor stats
@@ -742,11 +746,11 @@ export class ReportsPage {
       };
     });
 
-    const showStats  = (document.getElementById('rp-chk-stats')  as HTMLInputElement)?.checked !== false;
-    const showTrend  = (document.getElementById('rp-chk-trend')   as HTMLInputElement)?.checked !== false;
-    const showAlerts = (document.getElementById('rp-chk-alerts')  as HTMLInputElement)?.checked !== false;
-    const showPd     = (document.getElementById('rp-chk-pd')      as HTMLInputElement)?.checked !== false;
-    const showSensor = (document.getElementById('rp-chk-sensor')  as HTMLInputElement)?.checked !== false;
+    const showStats = (document.getElementById('rp-chk-stats') as HTMLInputElement)?.checked !== false;
+    const showTrend = (document.getElementById('rp-chk-trend') as HTMLInputElement)?.checked !== false;
+    const showAlerts = (document.getElementById('rp-chk-alerts') as HTMLInputElement)?.checked !== false;
+    const showPd = (document.getElementById('rp-chk-pd') as HTMLInputElement)?.checked !== false;
+    const showSensor = (document.getElementById('rp-chk-sensor') as HTMLInputElement)?.checked !== false;
 
     // PD stats
     const pdVals = hist.filter(r => r.pointId === 'phong_dien').map(r => r.value);
@@ -774,10 +778,10 @@ export class ReportsPage {
       <!-- KPI -->
       <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">
         ${[
-          { label: 'Tổng cảnh báo',    value: alerts.length, color: '#1a56db' },
-          { label: 'Nguy cấp (Alarm)', value: alarmCount,    color: '#e02424' },
-          { label: 'Cảnh báo',         value: warnCount,     color: '#d97706' },
-          { label: 'Đã xử lý',         value: closedCount,   color: '#059669' },
+          { label: 'Tổng cảnh báo', value: alerts.length, color: '#1a56db' },
+          { label: 'Nguy cấp (Alarm)', value: alarmCount, color: '#e02424' },
+          { label: 'Cảnh báo', value: warnCount, color: '#d97706' },
+          { label: 'Đã xử lý', value: closedCount, color: '#059669' },
         ].map(k => `
           <div style="border:1px solid #e5e7eb;border-left:4px solid ${k.color};border-radius:6px;padding:12px;">
             <div style="font-size:10px;font-weight:700;color:#6b7280;text-transform:uppercase;">${k.label}</div>
@@ -870,11 +874,11 @@ export class ReportsPage {
           </thead>
           <tbody>
             ${[...alerts].sort((a, b) => new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime())
-              .slice(0, 30).map((a, i) => {
-                const isAlm = a.level === 'alarm';
-                const lvlColor = isAlm ? '#e02424' : '#d97706';
-                const lvlBg    = isAlm ? '#fee2e2' : '#fef3c7';
-                return `
+          .slice(0, 30).map((a, i) => {
+            const isAlm = a.level === 'alarm';
+            const lvlColor = isAlm ? '#e02424' : '#d97706';
+            const lvlBg = isAlm ? '#fee2e2' : '#fef3c7';
+            return `
                 <tr style="background:${i % 2 === 0 ? '#fff' : '#f9fafb'};">
                   <td style="padding:5px 8px;color:#6b7280;white-space:nowrap;border:1px solid #e5e7eb;">${fmtDt(a.triggeredAt)}</td>
                   <td style="padding:5px 8px;border:1px solid #e5e7eb;">${a.message || '—'}</td>
@@ -884,7 +888,7 @@ export class ReportsPage {
                   </td>
                   <td style="padding:5px 8px;text-align:center;color:#6b7280;border:1px solid #e5e7eb;">${a.status}</td>
                 </tr>`;
-              }).join('')}
+          }).join('')}
           </tbody>
         </table>
       </div>` : showAlerts ? `
@@ -929,24 +933,30 @@ export class ReportsPage {
         responsive: true, maintainAspectRatio: false, animation: false,
         plugins: { legend: { labels: { color: '#374151', boxWidth: 12, font: { size: 10 } } } },
         scales: {
-          x: { type: 'time', time: { tooltipFormat: 'dd/MM HH:mm' },
+          x: {
+            type: 'time', time: { tooltipFormat: 'dd/MM HH:mm' },
             ticks: { color: '#6b7280', maxTicksLimit: 8 },
-            grid: { color: '#f3f4f6' } },
-          yTemp: { position: 'left',
+            grid: { color: '#f3f4f6' }
+          },
+          yTemp: {
+            position: 'left',
             ticks: { color: '#3b82f6' }, grid: { color: '#f3f4f6' },
-            title: { display: true, text: '°C', color: '#6b7280', font: { size: 10 } } },
-          yPd: { position: 'right',
+            title: { display: true, text: '°C', color: '#6b7280', font: { size: 10 } }
+          },
+          yPd: {
+            position: 'right',
             ticks: { color: '#a855f7' }, grid: { display: false },
-            title: { display: true, text: 'dB', color: '#6b7280', font: { size: 10 } } },
+            title: { display: true, text: 'dB', color: '#6b7280', font: { size: 10 } }
+          },
         },
       } as any,
     });
   }
 
   private enableReportBtns(): void {
-    const serverBtn  = document.getElementById('rp-dl-server-btn') as HTMLButtonElement;
+    const serverBtn = document.getElementById('rp-dl-server-btn') as HTMLButtonElement;
     const browserBtn = document.getElementById('rp-dl-browser-btn') as HTMLButtonElement;
-    serverBtn.disabled  = false;
+    serverBtn.disabled = false;
     serverBtn.style.opacity = '1';
     serverBtn.style.cursor = 'pointer';
     serverBtn.style.color = '#60a5fa';
@@ -965,8 +975,8 @@ export class ReportsPage {
     btn.disabled = true;
     try {
       const blob = await stationApi.downloadReport(this.currentReportId);
-      const url  = URL.createObjectURL(blob);
-      const a    = document.createElement('a');
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
       a.href = url;
       a.download = `BaoCao_${new Date().toISOString().split('T')[0]}.pdf`;
       a.click();
@@ -1016,7 +1026,7 @@ export class ReportsPage {
 
       container.innerHTML = reports.slice(0, 20).map(r => {
         const from = r.periodFrom ? new Date(r.periodFrom).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '';
-        const to   = r.periodTo   ? new Date(r.periodTo).toLocaleDateString('vi-VN',   { day: '2-digit', month: '2-digit' }) : '';
+        const to = r.periodTo ? new Date(r.periodTo).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit' }) : '';
         const color = typeColors[r.type] ?? '#64748b';
         return `
           <div style="display:flex;align-items:center;gap:8px;padding:7px 8px;
@@ -1048,8 +1058,8 @@ export class ReportsPage {
           const id = (btn as HTMLElement).dataset.id!;
           try {
             const blob = await stationApi.downloadReport(id);
-            const url  = URL.createObjectURL(blob);
-            const a    = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
             a.href = url; a.download = `BaoCao_${id.slice(0, 8)}.pdf`; a.click();
             URL.revokeObjectURL(url);
           } catch (err) { alert(`Lỗi: ${err}`); }
@@ -1062,7 +1072,7 @@ export class ReportsPage {
           const id = (btn as HTMLElement).dataset.id!;
           const ok = await confirmDialog({ title: 'Xóa báo cáo', message: 'Xóa báo cáo này?', danger: true });
           if (!ok) return;
-          await stationApi.deleteReport(id).catch(() => {});
+          await stationApi.deleteReport(id).catch(() => { });
           await this.loadReportHistory();
         });
       });

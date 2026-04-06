@@ -117,5 +117,155 @@
 - Camera 153 phóng điện: config đã fix, chờ restart go2rtc để verify video
 
 ### Todo còn lại
-- [ ] Restart go2rtc để camera 153 hiển thị video (go2rtc.yaml đã update)
-- [ ] Phase 3: Rule Engine + Alerts + Cloudflare Tunnel
+- [x] Restart go2rtc để camera 153 hiển thị video (go2rtc.yaml đã update)
+- [x] Phase 3-9, 11: Hoàn thành
+
+---
+
+## 2026-04-05 — Phase 11: Protocol + Hạ tầng + Simulators
+
+### Làm gì
+
+**Quality infrastructure**
+- `DataQualityPipeline` — Range → Spike (3σ) → Deadband → Moving average
+- `CircuitBreaker` — 3 states (Closed/Open/HalfOpen), auto-recover
+- `RetryHelper` — exponential backoff + jitter
+
+**Protocol Workers** (tất cả extend `BackgroundService`, inject `IServiceScopeFactory`)
+- `ModbusTcpWorker` — FluentModbus 5.2.0 FC3, sync helper do Span<T> constraint
+- `ModbusRtuWorker` — serial port, shared client per port, mutex
+- `MqttSubscriberWorker` — MQTTnet 4.x, auto-register device mới
+- `Iec104Worker` — TCP skeleton, STARTDT + General Interrogation
+
+**Camera Services**
+- `OnvifService` — UDP WS-Discovery, SOAP GetSnapshotUri
+- `HikvisionIsapiService` — ISAPI HTTP, snapshot, PTZ, event stream
+
+**Discovery & Testing**
+- `AutoDiscoveryService` — ping sweep → port scan → protocol probe
+- `ProtocolConnectionTester` — test kết nối không ghi DB
+- `ProtocolController` — 5 endpoints
+
+**Infrastructure**
+- `PermissionService`, `StorageMonitorWorker`, `RuleTriggerLog`
+- Mở rộng `AuditLogController`, thêm rules toggle, CSV export
+
+**Simulators** (project riêng — `StationMonitor.Simulators`)
+- `ModbusTcpSimulator` — raw TcpListener (không dùng FluentModbus server)
+- `MqttSimulator`, `Iec104Simulator`
+- `ProtocolTestRunner` — 19/19 PASS
+
+### Lỗi gặp và cách sửa
+
+| # | Lỗi | Fix |
+|---|-----|-----|
+| 1 | CS9051: `file class` trong method signature | Đổi sang `internal sealed class` |
+| 2 | CS8652: Span<T> in async | Tách sync helper `ReadAllRegisters()` ra khỏi async method |
+| 3 | `ModbusTcpClient.Connect(string, int)` không tồn tại | `Connect(new IPEndPoint(IPAddress.Parse(ip), port))` |
+| 4 | `ModbusRtuClient.DataBits` không tồn tại | Xóa dòng đó |
+| 5 | `ModbusTcpServer` API FluentModbus 5.2.0 thay đổi | Rewrite simulator dùng raw `TcpListener` |
+| 6 | `Device.IsActive` không tồn tại | Dùng `d.Status != "maintenance"` |
+| 7 | `db.DataPoints` không tồn tại | Dùng `SensorReading` với string `PointId` trực tiếp |
+| 8 | `Math.Min(ushort, 250)` ambiguous CS0121 | Cast: `Math.Min((int)length, 250)` |
+| 9 | Program.cs `return int` (CS0126) | Wrap trong `static async Task<int> MainAsync(args)` |
+| 10 | `SystemSettings.Value` là string, không phải JsonElement | Dùng `setting.Value` trực tiếp |
+
+### Kết quả cuối ngày
+- **47/47 unit tests PASS** (`dotnet test`)
+- **19/19 protocol self-tests PASS** (`dotnet run -- test`)
+- **35/35 API tests PASS** (`node test-api.mjs`) → đã nâng lên 47 sau Phase 8
+- `test-protocol.mjs` — 13 test cases
+- Simulator chạy ổn: Modbus TCP + IEC-104 + MQTT
+- Đánh giá scale: 1-10 trạm ngay bây giờ, mở rộng dễ do StationId đã có ở mọi entity
+
+### Quyết định kỹ thuật quan trọng
+- **Simulator không dùng DB**: project riêng hoàn toàn, chỉ dùng System.Net.Sockets + MQTTnet
+- **Test ports tách biệt**: 15020 (Modbus test), 12404 (IEC-104 test) ≠ production 502/2404
+- **FluentModbus server API**: không dùng do API unstable giữa versions — dùng raw TCP thay
+- **`internal` thay `file`**: config DTOs trong Workers phải `internal` để tránh CS9051
+- **Scale strategy**: StationId trên mọi entity + TimescaleDB partition đủ cho 50+ trạm không cần refactor
+
+---
+
+## 2026-04-06 (session 2) — UI Polish + RuleEngine + UserManagement
+
+### Làm gì
+
+**Theme & màu sắc (fix gốc)**
+- `AppShell.ts`: đọc `localStorage['station-theme']` khi render, apply `theme-dark/theme-light/...` class → toàn bộ trang đồng bộ theme
+- `index.html`: thống nhất key từ `station-monitor-theme` → `station-theme`
+- `SettingsPage`: highlight đúng theme đang active
+
+**AuditLogPage**
+- Đổi tất cả `var(--bg)`, `var(--surface)`, `var(--border)` → `var(--admin-bg)`, `var(--admin-card-bg)`, `var(--admin-border)` trong inline `<style>`
+
+**RealtimeMonitorPage (camera)**
+- Đổi toàn bộ hardcode trắng sang admin vars: `.monitor-toolbar`, `.camera-logs-section`, `.sidebar-edge-toggle`, `.cam-log-item`, v.v.
+
+**AlertsHistoryPage**
+- Thêm time range filter (hôm nay/hôm qua/7d/30d/tất cả) + scroll tbody
+- Thêm sort dropdown với icon + dấu ✓, `position:fixed` để tránh clip bởi overflow
+- Backend `AlertsController.GetAll` thêm `from`/`to` params
+- `StationApiService.getAlerts()` thêm from/to
+- Fix column misalignment: đổi từ `<table table-layout:fixed>` sang **CSS Grid** (`grid-template-columns: 155px 100px 1fr 70px 120px 100px`) — triệt để hơn, không còn bug browser table layout
+- Thêm inline detail panel (slide-in từ phải, 420px): click dòng → panel mở, hiện timeline lịch sử, nút ACK/Đóng/Phân tích ngay trong trang, không navigate sang trang riêng
+
+**AlertDetailPage**
+- Viết lại hoàn chỉnh: bỏ IndexedDB mock → gọi `stationApi.getAlertDetail(id)` thật
+- Timeline lịch sử xử lý, nút ACK/Close với confirm
+
+**RuleEnginePage** (hoàn thiện)
+- Viết lại `RuleEnginePage.ts`: CSS Grid list, stats bar (tổng/bật/alarm), toggle dùng `PATCH /api/v1/rules/{id}/toggle` thay vì PUT
+- Thêm nút ✏ Sửa — modal điền sẵn thông tin, save gọi `PUT`
+- `StationApiService`: thêm `toggleRule()` → PATCH
+- Xóa stub `RuleEnginePage` thừa trong `OtherPages.ts`
+
+**UserManagementPage**
+- Đã đầy đủ từ trước (CRUD + change-password + deactivate + toast)
+- Xác nhận CSS classes hợp lệ, không cần sửa
+
+### Lỗi gặp
+| # | Lỗi | Fix |
+|---|-----|-----|
+| 1 | Table column misalign — `<col style="width:auto">` với `table-layout:fixed` cho width gần 0 | Bỏ hoàn toàn `<table>`, dùng CSS Grid |
+| 2 | Sort dropdown bị clip bởi `overflow:auto` | `position:fixed` + `getBoundingClientRect()` + `appendChild(document.body)` |
+| 3 | `display:flex` trên `<span>` trong `<th>` làm cột co giãn không đúng với `table-layout:auto` | Giải quyết triệt để khi chuyển sang Grid |
+
+### Kết quả
+- TypeScript 0 lỗi (`npx tsc --noEmit`)
+- Chuyển sang phase Mobile App
+
+---
+
+## 2026-04-06 — Phase 10: Cloud Sync Supabase
+
+### Làm gì
+
+**Supabase setup**
+- Tạo project `nezuteiwukcheqpzitcn` trên supabase.com (free tier)
+- Chạy `supabase_setup.sql` → tạo bảng `alerts` + `maintenance_tasks`
+- Bật RLS: anon key chỉ SELECT (mobile app), service_role INSERT/UPDATE (backend)
+- Không dùng supabase-csharp SDK — dùng HttpClient gọi REST API `/rest/v1/{table}` trực tiếp
+
+**Backend**
+- `SupabaseService` (Services): HttpClient wrapper, upsert dùng `Prefer: resolution=merge-duplicates`, có flag `IsConfigured` kiểm tra trước khi gọi
+- `CloudSyncWorker` (Workers/Polling): chạy mỗi 5 phút, delay 30s sau startup, batch 50 items/lần, retry tối đa 3 lần rồi đánh dấu failed
+- `RuleEvaluationWorker`: sau `SaveChangesAsync` → thêm Alert vào SyncQueue với payload JSON đầy đủ
+- `SyncController`: `GET /api/v1/sync/status`, `POST /api/v1/sync/trigger` (admin only)
+- Config trong `appsettings.json` section `Supabase`: Url, ServiceKey, AnonKey
+
+**Frontend**
+- SettingsPage: thêm tab thứ 5 "Cloud Sync"
+- `StationApiService`: `getSyncStatus()`, `triggerSync()`
+- UI: 3 counter card (pending/sent/failed), badge kết nối, nút Sync ngay + Làm mới
+
+### Quyết định kỹ thuật
+- **HttpClient thay SDK**: supabase-csharp có vấn đề dependency với .NET 8 → dùng HttpClient thẳng, đơn giản hơn, kiểm soát được header
+- **Chỉ sync Alert + Maintenance**: không sync SensorReadings (tốn quota 500MB) — alert/maintenance ít bản ghi, quan trọng hơn cho mobile
+- **Retry 3 lần**: tránh stuck khi Supabase tạm lỗi, sau 3 lần mới đánh failed, admin có thể reset qua `/sync/trigger`
+- **AnonKey lưu appsettings**: dành cho mobile app đọc sau này
+
+### Kết quả
+- Build thành công, 0 errors
+- TypeScript 0 lỗi
+- Supabase: bảng tạo thành công, RLS active

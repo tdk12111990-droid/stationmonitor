@@ -29,9 +29,13 @@ public class AlertsController : ControllerBase
         _permissions = permissions;
     }
 
-    // GET /api/v1/alerts?status=open&limit=50
+    // GET /api/v1/alerts?status=open&from=2026-01-01&to=2026-12-31&limit=50
     [HttpGet]
-    public async Task<IActionResult> GetAll([FromQuery] string? status, [FromQuery] int limit = 100)
+    public async Task<IActionResult> GetAll(
+        [FromQuery] string? status,
+        [FromQuery] DateTime? from,
+        [FromQuery] DateTime? to,
+        [FromQuery] int limit = 200)
     {
         var q = _db.Alerts.AsQueryable();
 
@@ -40,6 +44,9 @@ public class AlertsController : ControllerBase
 
         if (!string.IsNullOrEmpty(status))
             q = q.Where(a => a.Status == status);
+
+        if (from.HasValue) q = q.Where(a => a.TriggeredAt >= from.Value);
+        if (to.HasValue)   q = q.Where(a => a.TriggeredAt <= to.Value);
 
         var alerts = await q
             .OrderByDescending(a => a.TriggeredAt)

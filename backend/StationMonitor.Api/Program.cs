@@ -47,6 +47,8 @@ builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>(); // SignalR 
 builder.Services.AddScoped<OnvifService>();
 builder.Services.AddScoped<HikvisionIsapiService>();
 builder.Services.AddScoped<AutoDiscoveryService>();
+builder.Services.AddScoped<ProtocolConnectionTester>();
+builder.Services.AddScoped<SupabaseService>();
 
 // ── Background Workers ────────────────────────────────────
 // PlcPollingWorker: đọc PLC S7 mỗi 3 giây
@@ -69,6 +71,8 @@ builder.Services.AddHostedService<ModbusRtuWorker>();
 builder.Services.AddHostedService<MqttSubscriberWorker>();
 // Iec104Worker: kết nối IEC 60870-5-104 (skeleton)
 builder.Services.AddHostedService<Iec104Worker>();
+// CloudSyncWorker: sync SyncQueue lên Supabase mỗi 5 phút
+builder.Services.AddHostedService<CloudSyncWorker>();
 
 // ── SignalR ───────────────────────────────────────────────
 // Client kết nối: ws://localhost:5056/ws/realtime

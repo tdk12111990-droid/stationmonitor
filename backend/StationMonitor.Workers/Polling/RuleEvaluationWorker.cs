@@ -152,6 +152,27 @@ public class RuleEvaluationWorker : BackgroundService
             Note    = alert.Message,
         });
 
+        // Thêm vào SyncQueue để CloudSyncWorker đẩy lên Supabase
+        db.SyncQueues.Add(new StationMonitor.Data.Entities.SyncQueue
+        {
+            EntityType = "Alert",
+            EntityId   = alert.Id,
+            Payload    = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                id           = alert.Id,
+                station_id   = alert.StationId,
+                device_id    = alert.DeviceId,
+                rule_id      = alert.RuleId,
+                source       = alert.Source,
+                level        = alert.Level,
+                status       = alert.Status,
+                message      = alert.Message,
+                value        = alert.Value,
+                triggered_at = alert.TriggeredAt,
+            }),
+            Status = "pending",
+        });
+
         await db.SaveChangesAsync(ct);
 
         _logger.LogWarning("[Rules] Alert [{Level}]: {Msg}", level, alert.Message);
