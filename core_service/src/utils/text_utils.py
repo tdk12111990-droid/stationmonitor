@@ -9,4 +9,5 @@ def postprocess_text(text: str) -> str:
     text = re.sub(r"(?<=\d)O(?=\d)", "0", text)
     text = re.sub(r"(?<=\d)[lI](?=\d)", "1", text)
     text = re.sub(r"(?<=\d)S(?=\d)", "5", text)
+    text = re.sub(r"(?<=\d),(?=\d)", ".", text)
     return text
