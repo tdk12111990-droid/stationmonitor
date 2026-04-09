@@ -51,3 +51,48 @@ def parse_text(raw: str, source: str) -> dict:
         out["frequency_band"] = m.group(1).replace(" ", "")
 
     return out
+
+# # access user   
+
+
+
+# def parse_text(results, source: str) -> dict:
+#     """
+#     Giữ nguyên tên hàm parse_text để main.py không phải đổi nhiều.
+#     Nhưng giờ parse từ YOLO results sang payload detection.
+#     """
+#     detections = []
+
+#     for result in results:
+#         boxes = getattr(result, "boxes", None)
+#         names = getattr(result, "names", {})
+
+#         if boxes is None:
+#             continue
+
+#         for box in boxes:
+#             cls_id = int(box.cls[0].item())
+#             conf = float(box.conf[0].item())
+#             x1, y1, x2, y2 = box.xyxy[0].tolist()
+
+#             detections.append(
+#                 {
+#                     "class_id": cls_id,
+#                     "class_name": names.get(cls_id, str(cls_id)),
+#                     "confidence": round(conf, 4),
+#                     "bbox": [round(x1, 2), round(y1, 2), round(x2, 2), round(y2, 2)],
+#                 }
+#             )
+
+#     payload = {
+#         "device_id": DEVICE_ID,
+#         "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+#         "source": source or CAMERA_SOURCE,
+#         "event_type": "person_detection",
+#         "frame_width": FRAME_WIDTH,
+#         "frame_height": FRAME_HEIGHT,
+#         "total_detections": len(detections),
+#         "detections": detections,
+#     }
+
+#     return payload

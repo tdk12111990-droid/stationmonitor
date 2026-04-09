@@ -1,7 +1,7 @@
 import time
 import cv2
 from paddleocr import PaddleOCR
-
+# from ultralytics import YOLO
 from config.settings import OCR_DEVICE, TMP_DIR
 
 
@@ -95,3 +95,41 @@ def ocr_predict_text(ocr_model, image_bgr, prefix="roi"):
             pass
 
     return text
+
+# # access_user
+# from config.settings import (
+#     YOLO_CLASSES,
+#     YOLO_CONF,
+#     YOLO_DEVICE,
+#     YOLO_IMGSZ,
+#     YOLO_IOU,
+#     YOLO_MODEL_PATH,
+# )
+
+
+# def _parse_classes():
+#     value = YOLO_CLASSES.strip()
+#     if not value:
+#         return None
+#     return [int(x.strip()) for x in value.split(",") if x.strip()]
+
+
+# def load_ocr_model():
+#     model = YOLO(YOLO_MODEL_PATH)
+#     print(f"[DETECTION] Loaded YOLO model: {YOLO_MODEL_PATH}")
+#     return model
+
+
+# def ocr_predict_text(model, image_bgr, prefix="frame"):
+#     classes = _parse_classes()
+
+#     results = model.predict(
+#         source=image_bgr,
+#         imgsz=YOLO_IMGSZ,
+#         conf=YOLO_CONF,
+#         iou=YOLO_IOU,
+#         device=YOLO_DEVICE,
+#         classes=classes,
+#         verbose=False,
+#     )
+#     return results
