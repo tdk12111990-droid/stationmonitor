@@ -141,20 +141,75 @@ export class DeviceManagementPage {
       </div>
     </div>
 
-    <!-- Modal quét LAN -->
+    <!-- Modal khám phá thiết bị -->
     <div id="scanModal" class="modal-overlay">
-      <div class="modal-content" style="max-width:600px">
+      <div class="modal-content" style="max-width:680px">
         <div class="modal-header">
-          <h3>🔍 Quét LAN – Tìm thiết bị mới</h3>
+          <h3>🔍 Khám phá thiết bị</h3>
           <button id="scanModalClose" class="modal-close-btn">✕</button>
         </div>
         <div class="modal-body">
-          <div style="display:flex;gap:8px;margin-bottom:12px">
-            <input id="scanSubnet" type="text" class="form-input" value="192.168.10" placeholder="Subnet: 192.168.10" style="flex:1">
-            <button id="startScanBtn" class="btn-industrial btn-primary">Bắt đầu quét</button>
+          <!-- Tabs -->
+          <div style="display:flex;gap:0;border-bottom:1px solid var(--admin-border);margin-bottom:16px;">
+            ${['🌐 Quét LAN','📷 ONVIF','🔌 Test kết nối'].map((t,i) => `
+              <button class="disc-tab${i===0?' disc-tab-active':''}" data-disc-tab="${i}"
+                style="padding:8px 16px;background:none;border:none;border-bottom:2px solid ${i===0?'var(--admin-accent)':'transparent'};
+                color:${i===0?'var(--admin-accent)':'var(--admin-text)'};opacity:${i===0?'1':'.5'};
+                font-size:.8rem;font-weight:600;cursor:pointer;">${t}</button>
+            `).join('')}
           </div>
-          <div id="scanResults" style="min-height:120px;color:#94a3b8;text-align:center;padding:20px">
-            Nhấn "Bắt đầu quét" để tìm thiết bị trong LAN
+
+          <!-- Tab 0: Quét LAN -->
+          <div id="discTab0">
+            <div style="display:flex;gap:8px;margin-bottom:12px">
+              <input id="scanSubnet" type="text" class="form-input" value="192.168.10" placeholder="Subnet: 192.168.10" style="flex:1">
+              <button id="startScanBtn" class="btn-industrial btn-primary">▶ Bắt đầu quét</button>
+            </div>
+            <div id="scanResults" style="min-height:120px;max-height:280px;overflow-y:auto;color:#94a3b8;text-align:center;padding:20px;
+              background:rgba(0,0,0,.2);border-radius:8px;font-size:.82rem;">
+              Nhấn "Bắt đầu quét" để tìm thiết bị trong subnet
+            </div>
+          </div>
+
+          <!-- Tab 1: ONVIF Discovery -->
+          <div id="discTab1" style="display:none">
+            <p style="font-size:.82rem;opacity:.6;margin-bottom:12px">
+              Gửi WS-Discovery multicast để tìm camera ONVIF trong cùng subnet.
+            </p>
+            <button id="startOnvifBtn" class="btn-industrial btn-primary">📷 Tìm camera ONVIF</button>
+            <div id="onvifResults" style="margin-top:12px;min-height:100px;max-height:280px;overflow-y:auto;
+              background:rgba(0,0,0,.2);border-radius:8px;padding:12px;font-size:.82rem;color:#94a3b8;text-align:center;">
+              Nhấn nút để tìm camera ONVIF
+            </div>
+          </div>
+
+          <!-- Tab 2: Test kết nối -->
+          <div id="discTab2" style="display:none">
+            <div class="form-grid-2" style="margin-bottom:12px">
+              <div class="form-group">
+                <label>Địa chỉ IP</label>
+                <input id="tcIp" type="text" class="form-input" placeholder="192.168.10.100">
+              </div>
+              <div class="form-group">
+                <label>Giao thức</label>
+                <select id="tcProtocol" class="form-select">
+                  <option value="plc_s7">PLC S7 (Snap7)</option>
+                  <option value="modbus_tcp">Modbus TCP</option>
+                  <option value="mqtt">MQTT</option>
+                  <option value="camera_rtsp">Camera RTSP</option>
+                  <option value="onvif">ONVIF</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Port</label>
+                <input id="tcPort" type="number" class="form-input" placeholder="102" value="102">
+              </div>
+            </div>
+            <button id="startTestConnBtn" class="btn-industrial btn-primary">🔌 Test kết nối</button>
+            <div id="tcResults" style="margin-top:12px;min-height:80px;background:rgba(0,0,0,.2);
+              border-radius:8px;padding:12px;font-size:.82rem;color:#94a3b8;">
+              Nhập thông tin và nhấn Test
+            </div>
           </div>
         </div>
       </div>
@@ -428,7 +483,7 @@ export class DeviceManagementPage {
       }
     });
 
-    // Quét LAN
+    // Mở / đóng modal khám phá
     document.getElementById('scanLanBtn')?.addEventListener('click', () => {
       document.getElementById('scanModal')?.classList.add('active');
     });
@@ -436,14 +491,30 @@ export class DeviceManagementPage {
       document.getElementById('scanModal')?.classList.remove('active');
     });
 
+    // Tab switching trong modal khám phá
+    document.querySelectorAll<HTMLButtonElement>('.disc-tab').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.dataset['discTab']);
+        document.querySelectorAll('.disc-tab').forEach((b, i) => {
+          (b as HTMLElement).style.borderBottomColor = i === idx ? 'var(--admin-accent)' : 'transparent';
+          (b as HTMLElement).style.color = i === idx ? 'var(--admin-accent)' : 'var(--admin-text)';
+          (b as HTMLElement).style.opacity = i === idx ? '1' : '0.5';
+        });
+        [0,1,2].forEach(i => {
+          const el = document.getElementById(`discTab${i}`);
+          if (el) el.style.display = i === idx ? 'block' : 'none';
+        });
+      });
+    });
+
+    // Tab 0: Quét LAN
     document.getElementById('startScanBtn')?.addEventListener('click', async () => {
       const subnet = (document.getElementById('scanSubnet') as HTMLInputElement).value.trim();
       const resultsEl = document.getElementById('scanResults')!;
-      resultsEl.innerHTML = '<div style="color:#94a3b8">⏳ Đang quét ' + subnet + '.1 → .254 ...</div>';
+      resultsEl.innerHTML = `<div style="color:#94a3b8">⏳ Đang quét ${subnet}.1 → .254 ...</div>`;
       (document.getElementById('startScanBtn') as HTMLButtonElement).disabled = true;
-
       try {
-        const token = localStorage.getItem('station_jwt');
+        const token = localStorage.getItem('station_token') ?? '';
         const res = await fetch(`http://localhost:5056/api/v1/devices/scan?subnet=${subnet}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -452,18 +523,83 @@ export class DeviceManagementPage {
           resultsEl.innerHTML = '<div style="color:#94a3b8;padding:20px;text-align:center">Không tìm thấy thiết bị nào</div>';
         } else {
           resultsEl.innerHTML = found.map(f => `
-            <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;border-bottom:1px solid #1e293b;">
+            <div style="display:flex;justify-content:space-between;align-items:center;
+              padding:8px 12px;border-bottom:1px solid #1e293b;">
               <div>
                 <b style="color:#e2e8f0">${f.ip}</b>
-                <span style="margin-left:8px;font-size:11px;color:#94a3b8">${f.guessedType ?? 'Unknown'}</span>
+                <span style="margin-left:8px;font-size:.75rem;color:#94a3b8">${f.guessedType ?? 'Unknown'}</span>
+                ${f.openPorts?.length ? `<span style="margin-left:6px;font-size:.7rem;color:#60a5fa">ports: ${f.openPorts.join(',')}</span>` : ''}
               </div>
-              <span style="font-size:11px;color:${f.isOnline ? '#10b981' : '#ef4444'}">${f.isOnline ? '🟢 Online' : '🔴 Offline'}</span>
+              <span style="font-size:.75rem;color:${f.isOnline ? '#10b981' : '#ef4444'}">${f.isOnline ? '🟢 Online' : '🔴 Offline'}</span>
             </div>`).join('');
         }
       } catch {
-        resultsEl.innerHTML = '<div style="color:#ef4444">❌ Lỗi quét LAN — backend cần đang chạy</div>';
+        resultsEl.innerHTML = '<div style="color:#ef4444">❌ Lỗi quét LAN</div>';
       } finally {
         (document.getElementById('startScanBtn') as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    // Tab 1: ONVIF Discovery
+    document.getElementById('startOnvifBtn')?.addEventListener('click', async () => {
+      const resultsEl = document.getElementById('onvifResults')!;
+      resultsEl.innerHTML = '<div style="color:#94a3b8">⏳ Đang tìm camera ONVIF...</div>';
+      (document.getElementById('startOnvifBtn') as HTMLButtonElement).disabled = true;
+      try {
+        const token = localStorage.getItem('station_token') ?? '';
+        const res = await fetch('http://localhost:5056/api/v1/protocol/discover-onvif', {
+          headers: { Authorization: `Bearer ${token}` }
+        });
+        const cameras: any[] = await res.json();
+        if (!cameras.length) {
+          resultsEl.innerHTML = '<div style="color:#94a3b8;text-align:center;padding:20px">Không tìm thấy camera ONVIF</div>';
+        } else {
+          resultsEl.innerHTML = cameras.map(c => `
+            <div style="padding:10px 12px;border-bottom:1px solid #1e293b;">
+              <b style="color:#e2e8f0">${c.ip ?? c.address ?? 'N/A'}</b>
+              <span style="margin-left:8px;font-size:.75rem;color:#60a5fa">ONVIF</span>
+              ${c.name ? `<div style="font-size:.75rem;color:#94a3b8;margin-top:2px">${c.name}</div>` : ''}
+              ${c.snapshotUri ? `<div style="font-size:.7rem;color:#475569;margin-top:2px">Snapshot: ${c.snapshotUri}</div>` : ''}
+            </div>`).join('');
+        }
+      } catch {
+        resultsEl.innerHTML = '<div style="color:#ef4444">❌ Lỗi tìm ONVIF</div>';
+      } finally {
+        (document.getElementById('startOnvifBtn') as HTMLButtonElement).disabled = false;
+      }
+    });
+
+    // Tab 2: Test kết nối
+    document.getElementById('startTestConnBtn')?.addEventListener('click', async () => {
+      const ip       = (document.getElementById('tcIp') as HTMLInputElement).value.trim();
+      const protocol = (document.getElementById('tcProtocol') as HTMLSelectElement).value;
+      const port     = Number((document.getElementById('tcPort') as HTMLInputElement).value);
+      const resultsEl = document.getElementById('tcResults')!;
+      if (!ip) { resultsEl.innerHTML = '<span style="color:#f59e0b">Nhập địa chỉ IP trước</span>'; return; }
+
+      resultsEl.innerHTML = `<div style="color:#94a3b8">⏳ Đang test kết nối ${ip}:${port} (${protocol})...</div>`;
+      (document.getElementById('startTestConnBtn') as HTMLButtonElement).disabled = true;
+      try {
+        const token = localStorage.getItem('station_token') ?? '';
+        const res = await fetch('http://localhost:5056/api/v1/protocol/test-connection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ ip, port, protocol })
+        });
+        const result: any = await res.json();
+        const ok = result.success ?? result.isOnline ?? false;
+        resultsEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+            <span style="font-size:1.4rem">${ok ? '✅' : '❌'}</span>
+            <b style="color:${ok ? '#10b981' : '#ef4444'}">${ok ? 'Kết nối thành công' : 'Kết nối thất bại'}</b>
+            ${result.latencyMs != null ? `<span style="font-size:.75rem;color:#94a3b8">${result.latencyMs}ms</span>` : ''}
+          </div>
+          ${result.message ? `<div style="font-size:.8rem;color:#94a3b8">${result.message}</div>` : ''}
+          ${result.data ? `<pre style="font-size:.72rem;color:#60a5fa;margin-top:8px;overflow:auto">${JSON.stringify(result.data, null, 2)}</pre>` : ''}`;
+      } catch {
+        resultsEl.innerHTML = '<div style="color:#ef4444">❌ Lỗi test kết nối</div>';
+      } finally {
+        (document.getElementById('startTestConnBtn') as HTMLButtonElement).disabled = false;
       }
     });
   }

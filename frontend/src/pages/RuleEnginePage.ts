@@ -6,7 +6,8 @@
 import { stationApi, type Rule } from '@/services/StationApiService';
 import { confirmDialog } from '@/utils/confirm';
 
-const POINT_OPTIONS = [
+// Fallback khi API chưa trả về
+const FALLBACK_POINTS = [
   { value: 'nhiet_do_pha_1', label: 'Nhiệt độ Pha 1 (°C)' },
   { value: 'nhiet_do_pha_2', label: 'Nhiệt độ Pha 2 (°C)' },
   { value: 'nhiet_do_pha_3', label: 'Nhiệt độ Pha 3 (°C)' },
@@ -24,6 +25,7 @@ const OP_LABELS: Record<string, string> = {
 export class RuleEnginePage {
   private rules: Rule[] = [];
   private editingId: string | null = null;
+  private pointOptions: { value: string; label: string }[] = FALLBACK_POINTS;
 
   render(): string {
     return `
@@ -119,7 +121,7 @@ export class RuleEnginePage {
           <div class="form-group" style="margin:0">
             <label>Điểm đo <span style="color:#ef4444">*</span></label>
             <select id="rulePointInput" class="form-select">
-              ${POINT_OPTIONS.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
+              ${FALLBACK_POINTS.map(p => `<option value="${p.value}">${p.label}</option>`).join('')}
             </select>
           </div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
@@ -138,17 +140,80 @@ export class RuleEnginePage {
               <input id="ruleValueInput" class="form-input" type="number" placeholder="80" step="any" />
             </div>
           </div>
+          <!-- Tác động của Rule -->
           <div class="form-group" style="margin:0">
-            <label>Mức cảnh báo</label>
-            <div style="display:flex;gap:12px;margin-top:6px;">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border-radius:8px;border:1px solid var(--admin-border);flex:1;transition:border-color .15s;" id="levelWarningCard">
-                <input type="radio" name="ruleLevel" value="warning" checked style="accent-color:#f59e0b;">
-                <span>⚠️ <b>Warning</b></span>
-              </label>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px 16px;border-radius:8px;border:1px solid var(--admin-border);flex:1;transition:border-color .15s;" id="levelAlarmCard">
-                <input type="radio" name="ruleLevel" value="alarm" style="accent-color:#ef4444;">
-                <span>🚨 <b>Alarm</b></span>
-              </label>
+            <label>Tác động <span style="opacity:.5;font-size:.75rem;">(chọn ít nhất 1)</span></label>
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">
+
+              <!-- Health option -->
+              <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--admin-border);">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                  <input type="checkbox" id="doHealth" style="accent-color:#0ea5e9;width:16px;height:16px;">
+                  <div>
+                    <span style="font-weight:600;font-size:.85rem;">🏥 Ảnh hưởng sức khỏe thiết bị</span>
+                    <div style="font-size:.73rem;opacity:.55;margin-top:1px;">Trừ điểm Health Score âm thầm, không tạo alert</div>
+                  </div>
+                </label>
+                <div id="penaltyRow" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);">
+                  <label style="font-size:.78rem;opacity:.7;display:block;margin-bottom:4px;">Penalty (điểm trừ)</label>
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <input id="penaltyInput" type="number" class="form-input" value="10" min="1" max="50"
+                      style="width:90px;padding:6px 10px;">
+                    <span style="font-size:.75rem;opacity:.5;">điểm / lần vượt ngưỡng</span>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Alert option -->
+              <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--admin-border);">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                  <input type="checkbox" id="doAlert" checked style="accent-color:#f59e0b;width:16px;height:16px;">
+                  <div>
+                    <span style="font-weight:600;font-size:.85rem;">🔔 Tạo cảnh báo</span>
+                    <div style="font-size:.73rem;opacity:.55;margin-top:1px;">Tạo Alert + gửi email khi vượt ngưỡng</div>
+                  </div>
+                </label>
+                <div id="levelRow" style="display:flex;gap:10px;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);">
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px;border-radius:6px;border:1px solid var(--admin-border);flex:1;">
+                    <input type="radio" name="ruleLevel" value="warning" checked style="accent-color:#f59e0b;">
+                    <span style="font-size:.83rem;">⚠️ <b>Warning</b></span>
+                  </label>
+                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:8px 12px;border-radius:6px;border:1px solid var(--admin-border);flex:1;">
+                    <input type="radio" name="ruleLevel" value="alarm" style="accent-color:#ef4444;">
+                    <span style="font-size:.83rem;">🚨 <b>Alarm</b></span>
+                  </label>
+                </div>
+              </div>
+
+              <!-- Maintenance option -->
+              <div style="padding:12px 14px;border-radius:8px;border:1px solid var(--admin-border);">
+                <label style="display:flex;align-items:center;gap:10px;cursor:pointer;">
+                  <input type="checkbox" id="doMaintenance" style="accent-color:#22c55e;width:16px;height:16px;">
+                  <div>
+                    <span style="font-weight:600;font-size:.85rem;">🔧 Tạo lịch bảo trì</span>
+                    <div style="font-size:.73rem;opacity:.55;margin-top:1px;">Tự động tạo MaintenanceTask khi vượt ngưỡng</div>
+                  </div>
+                </label>
+                <div id="maintRow" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.07);display:none;">
+                  <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                    <div>
+                      <label style="font-size:.78rem;opacity:.7;display:block;margin-bottom:4px;">Loại công việc</label>
+                      <select id="maintTypeInput" class="form-select" style="padding:6px 10px;font-size:.82rem;">
+                        <option value="inspection">Kiểm tra</option>
+                        <option value="repair">Sửa chữa</option>
+                        <option value="cleaning">Vệ sinh</option>
+                        <option value="calibration">Hiệu chỉnh</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style="font-size:.78rem;opacity:.7;display:block;margin-bottom:4px;">Lên lịch sau (ngày)</label>
+                      <input id="maintDaysInput" type="number" class="form-input" value="30" min="1" max="365"
+                        style="width:100%;padding:6px 10px;">
+                    </div>
+                  </div>
+                </div>
+              </div>
+
             </div>
           </div>
         </div>
@@ -161,7 +226,7 @@ export class RuleEnginePage {
   }
 
   async mount(): Promise<void> {
-    await this.loadRules();
+    await Promise.all([this.loadRules(), this.loadPoints()]);
     this.bindEvents();
   }
 
@@ -173,6 +238,39 @@ export class RuleEnginePage {
       const body = document.getElementById('ruleListBody');
       if (body) body.innerHTML = `<div style="text-align:center;color:#ef4444;padding:30px">Lỗi tải rules: ${e}</div>`;
     }
+  }
+
+  private async loadPoints(): Promise<void> {
+    try {
+      const pts = await stationApi.getLatestPoints();
+      if (!pts.length) return;
+      // Unique pointIds, build label from pointId + unit
+      const seen = new Set<string>();
+      this.pointOptions = pts
+        .filter(p => { const ok = !seen.has(p.pointId); seen.add(p.pointId); return ok; })
+        .map(p => ({
+          value: p.pointId,
+          label: this.prettifyPoint(p.pointId, p.unit),
+        }));
+      // Update the select element if it exists (modal already rendered)
+      const sel = document.getElementById('rulePointInput') as HTMLSelectElement | null;
+      if (sel) {
+        const cur = sel.value;
+        sel.innerHTML = this.pointOptions.map(p => `<option value="${p.value}">${p.label}</option>`).join('');
+        if (this.pointOptions.some(p => p.value === cur)) sel.value = cur;
+      }
+    } catch { /* keep fallback */ }
+  }
+
+  private prettifyPoint(pointId: string, unit: string): string {
+    const names: Record<string, string> = {
+      nhiet_do_pha_1: 'Nhiệt độ Pha 1',
+      nhiet_do_pha_2: 'Nhiệt độ Pha 2',
+      nhiet_do_pha_3: 'Nhiệt độ Pha 3',
+      phong_dien:     'Phóng điện PD',
+    };
+    const name = names[pointId] ?? pointId.replace(/_/g, ' ');
+    return unit ? `${name} (${unit})` : name;
   }
 
   private renderList(): void {
@@ -193,12 +291,20 @@ export class RuleEnginePage {
     }
 
     body.innerHTML = this.rules.map(r => {
-      const cond  = this.parseCondition(r.condition);
-      const level = this.parseLevel(r.actions);
-      const pointLabel = POINT_OPTIONS.find(p => p.value === cond.point)?.label ?? cond.point;
-      const levelBadge = level === 'alarm'
-        ? '<span class="tag tag-danger">🚨 Alarm</span>'
-        : '<span class="tag tag-warning">⚠️ Warning</span>';
+      const cond    = this.parseCondition(r.condition);
+      const actions = this.parseActions(r.actions);
+      const pointLabel = this.pointOptions.find(p => p.value === cond.point)?.label ?? cond.point;
+
+      // Badge loại rule
+      let typeBadges = '';
+      if (actions.doHealth)
+        typeBadges += `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:rgba(14,165,233,.15);color:#38bdf8;font-size:.72rem;font-weight:700;margin-right:4px;">🏥 Sức khỏe −${actions.penalty}đ</span>`;
+      if (actions.doAlert) {
+        const isAlarm = actions.level === 'alarm';
+        typeBadges += `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:${isAlarm ? 'rgba(239,68,68,.15)' : 'rgba(245,158,11,.15)'};color:${isAlarm ? '#f87171' : '#fbbf24'};font-size:.72rem;font-weight:700;">${isAlarm ? '🚨 Alarm' : '⚠️ Warning'}</span>`;
+      }
+      if (actions.doMaintenance)
+        typeBadges += `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 8px;border-radius:4px;background:rgba(34,197,94,.15);color:#4ade80;font-size:.72rem;font-weight:700;">🔧 ${actions.maintDays}d</span>`;
 
       return `
       <div class="re-grid-row" data-id="${r.id}">
@@ -210,8 +316,8 @@ export class RuleEnginePage {
             ${r.deviceName ? `<span style="opacity:.5;font-size:.75rem;margin-left:4px;">· ${r.deviceName}</span>` : ''}
           </div>
         </div>
-        <div>${levelBadge}</div>
-        <div><b style="color:${level === 'alarm' ? '#ef4444' : '#f59e0b'}">${cond.value}</b></div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">${typeBadges}</div>
+        <div><b style="color:${actions.doAlert && actions.level === 'alarm' ? '#ef4444' : '#0ea5e9'}">${cond.value}</b></div>
         <div style="display:flex;justify-content:center;">
           <label class="toggle-switch" title="${r.enabled ? 'Tắt rule' : 'Bật rule'}">
             <input type="checkbox" class="re-toggle" data-id="${r.id}" ${r.enabled ? 'checked' : ''}>
@@ -259,8 +365,20 @@ export class RuleEnginePage {
     (document.getElementById('ruleModalTitle') as HTMLElement).textContent = 'Thêm Rule mới';
     (document.getElementById('ruleNameInput') as HTMLInputElement).value = '';
     (document.getElementById('ruleValueInput') as HTMLInputElement).value = '';
-    (document.getElementById('rulePointInput') as HTMLSelectElement).selectedIndex = 0;
+    const addSel = document.getElementById('rulePointInput') as HTMLSelectElement;
+    addSel.innerHTML = this.pointOptions.map(p => `<option value="${p.value}">${p.label}</option>`).join('');
+    addSel.selectedIndex = 0;
     (document.getElementById('ruleOpInput') as HTMLSelectElement).value = '>';
+    // Defaults: chỉ alert, không health, không maintenance
+    (document.getElementById('doHealth') as HTMLInputElement).checked = false;
+    (document.getElementById('doAlert') as HTMLInputElement).checked = true;
+    (document.getElementById('doMaintenance') as HTMLInputElement).checked = false;
+    (document.getElementById('penaltyInput') as HTMLInputElement).value = '10';
+    (document.getElementById('penaltyRow') as HTMLElement).style.display = 'none';
+    (document.getElementById('levelRow') as HTMLElement).style.display = 'flex';
+    (document.getElementById('maintRow') as HTMLElement).style.display = 'none';
+    (document.getElementById('maintTypeInput') as HTMLSelectElement).value = 'inspection';
+    (document.getElementById('maintDaysInput') as HTMLInputElement).value = '30';
     (document.querySelector('input[name="ruleLevel"][value="warning"]') as HTMLInputElement).checked = true;
     document.getElementById('ruleModal')!.classList.add('active');
   }
@@ -269,20 +387,51 @@ export class RuleEnginePage {
     const rule = this.rules.find(r => r.id === id);
     if (!rule) return;
     this.editingId = id;
-    const cond  = this.parseCondition(rule.condition);
-    const level = this.parseLevel(rule.actions);
+    const cond    = this.parseCondition(rule.condition);
+    const actions = this.parseActions(rule.actions);
 
     (document.getElementById('ruleModalTitle') as HTMLElement).textContent = `Sửa Rule — ${rule.name}`;
     (document.getElementById('ruleNameInput') as HTMLInputElement).value = rule.name;
     (document.getElementById('ruleValueInput') as HTMLInputElement).value = String(cond.value);
-    (document.getElementById('rulePointInput') as HTMLSelectElement).value = cond.point;
+    const pointSel = document.getElementById('rulePointInput') as HTMLSelectElement;
+    pointSel.innerHTML = this.pointOptions.map(p => `<option value="${p.value}">${p.label}</option>`).join('');
+    pointSel.value = cond.point;
     (document.getElementById('ruleOpInput') as HTMLSelectElement).value = cond.op;
-    (document.querySelector(`input[name="ruleLevel"][value="${level}"]`) as HTMLInputElement).checked = true;
+
+    (document.getElementById('doHealth') as HTMLInputElement).checked      = actions.doHealth;
+    (document.getElementById('doAlert') as HTMLInputElement).checked       = actions.doAlert;
+    (document.getElementById('doMaintenance') as HTMLInputElement).checked = actions.doMaintenance;
+    (document.getElementById('penaltyInput') as HTMLInputElement).value    = String(actions.penalty);
+    (document.getElementById('penaltyRow') as HTMLElement).style.display   = actions.doHealth      ? 'block' : 'none';
+    (document.getElementById('levelRow') as HTMLElement).style.display     = actions.doAlert       ? 'flex'  : 'none';
+    (document.getElementById('maintRow') as HTMLElement).style.display     = actions.doMaintenance ? 'block' : 'none';
+    (document.getElementById('maintTypeInput') as HTMLSelectElement).value = actions.maintType;
+    (document.getElementById('maintDaysInput') as HTMLInputElement).value  = String(actions.maintDays);
+    (document.querySelector(`input[name="ruleLevel"][value="${actions.level}"]`) as HTMLInputElement).checked = true;
+
     document.getElementById('ruleModal')!.classList.add('active');
   }
 
   private bindEvents(): void {
     document.getElementById('btnAddRule')?.addEventListener('click', () => this.openAddModal());
+
+    // Toggle hiển thị phần penalty khi check/uncheck "Sức khỏe"
+    document.getElementById('doHealth')?.addEventListener('change', (e) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      (document.getElementById('penaltyRow') as HTMLElement).style.display = checked ? 'block' : 'none';
+    });
+
+    // Toggle hiển thị phần level khi check/uncheck "Cảnh báo"
+    document.getElementById('doAlert')?.addEventListener('change', (e) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      (document.getElementById('levelRow') as HTMLElement).style.display = checked ? 'flex' : 'none';
+    });
+
+    // Toggle hiển thị phần maintenance
+    document.getElementById('doMaintenance')?.addEventListener('change', (e) => {
+      const checked = (e.target as HTMLInputElement).checked;
+      (document.getElementById('maintRow') as HTMLElement).style.display = checked ? 'block' : 'none';
+    });
 
     const closeModal = () => {
       document.getElementById('ruleModal')!.classList.remove('active');
@@ -301,8 +450,25 @@ export class RuleEnginePage {
       if (!name) { alert('Vui lòng nhập tên rule'); return; }
       if (isNaN(value)) { alert('Vui lòng nhập ngưỡng hợp lệ'); return; }
 
+      const doHealth      = (document.getElementById('doHealth') as HTMLInputElement).checked;
+      const doAlert       = (document.getElementById('doAlert') as HTMLInputElement).checked;
+      const doMaintenance = (document.getElementById('doMaintenance') as HTMLInputElement).checked;
+      const penalty       = parseInt((document.getElementById('penaltyInput') as HTMLInputElement).value) || 10;
+      const maintType     = (document.getElementById('maintTypeInput') as HTMLSelectElement).value;
+      const maintDays     = parseInt((document.getElementById('maintDaysInput') as HTMLInputElement).value) || 30;
+
+      if (!doHealth && !doAlert && !doMaintenance) {
+        alert('Vui lòng chọn ít nhất 1 tác động');
+        return;
+      }
+
+      const actionList: object[] = [];
+      if (doHealth)      actionList.push({ type: 'health',      penalty });
+      if (doAlert)       actionList.push({ type: 'alert',       level });
+      if (doMaintenance) actionList.push({ type: 'maintenance', taskType: maintType, scheduledInDays: maintDays });
+
       const condition = JSON.stringify({ point, op, value });
-      const actions   = JSON.stringify([{ type: 'alert', level }]);
+      const actions   = JSON.stringify(actionList);
 
       try {
         if (this.editingId) {
@@ -323,9 +489,32 @@ export class RuleEnginePage {
     catch { return { point: '?', op: '>', value: 0 }; }
   }
 
+  private parseActions(actionsJson: string): {
+    doHealth: boolean; penalty: number;
+    doAlert: boolean; level: string;
+    doMaintenance: boolean; maintType: string; maintDays: number;
+  } {
+    try {
+      const arr: any[] = JSON.parse(actionsJson);
+      const healthA = arr.find((a: any) => a.type === 'health');
+      const alertA  = arr.find((a: any) => a.type === 'alert' || !a.type);
+      const maintA  = arr.find((a: any) => a.type === 'maintenance');
+      return {
+        doHealth:      !!healthA,
+        penalty:       healthA?.penalty ?? 10,
+        doAlert:       !!alertA,
+        level:         alertA?.level ?? 'warning',
+        doMaintenance: !!maintA,
+        maintType:     maintA?.taskType ?? 'inspection',
+        maintDays:     maintA?.scheduledInDays ?? 30,
+      };
+    } catch {
+      return { doHealth: false, penalty: 10, doAlert: true, level: 'warning', doMaintenance: false, maintType: 'inspection', maintDays: 30 };
+    }
+  }
+
   private parseLevel(actionsJson: string): string {
-    try { return JSON.parse(actionsJson)[0]?.level ?? 'warning'; }
-    catch { return 'warning'; }
+    return this.parseActions(actionsJson).level;
   }
 
   destroy(): void {}

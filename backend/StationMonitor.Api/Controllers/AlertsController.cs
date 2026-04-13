@@ -22,11 +22,30 @@ public class AlertsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly PermissionService _permissions;
+    private readonly IRealtimeNotifier _notifier;
 
-    public AlertsController(AppDbContext db, PermissionService permissions)
+    public AlertsController(AppDbContext db, PermissionService permissions, IRealtimeNotifier notifier)
     {
         _db = db;
         _permissions = permissions;
+        _notifier = notifier;
+    }
+
+    // GET /api/v1/alerts/test
+    [HttpGet("test")]
+    [AllowAnonymous] // Cho phép test nhanh không cần token
+    public async Task<IActionResult> Test()
+    {
+        var testAlert = new
+        {
+            Id = Guid.NewGuid(),
+            Level = "alarm",
+            Message = "🚨 THÔNG BÁO TEST: Phát hiện xâm nhập tại khu vực Trạm chính!",
+            TriggeredAt = DateTime.UtcNow
+        };
+
+        await _notifier.SendAlertAsync(testAlert);
+        return Ok(new { success = true, message = "Đã gửi thông báo test tới SignalR", alert = testAlert });
     }
 
     // GET /api/v1/alerts?status=open&from=2026-01-01&to=2026-12-31&limit=50

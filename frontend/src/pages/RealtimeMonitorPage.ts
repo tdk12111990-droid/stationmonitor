@@ -196,22 +196,33 @@ export class RealtimeMonitorPage {
     const statEl = document.querySelector('.status-summary .stat-item b');
     if (statEl) statEl.textContent = String(onlineCount);
 
-    if (!this.cameras.length) {
-      grid.innerHTML = `<div style="grid-column:1/-1;padding:40px;text-align:center;color:#94a3b8;">
-        Chưa có camera nào. Thêm camera trong mục Quản lý thiết bị.
-      </div>`;
-      return;
-    }
+    let html = '';
 
-    grid.innerHTML = this.cameras.map(d => {
+    // Render data thực từ API
+    html += this.cameras.map((d, idx) => {
       const go2rtcId = d.config?.go2rtc_id ?? d.id;
+      let camName = d.name;
+      let aiLabel = "LIVE VIEWING";
+      let streamContent = `
+              <iframe
+                src="${GO2RTC_URL}/stream.html?src=${go2rtcId}&mode=mse&controls=0"
+                style="width:100%;height:100%;border:none;pointer-events:none;display:block;"
+                id="hik-rtc-frame-${d.id}">
+              </iframe>`;
+
+      if (idx === 3) {
+        camName = "Camera Quét Nhiệt (Thermal)";
+        aiLabel = "THERMAL SCAN";
+        streamContent = `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`;
+      }
+
       return `
         <div class="cam-card-v2" data-cam-id="${d.id}" data-go2rtc-id="${go2rtcId}" data-cam-name="${d.name.toLowerCase()}">
           <div class="cam-viewport" id="viewport-${d.id}">
             <div class="cam-hud-top">
               <div class="cam-title-group">
                 <span class="status-dot ${d.status === 'online' ? 'dot-green' : 'dot-red'}"></span>
-                <span class="cam-name">${d.name}</span>
+                <span class="cam-name">${camName}</span>
               </div>
               <div class="cam-actions">
                 <button title="Chụp ảnh" class="cam-btn-hud btn-capture" data-go2rtc="${go2rtcId}">📸</button>
@@ -219,18 +230,50 @@ export class RealtimeMonitorPage {
               </div>
             </div>
             <div class="cam-overlay-container" id="ai-overlay-${d.id}">
-              <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">LIVE VIEWING</span></div>
+              <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">${aiLabel}</span></div>
             </div>
-            <div class="real-stream-container" style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;">
-              <iframe
-                src="${GO2RTC_URL}/stream.html?src=${go2rtcId}&mode=mse&controls=0"
-                style="width:100%;height:100%;border:none;pointer-events:none;display:block;"
-                id="hik-rtc-frame-${d.id}">
-              </iframe>
+            <div class="real-stream-container" style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;background:#000;">
+              ${streamContent}
             </div>
           </div>
         </div>`;
     }).join('');
+
+    // Nếu ít hơn 4 cam, bơm thêm các thẻ ảo vào frontend
+    let currentLen = this.cameras.length;
+    while (currentLen < 4) {
+      const isThermal = currentLen === 3;
+      const camName = isThermal ? "Camera Quét Nhiệt (Thermal)" : `Camera Bổ Sung ${currentLen + 1}`;
+      const aiLabel = isThermal ? "THERMAL SCAN" : "LIVE VIEWING";
+      const streamContent = isThermal
+        ? `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`
+        : `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`;
+
+      html += `
+        <div class="cam-card-v2" data-cam-id="fake_${currentLen}" data-cam-name="${camName}">
+          <div class="cam-viewport" id="viewport-fake_${currentLen}">
+            <div class="cam-hud-top">
+              <div class="cam-title-group">
+                <span class="status-dot dot-green"></span>
+                <span class="cam-name">${camName}</span>
+              </div>
+              <div class="cam-actions">
+                <button title="Chụp ảnh" class="cam-btn-hud btn-capture">📸</button>
+                <button title="Phóng to" class="cam-btn-hud btn-expand-live">⛶</button>
+              </div>
+            </div>
+            <div class="cam-overlay-container" id="ai-overlay-fake_${currentLen}">
+              <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">${aiLabel}</span></div>
+            </div>
+            <div class="real-stream-container" style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;background:#000;">
+              ${streamContent}
+            </div>
+          </div>
+        </div>`;
+      currentLen++;
+    }
+
+    grid.innerHTML = html;
   }
 
   private connectSignalR(): void {

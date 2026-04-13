@@ -49,6 +49,7 @@ builder.Services.AddScoped<HikvisionIsapiService>();
 builder.Services.AddScoped<AutoDiscoveryService>();
 builder.Services.AddScoped<ProtocolConnectionTester>();
 builder.Services.AddScoped<SupabaseService>();
+builder.Services.AddSingleton<LoadCorrelationAnalyzer>(); // CBM: đối chiếu tải/nhiệt
 
 // ── Background Workers ────────────────────────────────────
 // PlcPollingWorker: đọc PLC S7 mỗi 3 giây
@@ -117,7 +118,7 @@ builder.Services.AddControllers();
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
-        policy.WithOrigins("http://localhost:5173", "http://localhost:5174", "http://localhost:4173")
+        policy.SetIsOriginAllowed(_ => true)
               .AllowAnyMethod()
               .AllowAnyHeader()
               .AllowCredentials());
@@ -158,6 +159,9 @@ using (var scope = app.Services.CreateScope())
     // Seed trạm + thiết bị mặc định nếu chưa có
     await SeedDefaultStationAsync(db);
 
+    // Seed rules NETA MTS 2023 mặc định cho PD (nếu chưa có)
+    await SeedNetaRulesAsync(db);
+
     // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
     var deviceService = scope.ServiceProvider.GetRequiredService<DeviceService>();
     var cameras = await db.Devices.Where(d => d.Type.StartsWith("camera")).ToListAsync();
@@ -165,6 +169,43 @@ using (var scope = app.Services.CreateScope())
 }
 
 app.Run();
+
+// ── Seed rules NETA MTS 2023 ────────────────────────────
+static async Task SeedNetaRulesAsync(AppDbContext db)
+{
+    if (await db.Rules.AnyAsync(r => r.Name.StartsWith("NETA"))) return;
+
+    var station = await db.Stations.FirstOrDefaultAsync();
+    if (station == null) return;
+
+    db.Rules.AddRange(
+        new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            Name      = "NETA Monitor — Phóng điện",
+            Condition = """{"point":"phong_dien","op":">","value":-37}""",
+            Actions   = """[{"type":"health","penalty":5},{"type":"maintenance","taskType":"inspection","scheduledInDays":180}]""",
+            Enabled   = true,
+        },
+        new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            Name      = "NETA Warning — Phóng điện",
+            Condition = """{"point":"phong_dien","op":">","value":-27}""",
+            Actions   = """[{"type":"health","penalty":15},{"type":"maintenance","taskType":"repair","scheduledInDays":45}]""",
+            Enabled   = true,
+        },
+        new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            Name      = "NETA Critical — Phóng điện",
+            Condition = """{"point":"phong_dien","op":">","value":-20}""",
+            Actions   = """[{"type":"health","penalty":30},{"type":"maintenance","taskType":"repair","scheduledInDays":3}]""",
+            Enabled   = true,
+        }
+    );
+    await db.SaveChangesAsync();
+}
 
 // ── Seed trạm + thiết bị thật ────────────────────────────
 static async Task SeedDefaultStationAsync(AppDbContext db)

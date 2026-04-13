@@ -51,12 +51,14 @@ export class AlertsHistoryPage {
       /* ── Grid list ── */
       .ah-grid-header, .ah-grid-row {
         display: grid;
-        grid-template-columns: 155px 100px 1fr 70px 120px 100px;
+        grid-template-columns: 155px 100px minmax(0, 1fr) 70px 120px 100px;
         align-items: center;
+        width: 100%;
+        box-sizing: border-box;
       }
       .ah-detail-panel.open ~ * .ah-grid-header,
       .ah-detail-panel.open ~ * .ah-grid-row {
-        grid-template-columns: 140px 90px 1fr 60px 110px 90px;
+        grid-template-columns: 140px 90px minmax(0, 1fr) 60px 110px 90px;
       }
       .ah-grid-header {
         border-bottom: 1px solid var(--admin-border);
@@ -70,6 +72,11 @@ export class AlertsHistoryPage {
         white-space: nowrap; overflow: hidden;
         display: flex; align-items: center; gap: 5px;
       }
+      .ah-grid-header > div:nth-child(4),
+      .ah-grid-header > div:nth-child(5),
+      .ah-grid-header > div:nth-child(6) {
+        justify-content: center;
+      }
       .ah-grid-row {
         border-bottom: 1px solid rgba(255,255,255,.04);
         cursor: pointer; transition: background .1s;
@@ -80,6 +87,13 @@ export class AlertsHistoryPage {
         padding: 10px 12px;
         font-size: .83rem; color: var(--admin-text);
         overflow: hidden;
+      }
+      .ah-grid-row > div:nth-child(4),
+      .ah-grid-row > div:nth-child(5),
+      .ah-grid-row > div:nth-child(6) {
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .ah-col-msg { word-break: break-word; }
 
@@ -196,6 +210,7 @@ export class AlertsHistoryPage {
               <option value="closed">Đã đóng</option>
             </select>
           </div>
+          <button id="btnExportAlerts"  class="btn-industrial" title="Xuất CSV">⬇ CSV</button>
           <button id="btnRefreshAlerts" class="btn-industrial btn-primary">↺ Làm mới</button>
         </div>
       </div>
@@ -204,22 +219,24 @@ export class AlertsHistoryPage {
         <!-- Danh sách alerts -->
         <div class="ah-list-col">
           <div class="admin-card" style="padding:0;overflow:hidden;">
-            <div class="ah-grid-header" id="ahGridHeader">
-              <div class="ah-sortable-th" data-sort="time">
-                <span class="ah-th-icon">🕒</span> Thời gian
-                <span id="sort-time" class="ah-sort-badge">↓</span>
+            <div style="overflow-y:scroll;max-height:calc(100vh - 260px);">
+              <div class="ah-grid-header" id="ahGridHeader">
+                <div class="ah-sortable-th" data-sort="time">
+                  <span class="ah-th-icon">🕒</span> Thời gian
+                  <span id="sort-time" class="ah-sort-badge">↓</span>
+                </div>
+                <div class="ah-sortable-th" data-sort="level">
+                  <span class="ah-th-icon">⚡</span> Mức độ
+                  <span id="sort-level" class="ah-sort-badge ah-sort-inactive">⇅</span>
+                </div>
+                <div>Thông báo</div>
+                <div>Giá trị</div>
+                <div>Trạng thái</div>
+                <div>Hành động</div>
               </div>
-              <div class="ah-sortable-th" data-sort="level">
-                <span class="ah-th-icon">⚡</span> Mức độ
-                <span id="sort-level" class="ah-sort-badge ah-sort-inactive">⇅</span>
+              <div id="alertTableBody">
+                <div style="text-align:center;padding:40px;color:#94a3b8">Đang tải...</div>
               </div>
-              <div>Thông báo</div>
-              <div>Giá trị</div>
-              <div>Trạng thái</div>
-              <div>Hành động</div>
-            </div>
-            <div style="overflow-y:auto;max-height:calc(100vh - 260px);" id="alertTableBody">
-              <div style="text-align:center;padding:40px;color:#94a3b8">Đang tải...</div>
             </div>
             <div style="padding:7px 14px;border-top:1px solid var(--admin-border);font-size:.75rem;color:var(--admin-text);opacity:.5;display:flex;justify-content:space-between;">
               <span id="alertCount">0 cảnh báo</span>
@@ -544,7 +561,7 @@ export class AlertsHistoryPage {
 
     <!-- Actions -->
     <div class="ah-detail-actions">
-      ${a.status === 'open'  ? `<button id="adAckBtn"   class="btn-industrial btn-primary" style="flex:1">✓ ACK cảnh báo</button>` : ''}
+      ${a.status === 'open' ? `<button id="adAckBtn"   class="btn-industrial btn-primary" style="flex:1">✓ ACK cảnh báo</button>` : ''}
       ${a.status === 'acked' ? `<button id="adCloseBtn" class="btn-industrial btn-danger"  style="flex:1">✕ Đóng cảnh báo</button>` : ''}
       <button id="adAnalyticsBtn" class="btn-industrial" style="flex:1">📈 Phân tích</button>
     </div>`;
@@ -572,6 +589,7 @@ export class AlertsHistoryPage {
 
   private bindEvents(): void {
     document.getElementById('btnRefreshAlerts')?.addEventListener('click', () => this.loadAlerts());
+    document.getElementById('btnExportAlerts')?.addEventListener('click', () => this.exportCsv());
 
     document.getElementById('alertFilter')?.addEventListener('change', async (e) => {
       this.filterStatus = (e.target as HTMLSelectElement).value;
@@ -638,6 +656,23 @@ export class AlertsHistoryPage {
     const closeAck = () => document.getElementById('ackModal')?.classList.remove('active');
     document.getElementById('ackModalClose')?.addEventListener('click', closeAck);
     document.getElementById('ackCancel')?.addEventListener('click', closeAck);
+  }
+
+  private exportCsv(): void {
+    const params = new URLSearchParams();
+    if (this.filterStatus) params.set('status', this.filterStatus);
+    if (this.fromDate) params.set('from', new Date(this.fromDate).toISOString());
+    if (this.toDate) params.set('to', new Date(this.toDate).toISOString());
+    const token = localStorage.getItem('station_token') ?? '';
+    const url = `http://localhost:5056/api/v1/alerts/export?${params}`;
+    fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.blob())
+      .then(blob => {
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `alerts_${new Date().toISOString().slice(0, 10)}.csv`;
+        a.click();
+      });
   }
 
   destroy(): void {

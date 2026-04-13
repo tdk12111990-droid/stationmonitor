@@ -447,6 +447,22 @@ export class MaintenancePage {
     });
   }
 
+  private sourceBadge(notes: string | undefined): string {
+    if (!notes) return '';
+    // Task từ Rule Engine (bao gồm NETA rules và custom rules)
+    if (/\[RULE:/.test(notes)) {
+      const isNeta = /NETA/.test(notes);
+      if (isNeta)
+        return `<span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:4px;font-size:0.65rem;font-weight:700;background:rgba(14,165,233,.15);color:#38bdf8;border:1px solid rgba(14,165,233,.2);">NETA PD</span>`;
+      return `<span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:4px;font-size:0.65rem;font-weight:700;background:rgba(34,197,94,.15);color:#4ade80;border:1px solid rgba(34,197,94,.2);">Rule Engine</span>`;
+    }
+    if (/\[EW:LOADCORR:/.test(notes))
+      return `<span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:4px;font-size:0.65rem;font-weight:700;background:rgba(168,85,247,.15);color:#c084fc;border:1px solid rgba(168,85,247,.2);">Load Corr</span>`;
+    if (/\[EW:/.test(notes))
+      return `<span style="display:inline-block;margin-top:4px;padding:1px 7px;border-radius:4px;font-size:0.65rem;font-weight:700;background:rgba(245,158,11,.15);color:#fbbf24;border:1px solid rgba(245,158,11,.2);">Early Warning</span>`;
+    return '';
+  }
+
   private renderRow(t: MaintenanceTask): string {
     const cl     = this.parseChecklist(t.checklist);
     const done   = cl.filter(i => i.done).length;
@@ -455,6 +471,7 @@ export class MaintenancePage {
     const color  = STATUS_COLORS[t.status] ?? '#64748b';
     const isExp  = this.expandedRows.has(t.id);
     const date   = t.scheduledDate ? t.scheduledDate.substring(0, 10) : '';
+    const badge  = this.sourceBadge(t.notes);
 
     const actionBtns = t.status === 'completed' ? '' : `
       ${t.status === 'pending' || t.status === 'overdue' ? `
@@ -479,8 +496,9 @@ export class MaintenancePage {
          onmouseout="this.style.background=''"
       >
         <td style="padding:10px 14px;color:#cbd5e1;">${t.deviceName ?? '<span style="color:#475569">—</span>'}</td>
-        <td style="padding:10px 14px;font-weight:600;color:#f1f5f9;max-width:180px;">
+        <td style="padding:10px 14px;font-weight:600;color:#f1f5f9;max-width:200px;">
           <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" title="${t.title}">${t.title}</div>
+          ${badge}
         </td>
         <td style="padding:10px 14px;color:#94a3b8;">${TYPE_LABELS[t.type] ?? t.type}</td>
         <td style="padding:10px 14px;color:#94a3b8;white-space:nowrap;">${date}</td>
@@ -518,7 +536,7 @@ export class MaintenancePage {
     const expandRow = isExp ? `
       <tr class="mt-row-expand">
         <td colspan="8" style="padding:12px 20px 16px;border-bottom:1px solid #1e293b;">
-          ${t.notes ? `<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:10px;">Ghi chú: ${t.notes}</div>` : ''}
+          ${t.notes ? `<div style="font-size:0.78rem;color:#94a3b8;margin-bottom:10px;">Ghi chú: ${t.notes.replace(/\[RULE:[^\]]+\]/g,'').replace(/\[EW:[^\]]+\]/g,'').trim()}</div>` : ''}
           ${total > 0 ? `
             <div style="font-size:0.75rem;font-weight:700;color:#64748b;margin-bottom:8px;letter-spacing:.4px;">CHECKLIST</div>
             <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;">

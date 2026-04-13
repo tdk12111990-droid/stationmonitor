@@ -2,13 +2,21 @@
 // RuleEvaluationWorker — Đánh giá Rules sau mỗi PLC poll
 // Chạy nền, kiểm tra mỗi 5 giây
 //
-// Condition JSONB format:
-//   { "point": "nhiet_do_pha_1", "op": ">", "value": 80 }
-//   Operators: > < >= <= ==
+// Condition JSONB format (extended):
+//   {
+//     "point": "nhiet_do_pha_1",
+//     "op": ">",
+//     "value": 80,
+//     "clearValue": 77,        // optional: ngưỡng tắt alert (hysteresis), default = value - 3
+//     "cooldownMin": 5,        // optional: phút không tạo alert mới sau khi close, default = 5
+//     "confirmReadings": 3     // optional: số lần liên tiếp vượt ngưỡng trước khi trigger, default = 1
+//   }
 //
 // Actions JSONB format:
-//   [{ "type": "alert", "level": "warning" }]
-//   [{ "type": "alert", "level": "alarm" }]
+//   [{ "type": "alert",       "level": "warning" }]
+//   [{ "type": "alert",       "level": "alarm"   }]
+//   [{ "type": "health",      "penalty": 15      }]
+//   [{ "type": "maintenance", "taskType": "repair", "scheduledInDays": 45 }]
 // ============================================================
 
 using System.Text.Json;
@@ -29,6 +37,10 @@ public class RuleEvaluationWorker : BackgroundService
     private readonly ILogger<RuleEvaluationWorker> _logger;
 
     private const int CheckIntervalMs = 5000;
+
+    // In-memory state: confirmCount và cooldownUntil per ruleId
+    private readonly Dictionary<Guid, int>      _confirmCounts  = new();
+    private readonly Dictionary<Guid, DateTime> _cooldownUntil  = new();
 
     public RuleEvaluationWorker(
         IServiceScopeFactory scopeFactory,
@@ -64,14 +76,9 @@ public class RuleEvaluationWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        // Lấy tất cả rules đang bật
-        var rules = await db.Rules
-            .Where(r => r.Enabled)
-            .ToListAsync(ct);
-
+        var rules = await db.Rules.Where(r => r.Enabled).ToListAsync(ct);
         if (rules.Count == 0) return;
 
-        // Lấy giá trị sensor mới nhất từ DB (DISTINCT ON)
         var latestReadings = await db.SensorReadings
             .FromSqlRaw(@"
                 SELECT DISTINCT ON (""PointId"") *
@@ -92,32 +99,85 @@ public class RuleEvaluationWorker : BackgroundService
         Dictionary<string, SensorReading> latestReadings,
         CancellationToken ct)
     {
-        // Parse condition
-        var condition = ParseCondition(rule.Condition);
+        var hasAlert = RuleEvaluator.HasAlertAction(rule.Actions);
+        var hasMaint = RuleEvaluator.HasMaintenanceAction(rule.Actions);
+        // Rule chỉ có health action → HealthScoreWorker xử lý, không cần xử lý ở đây
+        if (!hasAlert && !hasMaint) return;
+
+        var condition = RuleEvaluator.ParseConditionExtended(rule.Condition);
         if (condition == null) return;
 
-        var pointId = condition.Value.point;
-        var op      = condition.Value.op;
-        var threshold = condition.Value.value;
+        var (pointId, op, threshold, clearValue, cooldownMin, confirmReadings) = condition.Value;
 
         if (!latestReadings.TryGetValue(pointId, out var reading)) return;
         if (reading.Value == null) return;
 
         var currentValue = reading.Value.Value;
-        var triggered = RuleEvaluator.Evaluate(currentValue, op, threshold);
+        var triggered    = RuleEvaluator.Evaluate(currentValue, op, threshold);
 
-        if (!triggered) return;
+        if (hasAlert)
+            await HandleAlertActionAsync(services, db, rule, pointId, op, threshold, clearValue,
+                                         cooldownMin, confirmReadings, currentValue, triggered, ct);
 
-        // Kiểm tra xem đã có alert open cho rule này chưa (tránh spam)
-        var existingOpen = await db.Alerts.AnyAsync(
-            a => a.RuleId == rule.Id && a.Status == "open", ct);
+        if (hasMaint && triggered)
+            await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
+    }
 
-        if (existingOpen) return;
+    // ── Xử lý action type=alert ────────────────────────────────────────────
+    private async Task HandleAlertActionAsync(
+        IServiceProvider services, AppDbContext db, Rule rule,
+        string pointId, string op, double threshold, double clearValue,
+        int cooldownMin, int confirmReadings,
+        double currentValue, bool triggered, CancellationToken ct)
+    {
+        // ── Lấy alert đang open cho rule này ──────────────────
+        var openAlert = await db.Alerts
+            .Where(a => a.RuleId == rule.Id && a.Status == "open")
+            .FirstOrDefaultAsync(ct);
 
-        // Parse actions để lấy level
-        var level = ParseAlertLevel(rule.Actions);
+        // ── Auto-close nếu giá trị xuống dưới clearValue ──────
+        if (openAlert != null && !triggered)
+        {
+            var belowClear = RuleEvaluator.EvaluateClear(currentValue, op, clearValue);
+            if (belowClear)
+            {
+                openAlert.Status   = "closed";
+                openAlert.ClosedAt = DateTime.UtcNow;
+                db.AlertHistories.Add(new AlertHistory
+                {
+                    AlertId = openAlert.Id,
+                    Status  = "auto_closed",
+                    Note    = $"Tự động đóng: {pointId} = {currentValue:F1} (dưới ngưỡng phục hồi {clearValue:F1})",
+                });
+                await db.SaveChangesAsync(ct);
+                _cooldownUntil[rule.Id] = DateTime.UtcNow.AddMinutes(cooldownMin);
+                _confirmCounts[rule.Id] = 0;
+                _logger.LogInformation("[Rules] Auto-close alert {id}: {pt}={val}", openAlert.Id, pointId, currentValue);
+            }
+            return;
+        }
 
-        // Tạo alert mới
+        if (!triggered) { _confirmCounts[rule.Id] = 0; return; }
+        if (openAlert != null) return;
+
+        if (_cooldownUntil.TryGetValue(rule.Id, out var until) && DateTime.UtcNow < until)
+        {
+            _logger.LogDebug("[Rules] Rule {id} đang trong cooldown tới {until}", rule.Id, until);
+            return;
+        }
+
+        _confirmCounts.TryGetValue(rule.Id, out var count);
+        count++;
+        _confirmCounts[rule.Id] = count;
+        if (count < confirmReadings)
+        {
+            _logger.LogDebug("[Rules] Rule {id}: {count}/{need} readings", rule.Id, count, confirmReadings);
+            return;
+        }
+
+        _confirmCounts[rule.Id] = 0;
+
+        var level = RuleEvaluator.ParseAlertLevel(rule.Actions);
         var alert = new Alert
         {
             StationId   = rule.StationId,
@@ -132,8 +192,6 @@ public class RuleEvaluationWorker : BackgroundService
         };
 
         db.Alerts.Add(alert);
-
-        // Ghi RuleTriggerLog — lưu lịch sử mỗi lần rule kích hoạt
         db.RuleTriggerLogs.Add(new RuleTriggerLog
         {
             RuleId            = rule.Id,
@@ -143,47 +201,32 @@ public class RuleEvaluationWorker : BackgroundService
             ValueAtTrigger    = currentValue,
             AlertId           = alert.Id,
         });
-
-        // Ghi AlertHistory — trạng thái đầu tiên khi tạo
         db.AlertHistories.Add(new AlertHistory
         {
-            AlertId = alert.Id,
-            Status  = "triggered",
-            Note    = alert.Message,
+            AlertId = alert.Id, Status = "triggered", Note = alert.Message,
         });
-
-        // Thêm vào SyncQueue để CloudSyncWorker đẩy lên Supabase
         db.SyncQueues.Add(new StationMonitor.Data.Entities.SyncQueue
         {
             EntityType = "Alert",
             EntityId   = alert.Id,
-            Payload    = System.Text.Json.JsonSerializer.Serialize(new
+            Payload    = JsonSerializer.Serialize(new
             {
-                id           = alert.Id,
-                station_id   = alert.StationId,
-                device_id    = alert.DeviceId,
-                rule_id      = alert.RuleId,
-                source       = alert.Source,
-                level        = alert.Level,
-                status       = alert.Status,
-                message      = alert.Message,
-                value        = alert.Value,
+                id = alert.Id, station_id = alert.StationId, device_id = alert.DeviceId,
+                rule_id = alert.RuleId, source = alert.Source, level = alert.Level,
+                status = alert.Status, message = alert.Message, value = alert.Value,
                 triggered_at = alert.TriggeredAt,
             }),
             Status = "pending",
         });
 
         await db.SaveChangesAsync(ct);
+        _logger.LogWarning("[Rules] Alert [{Level}] ({confirmReadings} readings): {Msg}", level, confirmReadings, alert.Message);
 
-        _logger.LogWarning("[Rules] Alert [{Level}]: {Msg}", level, alert.Message);
-
-        // Gửi email thông báo (nếu có alert_email trong settings)
-        var emailSetting = await db.SystemSettings
-            .FirstOrDefaultAsync(s => s.Key == "alert_email", ct);
+        var emailSetting = await db.SystemSettings.FirstOrDefaultAsync(s => s.Key == "alert_email", ct);
         var toEmail = emailSetting?.Value?.Trim('"');
         if (!string.IsNullOrWhiteSpace(toEmail))
         {
-            var emailSvc = services.GetRequiredService<StationMonitor.Services.EmailNotifyService>();
+            var emailSvc = services.GetRequiredService<EmailNotifyService>();
             var device   = alert.DeviceId.HasValue
                 ? await db.Devices.FindAsync(new object[] { alert.DeviceId.Value }, ct)
                 : null;
@@ -191,23 +234,55 @@ public class RuleEvaluationWorker : BackgroundService
                 toEmail, alert.Level, alert.Message ?? "",
                 device?.Name ?? "Không rõ", alert.Value,
                 alert.Message?.Contains("°C") == true ? "°C" : "dB"
-            ).ContinueWith(t => { /* fire-and-forget, lỗi đã log trong service */ });
+            ).ContinueWith(_ => { });
         }
 
-        // Push realtime về frontend
         await _notifier.SendAlertAsync(new {
-            id          = alert.Id,
-            level       = alert.Level,
-            status      = alert.Status,
-            message     = alert.Message,
-            value       = alert.Value,
-            triggeredAt = alert.TriggeredAt,
-            ruleId      = alert.RuleId,
-            deviceId    = alert.DeviceId,
+            id = alert.Id, level = alert.Level, status = alert.Status,
+            message = alert.Message, value = alert.Value,
+            triggeredAt = alert.TriggeredAt, ruleId = alert.RuleId, deviceId = alert.DeviceId,
         });
     }
 
-    // ── Helpers ───────────────────────────────────────────
+    // ── Xử lý action type=maintenance ─────────────────────────────────────
+    private async Task HandleMaintenanceActionAsync(
+        AppDbContext db, Rule rule, string pointId, double currentValue,
+        SensorReading reading, CancellationToken ct)
+    {
+        var maint = RuleEvaluator.ParseMaintenanceAction(rule.Actions);
+        if (maint == null) return;
+        var (taskType, scheduledInDays) = maint.Value;
+
+        // Dedup: không tạo lại nếu đã có task pending/in_progress cho rule này
+        var marker = $"[RULE:{rule.Id}]";
+        var exists = await db.MaintenanceTasks.AnyAsync(t =>
+            t.Notes != null && t.Notes.Contains(marker) &&
+            (t.Status == "pending" || t.Status == "in_progress"), ct);
+        if (exists) return;
+
+        var device = rule.DeviceId.HasValue
+            ? await db.Devices.FindAsync(new object[] { rule.DeviceId.Value }, ct)
+            : null;
+
+        var task = new MaintenanceTask
+        {
+            StationId     = rule.StationId,
+            DeviceId      = rule.DeviceId,
+            Title         = $"[{rule.Name}] {pointId} = {currentValue:F1}",
+            Type          = taskType,
+            ScheduledDate = DateTime.UtcNow.AddDays(scheduledInDays),
+            Status        = "pending",
+            Notes         = $"Tự động tạo bởi Rule Engine.\n" +
+                            $"Rule: {rule.Name}\n" +
+                            $"Giá trị tại thời điểm trigger: {pointId} = {currentValue:F1}\n" +
+                            $"Thiết bị: {device?.Name ?? "Không rõ"}\n" +
+                            marker,
+        };
+        db.MaintenanceTasks.Add(task);
+        await db.SaveChangesAsync(ct);
+
+        _logger.LogWarning("[Rules] Maintenance task tạo: [{rule}] → {type} in {days} ngày", rule.Name, taskType, scheduledInDays);
+    }
 
     private static (string point, string op, double value)? ParseCondition(string json)
         => RuleEvaluator.ParseCondition(json);

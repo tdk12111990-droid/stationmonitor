@@ -4,6 +4,97 @@
 
 ---
 
+## 2026-04-07 — Analytics nâng cao + UI hoàn thiện + Test mở rộng
+
+### Nhóm 1 — Fix logic backend (không cần Jetson)
+
+**G1-1: Fix Flapping Alert — Hysteresis + Cooldown**
+- File: `StationMonitor.Workers/Polling/RuleEvaluationWorker.cs` + `RuleEvaluator.cs`
+- Vấn đề: sensor dao động quanh ngưỡng 80°C → alert spam liên tục vì không có cooldown
+- Giải pháp:
+  - `RuleEvaluator.ParseConditionExtended()` đọc thêm 3 field optional từ condition JSON:
+    - `clearValue`: ngưỡng phục hồi (hysteresis), mặc định = threshold ± 3
+    - `cooldownMin`: chặn tạo alert mới N phút sau khi close, mặc định = 5
+    - `confirmReadings`: cần N lần đọc liên tiếp vượt ngưỡng trước khi trigger, mặc định = 1
+  - `EvaluateClear()`: ngược chiều với trigger (ví dụ trigger ">80" → clear khi "≤77")
+  - **Auto-close alert**: nếu alert đang open và giá trị xuống dưới `clearValue` → tự đóng + ghi AlertHistory "auto_closed" + bắt đầu cooldown
+  - In-memory `_confirmCounts` và `_cooldownUntil` per ruleId
+
+**G1-2: Delta-T phân tích chênh lệch nhiệt 3 pha**
+- File: `EarlyWarningWorker.cs` — thêm `AnalyzeDeltaTAsync()`
+- Logic: lấy latest reading của nhiet_do_pha_1/2/3, tính ΔT = max - min
+  - ΔT > 10°C → warning "Chênh lệch nhiệt bất thường"
+  - ΔT > 15°C → alarm (tiếp điểm hỏng nghiêm trọng)
+- Dedup 6h theo marker `[EW:DELTAT:{deviceId}]`
+- Dùng raw SQL `DISTINCT ON (DeviceId, PointId)` với IN clause (tránh Npgsql dependency)
+
+**G1-3: PD Frequency Counting — đếm tần suất phóng điện**
+- File: `EarlyWarningWorker.cs` — thêm `AnalyzePdFrequencyAsync()`
+- Logic: đếm số readings PD > 2.0 dB theo từng tuần (tuần này vs tuần trước)
+  - Tăng > 3x → warning
+  - Tăng > 5x → alarm
+- Dedup 12h theo marker `[EW:PDFREQ:{deviceId}]`
+
+### Nhóm 2 — Hoàn thiện backend
+
+**G2-4: LoadCorrelationAnalyzer (mới)**
+- File mới: `StationMonitor.Workers/Polling/LoadCorrelationAnalyzer.cs`
+- CBM thật sự: tính `thermal_efficiency = temp / (current + 0.001)`, so với baseline 30 ngày (mean + 2σ)
+- Kích hoạt khi admin set `current_point_id` trong SystemSettings
+- Nếu chưa cấu hình → bỏ qua (graceful skip)
+- Dùng `SensorRow` record (strongly-typed thay vì dynamic để tránh compile error)
+
+**G2-5: Health Score nâng cao**
+- File: `HealthScoreWorker.cs` — rewrite formula
+- Thêm exponential decay: `penalty × e^(-0.1 × age_days)` — alert 7 ngày trước còn ~50% trọng lượng
+- Thêm Delta-T penalty: ΔT ≥ 15°C → -20, ΔT ≥ 10°C → -10
+- Thêm PD frequency penalty: tăng ≥ 5x → -20, ≥ 3x → -10
+- Ghi thêm `alarmCount`, `warningCount` vào JSON để frontend hiển thị
+
+**G2-7: StationsController PUT + DELETE**
+- File: `StationsController.cs`
+- Thêm `PUT /api/v1/stations/{id}` — cập nhật name/code/location/status (admin only)
+- Thêm `DELETE /api/v1/stations/{id}` — xóa trạm (admin only)
+  - Kiểm tra có device → trả 400 "Xóa thiết bị trước" để tránh orphan data
+
+**G2-6: SMTP config** — Đã có sẵn đầy đủ trong SettingsPage, không cần làm thêm
+
+### Nhóm 3 — UI + Tests
+
+**G3-8: Nút Export CSV**
+- `AlertsHistoryPage.ts`: thêm nút `⬇ CSV`, gọi `GET /alerts/export` với filter hiện tại (status, from, to)
+- `AnalyticsPage.ts`: thêm nút `⬇ CSV` trên thanh tab bar, gọi `GET /history/export`
+
+**G3-9: Protocol Discovery UI**
+- File: `DeviceManagementPage.ts` — mở rộng modal "Quét LAN" thành modal 3 tab
+  - **Tab 0 — Quét LAN**: scan subnet, hiển thị IP/type/ports/online status
+  - **Tab 1 — ONVIF**: gọi `GET /protocol/discover-onvif`, hiển thị camera + snapshotUri
+  - **Tab 2 — Test kết nối**: nhập IP/port/protocol → `POST /protocol/test-connection`, hiển thị latency + data đọc được
+
+**G3-10: Mở rộng test-api.mjs**
+- Từ 42 → ~70 test cases, thêm:
+  - Phase 9: Analytics (health scores, trend, trend?days=3)
+  - Phase 10: Cloud Sync (status, trigger)
+  - Phase 11: Protocol (serial-ports, scan IP, discover, discover-onvif, test-connection)
+  - Export: alerts/export CSV, history/export CSV
+  - Reports: generate, download, delete
+  - SLD: GET sld/{stationId}
+  - Notifications: smtp-config
+  - Stations: PUT, DELETE (dùng trạm test tạo/xóa)
+
+### Kết quả
+- Backend build: ✅ 0 errors (6 warnings cũ — package version mismatch, không ảnh hưởng)
+- Frontend TypeScript: ✅ 0 errors
+- Files mới: `LoadCorrelationAnalyzer.cs`, `ai-python/ai_service.proto`, `AI_PLAN.md`, `ANALYTICS_PLAN.md`, `PROJECT_STATUS.md`
+- Files sửa: RuleEvaluationWorker, RuleEvaluator, EarlyWarningWorker, HealthScoreWorker, StationsController, AlertsHistoryPage, AnalyticsPage, DeviceManagementPage, test-api.mjs
+
+### Lỗi gặp và fix
+- `LoadCorrelationAnalyzer`: dùng `IList<dynamic>` không cast được từ anonymous type → đổi sang `SensorRow` record (strongly-typed)
+- `EarlyWarningWorker`: dùng `Npgsql.NpgsqlParameter` không có reference trong Workers project → đổi sang IN clause hardcode
+- `HealthScoreWorker`: inject `IRealtimeNotifier` — thêm vào constructor (cần notifier cho tương lai)
+
+---
+
 ## 2026-04-02 — Khởi tạo Backend (Phase 1)
 
 ### Làm gì
@@ -269,3 +360,4 @@
 - Build thành công, 0 errors
 - TypeScript 0 lỗi
 - Supabase: bảng tạo thành công, RLS active
+

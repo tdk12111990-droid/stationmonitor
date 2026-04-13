@@ -70,8 +70,8 @@ public class RulesController : ControllerBase
         {
             StationId = req.StationId ?? station.Id,
             DeviceId  = req.DeviceId,
-            Name      = req.Name,
-            Condition = req.Condition,
+            Name      = req.Name ?? "Tên quy tắc mới",
+            Condition = req.Condition ?? "{}",
             Actions   = req.Actions ?? "[]",
             Enabled   = req.Enabled ?? true,
         };

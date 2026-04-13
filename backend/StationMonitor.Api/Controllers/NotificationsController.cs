@@ -69,8 +69,25 @@ public class NotificationsController : ControllerBase
         }
         catch (Exception ex)
         {
-            // Trả về chi tiết lỗi để user debug (ví dụ: Auth failed, Connection refused)
             return BadRequest(new { message = $"Gửi thất bại: {ex.Message}" });
+        }
+    }
+
+    // GET /api/v1/notifications/test-email/direct?email=...
+    [HttpGet("test-email/direct")]
+    [AllowAnonymous]
+    public async Task<IActionResult> TestEmailDirect([FromQuery] string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            return BadRequest("Vui lòng cung cấp tham số ?email=...");
+        try
+        {
+            await _email.SendTestEmailAsync(email);
+            return Ok(new { success = true, message = $"Đã gửi email test tới {email}" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { success = false, message = $"Gửi thất bại: {ex.Message}" });
         }
     }
 }

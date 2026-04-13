@@ -71,6 +71,9 @@ export class AnalyticsPage {
               border:1px solid ${r==='1D'?'#2563eb':'#334155'};border-radius:4px;
               color:${r==='1D'?'#60a5fa':'#64748b'};font-size:0.7rem;font-weight:600;cursor:pointer;">${r}</button>
           `).join('')}
+          <button id="btnExportHistory" title="Xuất lịch sử CSV"
+            style="padding:3px 9px;background:none;border:1px solid #334155;border-radius:4px;
+            color:#64748b;font-size:0.7rem;font-weight:600;cursor:pointer;">⬇ CSV</button>
           <div style="display:flex;align-items:center;gap:6px;margin-left:8px;">
             <span style="font-size:0.68rem;color:#64748b;font-weight:700;">LIVE</span>
             <div id="an-live-wrap" style="position:relative;width:34px;height:18px;cursor:pointer;">
@@ -101,8 +104,24 @@ export class AnalyticsPage {
     this.bindTabBar();
     this.bindRangeButtons();
     this.bindLiveToggle();
+    this.bindExportHistory();
     await this.loadAll();
     await this.initTab('overview');
+  }
+
+  private bindExportHistory(): void {
+    document.getElementById('btnExportHistory')?.addEventListener('click', () => {
+      const token = localStorage.getItem('station_token') ?? '';
+      const url = `http://localhost:5056/api/v1/history/export`;
+      fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+        .then(r => r.blob())
+        .then(blob => {
+          const a = document.createElement('a');
+          a.href = URL.createObjectURL(blob);
+          a.download = `history_${new Date().toISOString().slice(0,10)}.csv`;
+          a.click();
+        });
+    });
   }
 
   private bindTabBar(): void {
@@ -618,16 +637,27 @@ export class AnalyticsPage {
       </div>
     `);
 
-    // Line chart PD — ngưỡng từ Rules
+    // Line chart PD — ngưỡng từ Rules + NETA MTS 2023 cố định
     const nowMs = Date.now();
+    const tMin  = nowMs - RMS[this.range];
     const pdDatasets: object[] = [
       {
-        label: 'PD (dB)',
+        label: 'PD (dBmW)',
         data: this.pdH.map(h => ({x: new Date(h.time).getTime(), y: h.value})),
         borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.08)',
         borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true, order: 1,
       },
-      ...this.thresholdDatasets(PD_ID, nowMs - RMS[this.range], nowMs),
+      ...this.thresholdDatasets(PD_ID, tMin, nowMs),
+      // NETA MTS 2023 — 3 ngưỡng cố định (không phụ thuộc rules)
+      { label: 'NETA Monitor (−37)', data: [{x:tMin,y:-37},{x:nowMs,y:-37}],
+        borderColor:'#eab308', backgroundColor:'transparent',
+        borderWidth:1, borderDash:[4,4], pointRadius:0, tension:0, order:98 },
+      { label: 'NETA Warning (−27)', data: [{x:tMin,y:-27},{x:nowMs,y:-27}],
+        borderColor:'#f97316', backgroundColor:'transparent',
+        borderWidth:1, borderDash:[4,4], pointRadius:0, tension:0, order:98 },
+      { label: 'NETA Critical (−20)', data: [{x:tMin,y:-20},{x:nowMs,y:-20}],
+        borderColor:'#ef4444', backgroundColor:'transparent',
+        borderWidth:1, borderDash:[4,4], pointRadius:0, tension:0, order:98 },
     ];
     this.mkChart('an-c-pd-line', {
       type: 'line',

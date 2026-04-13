@@ -4,6 +4,7 @@
 // ============================================================
 
 import { stationApi, type SldPoint, type SldUnpinnedDevice, type SensorPoint, type HealthScore } from '@/services/StationApiService';
+import * as signalR from '@microsoft/signalr';
 import { GO2RTC_URL } from '@/utils/env';
 import { router } from '@/router/Router';
 import { confirmDialog } from '@/utils/confirm';
@@ -21,15 +22,65 @@ export class DashboardPage {
   private healthInterval?: ReturnType<typeof setInterval>;
   private editMode = false;
 
-  // Pan/zoom state (cần truy cập từ nhiều method)
-  private vs = 1; private vx = 0; private vy = 0;
+  // Pan/zoom/rotate state (cần truy cập từ nhiều method)
+  private vs = 1; private vx = 0; private vy = 0; private vr = 0;
+  private unpinnedDevices: SldUnpinnedDevice[] = [];
+  private hubConnection: signalR.HubConnection | null = null;
+  private showLabels = false; // State cho viec hien nhãn
 
   render(): string {
     return `
     <div class="dashboard-page new-dash-theme" style="position:relative;overflow:hidden;height:100%;background:#0f172a;">
 
       <!-- ══ SLD SVG fullscreen ══ -->
-      <div id="sldViewport" style="position:absolute;inset:0;overflow:hidden;cursor:grab;">
+      <style>
+      @keyframes sld-float {
+        0% { transform: translateY(0px); }
+        50% { transform: translateY(-3px); }
+        100% { transform: translateY(0px); }
+      }
+      .sld-floating-badge {
+        animation: sld-float 3s ease-in-out infinite;
+      }
+      /* Mac dinh an nhan (label) */
+      .sld-point-label {
+        opacity: 0;
+        transition: opacity 0.2s ease-in-out;
+        pointer-events: none;
+      }
+      /* Hien khi hover vao group */
+      .sld-point-g:hover .sld-point-label {
+        opacity: 1;
+      }
+      /* Hien tat ca khi co class show-labels */
+      .show-labels .sld-point-label {
+        opacity: 1;
+      }
+      /* Style nut Toggle */
+      .sld-label-toggle-btn {
+        display: none; /* Mac dinh an */
+        background: rgba(255,255,255,0.07);
+        border: 1px solid rgba(255,255,255,0.15);
+        color: #e2e8f0;
+        border-radius: 5px;
+        padding: 3px 9px;
+        font-size: 0.68rem;
+        cursor: pointer;
+        align-items: center;
+        gap: 6px;
+        transition: all 0.2s;
+      }
+      /* Chi hien trong Edit Mode */
+      .edit-mode-active .sld-label-toggle-btn {
+        display: flex;
+      }
+      .sld-label-toggle-btn.active {
+        background: #1d4ed8;
+        border-color: #3b82f6;
+        color: white;
+      }
+      </style>
+        <div id="sldViewport" style="position:absolute;inset:0;overflow:hidden;cursor:grab;">
         <svg id="sld-canvas" style="width:100%;height:100%;display:block;" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <filter id="sld-color-filter" color-interpolation-filters="sRGB">
@@ -149,8 +200,13 @@ export class DashboardPage {
         <div style="width:1px;height:18px;background:rgba(255,255,255,0.15);"></div>
         <button id="sld-btn-fit" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);
           color:#e2e8f0;border-radius:5px;padding:3px 9px;font-size:0.68rem;cursor:pointer;">⊞ Fit</button>
+        <button id="sld-btn-rotate" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);
+          color:#e2e8f0;border-radius:5px;padding:3px 9px;font-size:0.68rem;cursor:pointer;">🔄 Xoay</button>
         <button id="btnEditMode" style="background:rgba(255,255,255,0.07);border:1px solid rgba(255,255,255,0.15);
           color:#e2e8f0;border-radius:5px;padding:3px 9px;font-size:0.68rem;cursor:pointer;">📝 Chỉnh sơ đồ</button>
+        <button id="toggleLabelsBtn" class="sld-label-toggle-btn">
+          <span id="labelToggleText">Hiện tên</span>
+        </button>
         <label title="Màu đường nét" style="display:flex;align-items:center;gap:3px;cursor:pointer;color:#94a3b8;font-size:10px;">
           🎨<input type="color" id="sld-color-picker" value="#38bdf8"
             style="width:18px;height:14px;border:none;padding:0;background:none;cursor:pointer;border-radius:2px;">
@@ -275,6 +331,7 @@ export class DashboardPage {
     this.initDragDrop();
     this.initUploadSvg();
     this.bindNavEvents();
+    this.connectSignalR();
 
     // Load data
     await this.loadSld();
@@ -295,7 +352,11 @@ export class DashboardPage {
     try {
       const data = await stationApi.getSld(this.stationId);
       // sldFileId tracked server-side only
+      // viewRotation is stored locally to avoid DB schema dependency crashes
+      const localVr = localStorage.getItem(`sld_vr_${this.stationId}`);
+      this.vr = localVr ? parseInt(localVr) : 0;
       this.sldPoints = data.points;
+      this.unpinnedDevices = data.unpinned;
 
       // Render SVG background
       this.renderSvgBackground(data.svgUrl);
@@ -304,7 +365,7 @@ export class DashboardPage {
       this.renderSldPoints(data.points);
 
       // Render drawer
-      this.renderDrawer(data.unpinned);
+      this.renderDrawer();
 
       // Status bar
       const statusEl = document.getElementById('statusSld');
@@ -372,8 +433,10 @@ export class DashboardPage {
       const color = this.dotColor(p.deviceType, p.deviceStatus);
       const g = document.createElementNS(ns, 'g');
       g.setAttribute('data-point-id', p.id);
-      g.setAttribute('data-device-id', p.deviceId ?? '');
+      g.setAttribute('data-point-tag', p.pointId ?? '');
+      g.setAttribute('data-device-id', (p.deviceId ?? '').toLowerCase());
       g.setAttribute('data-device-type', p.deviceType ?? '');
+      g.setAttribute('transform', `rotate(${-this.vr}, ${p.x}, ${p.y})`);
       g.style.cursor = this.editMode ? 'move' : 'pointer';
 
       const circ = document.createElementNS(ns, 'circle');
@@ -384,11 +447,62 @@ export class DashboardPage {
       circ.setAttribute('stroke-width', '1.5');
       g.appendChild(circ);
 
+      const isCamera = p.deviceType?.toLowerCase().startsWith('camera');
+      if (isCamera) {
+          // Skip badge for cameras
+      } else {
+        // ══ Measurement Badge ══
+        // QUAN TRỌNG: tách 2 group để tránh CSS animation override SVG transform.
+        // posG: chứa SVG transform (vị trí + scale) — KHÔNG có class animation
+        // animG: chứa CSS animation (sld-floating-badge) — KHÔNG có SVG transform
+        const posG = document.createElementNS(ns, 'g');
+        posG.classList.add('sld-badge-pos');
+        posG.setAttribute('transform', `translate(${p.x}, ${p.y}) scale(${1 / (this.vs || 1)})`);
+
+        const animG = document.createElementNS(ns, 'g');
+        animG.classList.add('sld-floating-badge'); // CSS animation ở đây, không có transform attribute
+
+        const badgeBg = document.createElementNS(ns, 'rect');
+        badgeBg.classList.add('sld-measurement-bg');
+        badgeBg.setAttribute('x', '-18');
+        badgeBg.setAttribute('y', '-20');
+        badgeBg.setAttribute('width', '36');
+        badgeBg.setAttribute('height', '12');
+        badgeBg.setAttribute('rx', '6');
+        badgeBg.setAttribute('fill', 'rgba(15, 23, 42, 0.9)');
+        badgeBg.setAttribute('stroke', '#facc15');
+        badgeBg.setAttribute('stroke-width', '1');
+        badgeBg.setAttribute('style', 'cursor: inherit;');
+
+        const measureTxt = document.createElementNS(ns, 'text');
+        measureTxt.setAttribute('x', '0');
+        measureTxt.setAttribute('y', '-11.5');
+        measureTxt.setAttribute('text-anchor', 'middle');
+        measureTxt.setAttribute('fill', '#facc15');
+        measureTxt.setAttribute('font-size', '7.5px');
+        measureTxt.setAttribute('font-weight', '900');
+        measureTxt.setAttribute('style', 'pointer-events:none;');
+        measureTxt.classList.add('sld-measurement-text');
+
+        const allSensors = this.sensors.filter(s => s.deviceId === p.deviceId);
+        const pointTag = p.pointId;
+        const isUnifiedIcon = pointTag === p.deviceId;
+        const mySensors = isUnifiedIcon ? allSensors : allSensors.filter(s => s.pointId === pointTag);
+        measureTxt.textContent = mySensors.length > 0 && mySensors[0]
+          ? `${mySensors[0].value.toFixed(1)}${mySensors[0].unit}`
+          : '--';
+
+        animG.appendChild(badgeBg);
+        animG.appendChild(measureTxt);
+        posG.appendChild(animG);
+        g.appendChild(posG);
+      }
+
       const txt = document.createElementNS(ns, 'text');
       txt.setAttribute('x', String(p.x + p.r + 3)); txt.setAttribute('y', String(p.y + 4));
       txt.setAttribute('font-size', '7'); txt.setAttribute('font-family', 'sans-serif');
       txt.setAttribute('font-weight', '700'); txt.setAttribute('fill', color);
-      txt.setAttribute('pointer-events', 'none');
+      txt.classList.add('sld-point-label'); // Match the CSS defined above
       txt.textContent = p.label;
       g.appendChild(txt);
 
@@ -396,22 +510,22 @@ export class DashboardPage {
       g.addEventListener('mouseenter', (e: MouseEvent) => {
         if (this.editMode) return;
         const tip = document.getElementById('sld-tooltip')!;
-        const deviceSensors = this.sensors.filter(s => s.deviceId === p.deviceId);
-        let sensorHtml = '';
-        if (deviceSensors.length > 0) {
-          sensorHtml = '<div style="border-top:1px solid #334155;margin:5px 0 3px;"></div>' +
-            deviceSensors.map(s => {
-              const lbl = this.sensorLabel(s.pointId);
-              const col = s.pointId.startsWith('nhiet') ? '#f87171' : '#fbbf24';
-              return `<div style="display:flex;justify-content:space-between;gap:10px;">
-                <span style="color:#94a3b8;">${lbl}</span>
-                <b style="color:${col};">${s.value.toFixed(1)} ${s.unit}</b>
-              </div>`;
-            }).join('');
-        }
+        const allSensors = this.sensors.filter(s => s.deviceId === p.deviceId);
+        const pointTag = p.pointId;
+        const isUnifiedIcon = pointTag === p.deviceId;
+        const deviceSensors = isUnifiedIcon ? allSensors : allSensors.filter(s => s.pointId === pointTag);
+
+        const sensorHtml = deviceSensors.map(s => `
+          <div style="display:flex;justify-content:space-between;gap:15px;margin-bottom:3px;">
+            <span style="color:#94a3b8;">${s.pointId.replace('nhiet_do_', '').replace('_', ' ')}:</span>
+            <span style="color:#10b981;font-weight:600;">${s.value}${s.unit}</span>
+          </div>
+        `).join('') || '<div style="color:#64748b;font-style:italic;">Không có dữ liệu</div>';
+
         tip.innerHTML = `
           <div style="font-weight:800;color:#e2e8f0;margin-bottom:2px;">${p.label}</div>
           <div style="font-size:0.68rem;color:#64748b;">${p.deviceType ?? '—'} · ${p.deviceStatus ?? '—'}</div>
+          <div style="border-top:1px solid #334155;margin:5px 0 3px;"></div>
           ${sensorHtml}
           <div style="font-size:0.62rem;color:#475569;margin-top:4px;">Click để xem chi tiết</div>`;
         const vp = document.getElementById('sldViewport')!.getBoundingClientRect();
@@ -429,6 +543,26 @@ export class DashboardPage {
     this.applyDotFilter();
   }
 
+  private updateRealtimeData(data: any[]): void {
+    if (!data || !Array.isArray(data)) return;
+    // Update SLD persistent labels
+    data.forEach(item => {
+      const devId = (item.deviceId || '').toLowerCase();
+      const groups = document.querySelectorAll(`g[data-device-id="${devId}"]`);
+      groups.forEach(g => {
+        const pointTag = (g.getAttribute('data-point-tag') || '').toLowerCase();
+        const incomingPointId = (item.pointId || '').toLowerCase();
+        const incomingDeviceId = (item.deviceId || '').toLowerCase();
+
+        const isUnified = pointTag === incomingDeviceId;
+        if (isUnified || pointTag === incomingPointId) {
+          const mTxt = g.querySelector('.sld-measurement-text');
+          if (mTxt) mTxt.textContent = `${item.value.toFixed(1)}${item.unit}`;
+        }
+      });
+    });
+  }
+
   private dotColor(type?: string, status?: string): string {
     if (!type) return '#94a3b8';
     if (type.startsWith('camera')) return '#3b82f6';
@@ -437,43 +571,44 @@ export class DashboardPage {
   }
 
   // ── Drawer (unpinned devices) ────────────────────────────────
-  private renderDrawer(unpinned: SldUnpinnedDevice[]): void {
+  private renderDrawer(): void {
     const list = document.getElementById('drawerList');
     if (!list) return;
-    if (unpinned.length === 0) {
+    if (this.unpinnedDevices.length === 0) {
       list.innerHTML = '<div style="color:#475569;font-size:0.72rem;text-align:center;padding:20px;">Tất cả thiết bị đã đặt lên sơ đồ</div>';
       return;
     }
-    list.innerHTML = unpinned.map(d => {
-      const icon = d.type.startsWith('camera') ? '📷' : d.type === 'plc_s7' ? '🔌' : '📡';
-      const color = d.status === 'online' ? '#10b981' : '#ef4444';
-      return `
-      <div class="drawer-device-item" draggable="true" data-device-id="${d.id}" data-device-name="${d.name}" data-device-type="${d.type}"
-        style="background:#1f2937;border:1px solid transparent;border-radius:6px;
-          padding:9px 10px;cursor:grab;font-size:0.72rem;user-select:none;">
-        <div style="display:flex;align-items:center;gap:7px;">
-          <span>${icon}</span>
-          <div>
-            <div style="font-weight:700;color:#e2e8f0;">${d.name}</div>
-            <div style="color:${color};font-size:0.62rem;margin-top:2px;">● ${d.status}</div>
-          </div>
+    let html = '';
+    for (const d of this.unpinnedDevices) {
+      const dev = d as any;
+      html += `
+        <div class="sld-draggable" draggable="true" 
+          data-id="${dev.id}" 
+          data-type="${dev.type}"
+          data-sensor-tag="${dev.sensorTag || ''}"
+          style="padding:6px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);
+          border-radius:6px;cursor:grab;font-size:0.75rem;margin-bottom:6px;display:flex;align-items:center;gap:8px;
+          transition:all 0.2s ease;" onmouseover="this.style.background='rgba(255,255,255,0.1)'" onmouseout="this.style.background='rgba(255,255,255,0.05)'">
+          <span style="font-size:1.1rem;">${dev.type.startsWith('camera') ? '📷' : '📡'}</span>
+          <span style="color:#e2e8f0;">${dev.name}</span>
         </div>
-      </div>`;
-    }).join('');
+      `;
+    }
+    list.innerHTML = html;
 
-    // Bind dragstart
-    list.querySelectorAll('.drawer-device-item').forEach(item => {
-      item.addEventListener('dragstart', (e: Event) => {
-        const de = e as DragEvent;
-        const el = item as HTMLElement;
-        de.dataTransfer!.setData('deviceId', el.dataset['deviceId'] ?? '');
-        de.dataTransfer!.setData('deviceName', el.dataset['deviceName'] ?? '');
-        de.dataTransfer!.setData('deviceType', el.dataset['deviceType'] ?? '');
-        el.style.opacity = '0.4';
-      });
-      item.addEventListener('dragend', (_e: Event) => {
-        (item as HTMLElement).style.opacity = '1';
-      });
+    // Use delegation for better stability
+    list.addEventListener('dragstart', (e: DragEvent) => {
+      const target = (e.target as HTMLElement).closest('.sld-draggable') as HTMLElement;
+      if (target) {
+        e.dataTransfer?.setData('device-id', target.dataset.id || '');
+        e.dataTransfer?.setData('device-name', target.querySelector('span:last-child')?.textContent || '');
+        e.dataTransfer?.setData('sensor-tag', target.dataset.sensorTag || '');
+        target.style.opacity = '0.4';
+      }
+    });
+    list.addEventListener('dragend', (e: DragEvent) => {
+      const target = (e.target as HTMLElement).closest('.sld-draggable') as HTMLElement;
+      if (target) target.style.opacity = '1';
     });
   }
 
@@ -490,30 +625,31 @@ export class DashboardPage {
       if (!this.editMode) return;
       e.preventDefault();
 
-      const deviceId = e.dataTransfer!.getData('deviceId');
-      const deviceName = e.dataTransfer!.getData('deviceName');
+      const deviceId = e.dataTransfer?.getData('device-id');
+      const pointTag = e.dataTransfer?.getData('sensor-tag');
+      const deviceName = e.dataTransfer?.getData('device-name');
       if (!deviceId || !this.stationId) return;
 
       // Convert mouse position → SVG coordinate
       const rect = viewport.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-      const svgX = (mouseX - this.vx) / this.vs;
-      const svgY = (mouseY - this.vy) / this.vs;
+      const pt = this.screenToSvg(e.clientX - rect.left, e.clientY - rect.top);
 
       // Clamp within SLD bounds
-      const x = Math.max(10, Math.min(SLD_W - 10, svgX));
-      const y = Math.max(10, Math.min(SLD_H - 10, svgY));
+      const x = Math.max(10, Math.min(SLD_W - 10, pt.x));
+      const y = Math.max(10, Math.min(SLD_H - 10, pt.y));
 
       try {
         const newPoint = await stationApi.addSldPoint(this.stationId, {
-          deviceId, label: deviceName, x, y, r: 10,
+          deviceId,
+          x, y,
+          pointId: pointTag || undefined,
+          label: deviceName || 'Thiết bị',
+          r: 10
         });
         this.sldPoints.push(newPoint);
         this.renderSldPoints(this.sldPoints);
-        // Refresh drawer (thiết bị vừa đặt biến mất khỏi danh sách)
-        await this.reloadDrawer();
         this.initDotDrag(); // re-bind drag trên dots mới
+        await this.reloadDrawer(); // Hide the item we just pinned
       } catch (err) {
         console.error('[SLD] Đặt thiết bị thất bại:', err);
       }
@@ -547,221 +683,264 @@ export class DashboardPage {
 
     document.addEventListener('mousemove', (e: MouseEvent) => {
       if (!active) return;
-      const dx = (e.clientX - active.mx) / this.vs;
-      const dy = (e.clientY - active.my) / this.vs;
-      if (Math.abs(dx) > 2 || Math.abs(dy) > 2) wasDrag = true;
+      const dx_scr = (e.clientX - active.mx) / this.vs;
+      const dy_scr = (e.clientY - active.my) / this.vs;
+      if (Math.abs(dx_scr) > 2 || Math.abs(dy_scr) > 2) wasDrag = true;
       if (!wasDrag) return;
+
+      // Rotate delta back
+      const rad = (-this.vr * Math.PI) / 180;
+      const cos = Math.cos(rad);
+      const sin = Math.sin(rad);
+      const dx = dx_scr * cos - dy_scr * sin;
+      const dy = dx_scr * sin + dy_scr * cos;
+
       const nx = Math.max(0, Math.min(SLD_W, active.startX + dx));
       const ny = Math.max(0, Math.min(SLD_H, active.startY + dy));
       const circ = active.el.querySelector('circle')!;
       const r = parseFloat(circ.getAttribute('r')!);
       circ.setAttribute('cx', String(nx)); circ.setAttribute('cy', String(ny));
-      const txt = active.el.querySelector('text');
+      active.el.setAttribute('transform', `rotate(${-this.vr}, ${nx}, ${ny})`);
+      const txt = active.el.querySelector('text:not(.sld-measurement-text)');
       txt?.setAttribute('x', String(nx + r + 3)); txt?.setAttribute('y', String(ny + 4));
+      const badgePosG = active.el.querySelector('.sld-badge-pos');
+      if (badgePosG) {
+        badgePosG.setAttribute('transform', `translate(${nx}, ${ny}) scale(${1 / this.vs})`);
+      }
+    });
+
+    // ══ Label Toggle ══
+    const toggleBtn = document.getElementById('toggleLabelsBtn');
+    const labelText = document.getElementById('labelToggleText');
+    const canvas = document.getElementById('sld-canvas');
+
+    toggleBtn?.addEventListener('click', () => {
+      this.showLabels = !this.showLabels;
+      if (this.showLabels) {
+          canvas?.classList.add('show-labels');
+          toggleBtn.classList.add('active');
+          if (labelText) labelText.textContent = 'Ẩn tên';
+      } else {
+          canvas?.classList.remove('show-labels');
+          toggleBtn.classList.remove('active');
+          if (labelText) labelText.textContent = 'Hiện tên';
+      }
     });
 
     document.addEventListener('mouseup', async (e: MouseEvent) => {
-      if (!active) return;
-      if (wasDrag) {
-        const circ = active.el.querySelector('circle')!;
-        const nx = parseFloat(circ.getAttribute('cx')!);
-        const ny = parseFloat(circ.getAttribute('cy')!);
-        // Lưu vị trí mới lên API
-        await stationApi.updateSldPoint(active.pointId, { x: nx, y: ny }).catch(() => { });
-        // Cập nhật local state
-        const pt = this.sldPoints.find(p => p.id === active!.pointId);
-        if (pt) { pt.x = nx; pt.y = ny; }
-      } else {
-        // Click → show edit panel in edit mode, data panel in view mode
-        if (this.editMode) {
-          this.showDotPanel(active.pointId, e.clientX, e.clientY);
-        } else {
-          this.showDataPopup(active.pointId, e.clientX, e.clientY);
-        }
-      }
-      active = null;
-      wasDrag = false;
-      viewport.style.cursor = this.editMode ? 'grab' : 'grab';
-    });
+  if (!active) return;
+  if (wasDrag) {
+    const circ = active.el.querySelector('circle')!;
+    const nx = parseFloat(circ.getAttribute('cx')!);
+    const ny = parseFloat(circ.getAttribute('cy')!);
+    // Lưu vị trí mới lên API
+    await stationApi.updateSldPoint(active.pointId, { x: nx, y: ny }).catch(() => { });
+    // Cập nhật local state
+    const pt = this.sldPoints.find(p => p.id === active!.pointId);
+    if (pt) { pt.x = nx; pt.y = ny; }
+  } else {
+    // Click → show edit panel in edit mode, data panel in view mode
+    if (this.editMode) {
+      this.showDotPanel(active.pointId, e.clientX, e.clientY);
+    } else {
+      this.showDataPopup(active.pointId, e.clientX, e.clientY);
+    }
+  }
+  active = null;
+  wasDrag = false;
+  viewport.style.cursor = this.editMode ? 'grab' : 'grab';
+});
   }
 
   // ── Dot quick panel ──────────────────────────────────────────
   private initDotPanel(): void {
-    document.getElementById('dep-close')?.addEventListener('click', () => this.hideDotPanel());
-    document.getElementById('ddp-close')?.addEventListener('click', () => this.hideDataPopup());
+  document.getElementById('dep-close')?.addEventListener('click', () => this.hideDotPanel());
+  document.getElementById('ddp-close')?.addEventListener('click', () => this.hideDataPopup());
 
-    // Live preview: nhập r → cập nhật node ngay trên canvas
-    document.getElementById('dep-r')?.addEventListener('input', (e) => {
-      const r = parseFloat((e.target as HTMLInputElement).value);
-      if (isNaN(r) || r < 4) return;
-      const panel = document.getElementById('dot-edit-panel')!;
-      const pointId = panel.dataset['pointId'];
-      if (!pointId) return;
-      const g = document.querySelector(`#dash-dots > g[data-point-id="${pointId}"]`);
-      if (!g) return;
-      const circ = g.querySelector('circle')!;
-      const cx = parseFloat(circ.getAttribute('cx')!);
-      const cy = parseFloat(circ.getAttribute('cy')!);
-      circ.setAttribute('r', String(r));
-      const txt = g.querySelector('text');
-      if (txt) { txt.setAttribute('x', String(cx + r + 3)); txt.setAttribute('y', String(cy + 4)); }
-    });
+  // Live preview: nhập r → cập nhật node ngay trên canvas
+  document.getElementById('dep-r')?.addEventListener('input', (e) => {
+    const r = parseFloat((e.target as HTMLInputElement).value);
+    if (isNaN(r) || r < 4) return;
+    const panel = document.getElementById('dot-edit-panel')!;
+    const pointId = panel.dataset['pointId'];
+    if (!pointId) return;
+    const g = document.querySelector(`#dash-dots > g[data-point-id="${pointId}"]`);
+    if (!g) return;
+    const circ = g.querySelector('circle')!;
+    const cx = parseFloat(circ.getAttribute('cx')!);
+    const cy = parseFloat(circ.getAttribute('cy')!);
+    circ.setAttribute('r', String(r));
+    const txt = g.querySelector('text.sld-point-label');
+    if (txt) { txt.setAttribute('x', String(cx + r + 3)); txt.setAttribute('y', String(cy + 4)); }
 
-    // Save button
-    document.getElementById('dep-save')?.addEventListener('click', async () => {
-      const panel = document.getElementById('dot-edit-panel')!;
-      const pointId = panel.dataset['pointId'];
-      if (!pointId) return;
+    // No extra badge coordinate updates are needed, handled via transform
+  });
 
-      const label = (document.getElementById('dep-label') as HTMLInputElement).value.trim() || undefined;
-      const x = parseFloat((document.getElementById('dep-x') as HTMLInputElement).value);
-      const y = parseFloat((document.getElementById('dep-y') as HTMLInputElement).value);
-      const r = parseFloat((document.getElementById('dep-r') as HTMLInputElement).value);
+  // Save button
+  document.getElementById('dep-save')?.addEventListener('click', async () => {
+    const panel = document.getElementById('dot-edit-panel')!;
+    const pointId = panel.dataset['pointId'];
+    if (!pointId) return;
 
-      try {
-        await stationApi.updateSldPoint(pointId, { x, y, r, label });
-        // Cập nhật local state
-        const pt = this.sldPoints.find(p => p.id === pointId);
-        if (pt) {
-          pt.x = x; pt.y = y; pt.r = r;
-          if (label) pt.label = label;
-          if (label) (document.getElementById('dep-title') as HTMLElement).textContent = label;
-        }
-        this.renderSldPoints(this.sldPoints);
-        this.initDotDrag();
-        this.hideDotPanel();
-      } catch (err) {
-        alert('Lưu thất bại: ' + err);
+    const label = (document.getElementById('dep-label') as HTMLInputElement).value.trim() || undefined;
+    const x = parseFloat((document.getElementById('dep-x') as HTMLInputElement).value);
+    const y = parseFloat((document.getElementById('dep-y') as HTMLInputElement).value);
+    const r = parseFloat((document.getElementById('dep-r') as HTMLInputElement).value);
+
+    try {
+      await stationApi.updateSldPoint(pointId, { x, y, r, label });
+      // Cập nhật local state
+      const pt = this.sldPoints.find(p => p.id === pointId);
+      if (pt) {
+        pt.x = x; pt.y = y; pt.r = r;
+        if (label) pt.label = label;
+        if (label) (document.getElementById('dep-title') as HTMLElement).textContent = label;
       }
-    });
+      this.renderSldPoints(this.sldPoints);
+      this.renderDrawer();
+      this.hideDotPanel();
+    } catch (err) {
+      alert('Lưu thất bại: ' + err);
+    }
+  });
 
-    // Delete button
-    document.getElementById('dep-delete')?.addEventListener('click', async () => {
-      const panel = document.getElementById('dot-edit-panel')!;
-      const pointId = panel.dataset['pointId'];
-      if (!pointId) return;
-      if (!await confirmDialog({ message: 'Gỡ thiết bị này khỏi sơ đồ?', confirmText: 'Gỡ', danger: true })) return;
-      try {
-        await stationApi.deleteSldPoint(pointId);
-        this.sldPoints = this.sldPoints.filter(p => p.id !== pointId);
-        this.renderSldPoints(this.sldPoints);
-        await this.reloadDrawer();
-        this.hideDotPanel();
-      } catch { }
-    });
-  }
+  // Delete button
+  document.getElementById('dep-delete')?.addEventListener('click', async () => {
+    const panel = document.getElementById('dot-edit-panel')!;
+    const pointId = panel.dataset['pointId'];
+    if (!pointId) return;
+    if (!await confirmDialog({ message: 'Gỡ thiết bị này khỏi sơ đồ?', confirmText: 'Gỡ', danger: true })) return;
+    try {
+      await stationApi.deleteSldPoint(pointId);
+      this.sldPoints = this.sldPoints.filter(p => p.id !== pointId);
+      this.renderSldPoints(this.sldPoints);
+      await this.reloadDrawer();
+      this.hideDotPanel();
+    } catch { }
+  });
+}
 
   private showDotPanel(pointId: string, clientX: number, clientY: number): void {
-    const panel = document.getElementById('dot-edit-panel')!;
-    const viewport = document.getElementById('sldViewport')!.getBoundingClientRect();
-    const pt = this.sldPoints.find(p => p.id === pointId);
-    if (!pt) return;
+  const panel = document.getElementById('dot-edit-panel')!;
+  const viewport = document.getElementById('sldViewport')!.getBoundingClientRect();
+  const pt = this.sldPoints.find(p => p.id === pointId);
+  if(!pt) return;
 
-    panel.dataset['pointId'] = pointId;
+  panel.dataset['pointId'] = pointId;
     (document.getElementById('dep-title') as HTMLElement).textContent = pt.label;
-    (document.getElementById('dep-info') as HTMLElement).innerHTML =
-      `Loại: ${pt.deviceType ?? '—'} · ${pt.deviceStatus ?? '—'}`;
+(document.getElementById('dep-info') as HTMLElement).innerHTML =
+  `Loại: ${pt.deviceType ?? '—'} · ${pt.deviceStatus ?? '—'}`;
 
-    // Populate inputs
-    (document.getElementById('dep-label') as HTMLInputElement).value = pt.label;
-    (document.getElementById('dep-x') as HTMLInputElement).value = Math.round(pt.x).toString();
-    (document.getElementById('dep-y') as HTMLInputElement).value = Math.round(pt.y).toString();
-    (document.getElementById('dep-r') as HTMLInputElement).value = String(pt.r);
+// Populate inputs
+(document.getElementById('dep-label') as HTMLInputElement).value = pt.label;
+(document.getElementById('dep-x') as HTMLInputElement).value = Math.round(pt.x).toString();
+(document.getElementById('dep-y') as HTMLInputElement).value = Math.round(pt.y).toString();
+(document.getElementById('dep-r') as HTMLInputElement).value = String(pt.r);
 
-    let left = clientX - viewport.left + 12;
-    let top = clientY - viewport.top - 10;
-    if (left + 220 > viewport.width) left = clientX - viewport.left - 225;
-    if (top + 280 > viewport.height) top = clientY - viewport.top - 280;
-    panel.style.left = left + 'px'; panel.style.top = top + 'px';
-    panel.style.display = 'block';
+let left = clientX - viewport.left + 12;
+let top = clientY - viewport.top - 10;
+if (left + 220 > viewport.width) left = clientX - viewport.left - 225;
+if (top + 280 > viewport.height) top = clientY - viewport.top - 280;
+panel.style.left = left + 'px'; panel.style.top = top + 'px';
+panel.style.display = 'block';
   }
 
   private hideDotPanel(): void {
-    const panel = document.getElementById('dot-edit-panel')!;
-    panel.style.display = 'none';
-    delete panel.dataset['pointId'];
-  }
+  const panel = document.getElementById('dot-edit-panel')!;
+  panel.style.display = 'none';
+  delete panel.dataset['pointId'];
+}
 
   // ── Data popup (view mode click) ─────────────────────────────
   private hideDataPopup(): void {
-    const panel = document.getElementById('dot-data-panel');
-    if (panel) panel.style.display = 'none';
-  }
+  const panel = document.getElementById('dot-data-panel');
+  if(panel) panel.style.display = 'none';
+}
 
-  private async showDataPopup(pointId: string, clientX: number, clientY: number): Promise<void> {
-    const pt = this.sldPoints.find(p => p.id === pointId);
-    if (!pt) return;
+  private async showDataPopup(pointId: string, clientX: number, clientY: number): Promise < void> {
+  const p = this.sldPoints.find(p => p.id === pointId);
+  if(!p) return;
 
-    const panel = document.getElementById('dot-data-panel')!;
-    const body = document.getElementById('ddp-body')!;
-    (document.getElementById('ddp-title') as HTMLElement).textContent = pt.label;
+  const panel = document.getElementById('dot-data-panel')!;
+  const body = document.getElementById('ddp-body')!;
+    (document.getElementById('ddp-title') as HTMLElement).textContent = p.label;
 
-    // Position
-    const viewport = document.getElementById('sldViewport')!.getBoundingClientRect();
-    let left = clientX - viewport.left + 14;
-    let top = clientY - viewport.top - 12;
-    if (left + 240 > viewport.width) left = clientX - viewport.left - 245;
-    if (top + 240 > viewport.height) top = clientY - viewport.top - 240;
-    panel.style.left = left + 'px'; panel.style.top = top + 'px';
-    panel.style.display = 'block';
+// Position
+const viewport = document.getElementById('sldViewport')!.getBoundingClientRect();
+let left = clientX - viewport.left + 14;
+let top = clientY - viewport.top - 12;
+if (left + 240 > viewport.width) left = clientX - viewport.left - 245;
+if (top + 240 > viewport.height) top = clientY - viewport.top - 240;
+panel.style.left = left + 'px'; panel.style.top = top + 'px';
+panel.style.display = 'block';
 
-    const deviceSensors = this.sensors.filter(s => s.deviceId === pt.deviceId);
-    if (deviceSensors.length === 0) {
-      body.innerHTML = `<div style="color:#64748b;font-size:0.72rem;padding:4px 0;">Không có dữ liệu cảm biến</div>`;
-      return;
-    }
+const allSensors = this.sensors.filter(s => s.deviceId === p.deviceId);
+const pointTag = p.pointId;
+const isUnifiedIcon = pointTag === p.deviceId;
+const deviceSensors = isUnifiedIcon ? allSensors : allSensors.filter(s => s.pointId === pointTag);
 
-    const currentHtml = deviceSensors.map(s => {
-      const lbl = this.sensorLabel(s.pointId);
-      const col = s.pointId.startsWith('nhiet') ? '#f87171' : '#fbbf24';
-      return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+if (deviceSensors.length === 0) {
+  body.innerHTML = `<div style="color:#64748b;font-size:0.72rem;padding:4px 0;">Không có dữ liệu cảm biến</div>`;
+  return;
+}
+
+const currentHtml = deviceSensors.map(s => {
+  const lbl = this.sensorLabel(s.pointId);
+  const col = s.pointId.startsWith('nhiet') ? '#f87171' : '#fbbf24';
+  return `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
         <span style="font-size:0.68rem;color:#94a3b8;">${lbl}</span>
         <span style="font-size:0.82rem;font-weight:800;color:${col};">${s.value.toFixed(1)}<span style="font-size:0.62rem;font-weight:400;color:#64748b;"> ${s.unit}</span></span>
       </div>`;
-    }).join('');
+}).join('');
 
-    body.innerHTML = currentHtml +
-      `<div id="ddp-sparkline" style="margin-top:4px;"></div>`;
+body.innerHTML = currentHtml +
+  `<div id="ddp-sparkline" style="margin-top:4px;"></div>` +
+  `<button id="ddp-history-btn" style="width:100%;margin-top:8px;padding:4px;background:#1e293b;border:1px solid #334155;color:#94a3b8;border-radius:4px;cursor:pointer;font-size:0.7rem;">Xem chi tiết</button>`;
 
-    // Sparkline for first sensor
-    const main = deviceSensors[0];
-    if (main && pt.deviceId) {
-      this.loadSparkline('ddp-sparkline', pt.deviceId, main.pointId);
-    }
+// Link to detailed report
+document.getElementById('ddp-history-btn')?.addEventListener('click', () => {
+  window.location.hash = `#/reports?stationId=${this.stationId}&deviceId=${p.deviceId}`;
+});
+
+// Sparkline for first sensor
+const main = deviceSensors[0];
+if (main && p.deviceId) {
+  this.loadSparkline('ddp-sparkline', p.deviceId, main.pointId);
+}
   }
 
   private sensorLabel(pointId: string): string {
-    const map: Record<string, string> = {
-      nhiet_do_pha_1: 'Nhiệt độ Pha 1',
-      nhiet_do_pha_2: 'Nhiệt độ Pha 2',
-      nhiet_do_pha_3: 'Nhiệt độ Pha 3',
-      phong_dien: 'Phóng điện (PD)',
-    };
-    return map[pointId] ?? pointId;
-  }
+  const map: Record<string, string> = {
+    nhiet_do_pha_1: 'Nhiệt độ Pha 1',
+    nhiet_do_pha_2: 'Nhiệt độ Pha 2',
+    nhiet_do_pha_3: 'Nhiệt độ Pha 3',
+    phong_dien: 'Phóng điện (PD)',
+  };
+  return map[pointId] ?? pointId;
+}
 
-  private async loadSparkline(containerId: string, deviceId: string, pointId: string): Promise<void> {
-    try {
-      const to = new Date().toISOString();
-      const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      const data = await stationApi.getHistory(deviceId, pointId, from, to, 60);
+  private async loadSparkline(containerId: string, deviceId: string, pointId: string): Promise < void> {
+  try {
+    const to = new Date().toISOString();
+    const from = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const data = await stationApi.getHistory(deviceId, pointId, from, to, 60);
 
-      const container = document.getElementById(containerId);
-      if (!container || data.length < 2) return;
+    const container = document.getElementById(containerId);
+    if(!container || data.length < 2) return;
 
-      const vals = data.map(d => d.value);
-      const min = Math.min(...vals), max = Math.max(...vals);
-      const range = max - min || 1;
-      const W = 190, H = 44;
+  const vals = data.map(d => d.value);
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const range = max - min || 1;
+  const W = 190, H = 44;
 
-      const pts = data.map((d, i) => {
-        const x = (i / (data.length - 1)) * W;
-        const y = H - ((d.value - min) / range) * (H - 4) - 2;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      }).join(' ');
+  const pts = data.map((d, i) => {
+    const x = (i / (data.length - 1)) * W;
+    const y = H - ((d.value - min) / range) * (H - 4) - 2;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
 
-      const unit = pointId === 'phong_dien' ? 'dB' : '°C';
-      container.innerHTML = `
+  const unit = pointId === 'phong_dien' ? 'dB' : '°C';
+  container.innerHTML = `
         <div style="font-size:0.6rem;color:#475569;margin-bottom:3px;">1 giờ qua · ${data.length} mẫu</div>
         <svg width="${W}" height="${H}" style="display:block;border-radius:4px;background:#0f172a;">
           <polyline points="${pts}" fill="none" stroke="#38bdf8" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
@@ -770,217 +949,270 @@ export class DashboardPage {
           <span>Min: ${min.toFixed(1)}${unit}</span>
           <span>Max: ${max.toFixed(1)}${unit}</span>
         </div>`;
-    } catch {
-      // silently fail
-    }
+} catch {
+  // silently fail
+}
   }
 
   // ── Edit mode ────────────────────────────────────────────────
   private initEditMode(): void {
-    document.getElementById('btnEditMode')?.addEventListener('click', () => {
-      this.editMode = !this.editMode;
-      const btn = document.getElementById('btnEditMode')!;
-      const drawer = document.getElementById('deviceDrawer')!;
+  document.getElementById('btnEditMode')?.addEventListener('click', async () => {
+    this.editMode = !this.editMode;
+    this.renderDrawer();
+    const btn = document.getElementById('btnEditMode')!;
+    const drawer = document.getElementById('deviceDrawer')!;
 
-      if (this.editMode) {
-        btn.style.background = 'rgba(245,158,11,0.3)';
-        btn.style.color = '#fbbf24'; btn.style.borderColor = '#d97706';
-        btn.textContent = '🔓 Đang chỉnh';
-        drawer.style.transform = 'translateX(0)';
-        // Shift toolbar ra phải để tránh bị drawer che
-        (document.getElementById('sldToolbar') as HTMLElement).style.left = 'calc(50% + 110px)';
-      } else {
-        btn.style.background = 'rgba(255,255,255,0.07)';
-        btn.style.color = '#e2e8f0'; btn.style.borderColor = 'rgba(255,255,255,0.15)';
-        btn.textContent = '📝 Chỉnh sơ đồ';
-        drawer.style.transform = 'translateX(-100%)';
-        (document.getElementById('sldToolbar') as HTMLElement).style.left = '50%';
-        this.hideDotPanel();
-      }
+    if (this.editMode) {
+      btn.style.background = 'rgba(245,158,11,0.3)';
+      btn.style.color = '#fbbf24'; btn.style.borderColor = '#d97706';
+      btn.textContent = '🔓 Đang chỉnh';
+      drawer.style.transform = 'translateX(0)';
+      // Shift toolbar ra phải để tránh bị drawer che
+      const toolbar = document.getElementById('sldToolbar') as HTMLElement;
+      toolbar.style.left = 'calc(50% + 110px)';
+      toolbar.classList.add('edit-mode-active');
+    } else {
+      btn.style.background = 'rgba(255,255,255,0.07)';
+      btn.style.color = '#e2e8f0'; btn.style.borderColor = 'rgba(255,255,255,0.15)';
+      btn.textContent = '📝 Chỉnh sơ đồ';
+      drawer.style.transform = 'translateX(-100%)';
+      const toolbar = document.getElementById('sldToolbar') as HTMLElement;
+      toolbar.style.left = '50%';
+      toolbar.classList.remove('edit-mode-active');
+      this.hideDotPanel();
+    }
 
-      // Cập nhật màu stroke dots
-      document.querySelectorAll<SVGCircleElement>('#dash-dots circle').forEach(c => {
-        c.setAttribute('stroke', this.editMode ? '#facc15' : '#fff');
-      });
+    // Cập nhật màu stroke dots
+    document.querySelectorAll<SVGCircleElement>('#dash-dots circle').forEach(c => {
+      c.setAttribute('stroke', this.editMode ? '#facc15' : '#fff');
     });
-  }
+  });
+}
 
   // ── Upload SVG ───────────────────────────────────────────────
   private initUploadSvg(): void {
-    const btn = document.getElementById('btnUploadSvg')!;
-    const input = document.getElementById('svgFileInput') as HTMLInputElement;
+  const btn = document.getElementById('btnUploadSvg')!;
+  const input = document.getElementById('svgFileInput') as HTMLInputElement;
 
-    btn.addEventListener('click', () => input.click());
+  btn.addEventListener('click', () => input.click());
 
-    input.addEventListener('change', async () => {
-      const file = input.files?.[0];
-      if (!file || !this.stationId) return;
+  input.addEventListener('change', async () => {
+    const file = input.files?.[0];
+    if (!file || !this.stationId) return;
 
-      btn.textContent = '⏳ Đang upload...';
-      btn.setAttribute('disabled', 'true');
+    btn.textContent = '⏳ Đang upload...';
+    btn.setAttribute('disabled', 'true');
 
-      try {
-        const result = await stationApi.uploadSldSvg(this.stationId, file);
-        // sldFileId updated server-side
-        this.renderSvgBackground(result.svgUrl);
-        const statusEl = document.getElementById('statusSld');
-        if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;"></span> SLD: v${result.version}`;
-        this.showToast('Upload SVG thành công', 'success');
-      } catch (e) {
-        this.showToast(`Lỗi upload: ${(e as Error).message}`, 'error');
-      } finally {
-        btn.textContent = '↑ Upload SVG mới';
-        btn.removeAttribute('disabled');
-        input.value = '';
-      }
-    });
-  }
+    try {
+      await stationApi.uploadSldSvg(this.stationId, file);
+      // Reload toàn bộ SLD: SVG mới (URL có version mới) + xóa nodes cũ + reset drawer
+      await this.loadSld();
+      this.showToast('Upload SVG thành công — tất cả node đã được reset', 'success');
+    } catch (e) {
+      this.showToast(`Lỗi upload: ${(e as Error).message}`, 'error');
+    } finally {
+      btn.textContent = '↑ Upload SVG mới';
+      btn.removeAttribute('disabled');
+      input.value = '';
+    }
+  });
+}
 
   // ── Reload drawer (sau khi thêm/xóa điểm) ───────────────────
-  private async reloadDrawer(): Promise<void> {
-    if (!this.stationId) return;
-    const data = await stationApi.getSld(this.stationId).catch(() => null);
-    if (data) this.renderDrawer(data.unpinned);
+  private async reloadDrawer(): Promise < void> {
+  if(!this.stationId) return;
+  const data = await stationApi.getSld(this.stationId).catch(() => null);
+  if(data) {
+    this.unpinnedDevices = data.unpinned;
+    this.renderDrawer();
   }
+}
 
   // ── Pan / Zoom ───────────────────────────────────────────────
   private initPanZoom(): void {
-    const viewport = document.getElementById('sldViewport')!;
-    const world = document.getElementById('sld-world')!;
+  const viewport = document.getElementById('sldViewport')!;
+  const world = document.getElementById('sld-world')!;
 
-    const apply = () => world.setAttribute('transform', `translate(${this.vx},${this.vy}) scale(${this.vs})`);
-
-    const fit = () => {
-      const r = viewport.getBoundingClientRect();
-      const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 0.96;
-      this.vs = s;
-      this.vx = (r.width - SLD_W * s) / 2;
-      this.vy = (r.height - SLD_H * s) / 2;
-      apply();
-    };
-
-    let panning = false, px0 = 0, py0 = 0, vx0 = 0, vy0 = 0;
-
-    viewport.addEventListener('mousedown', e => {
-      if ((e.target as HTMLElement).closest('#floatKpi,#floatAlerts,#floatCam,#deviceDrawer')) return;
-      if (this.editMode && (e.target as Element).closest('#dash-dots > g')) return;
-      panning = true; px0 = e.clientX; py0 = e.clientY; vx0 = this.vx; vy0 = this.vy;
-      viewport.style.cursor = 'grabbing';
+  const apply = () => {
+    world.setAttribute('transform', `translate(${this.vx},${this.vy}) scale(${this.vs}) rotate(${this.vr}, ${SLD_W / 2}, ${SLD_H / 2})`);
+    // Update dots rotation to stay horizontal
+    document.querySelectorAll('#dash-dots > g').forEach(g => {
+      const circ = g.querySelector('circle');
+      if (!circ) return;
+      const cx = circ.getAttribute('cx'), cy = circ.getAttribute('cy');
+      g.setAttribute('transform', `rotate(${-this.vr}, ${cx}, ${cy})`);
+      
+      const badgePosG = g.querySelector('.sld-badge-pos');
+      if (badgePosG) {
+        badgePosG.setAttribute('transform', `translate(${cx}, ${cy}) scale(${1 / this.vs})`);
+      }
     });
-    document.addEventListener('mousemove', e => {
-      if (!panning) return;
-      this.vx = vx0 + (e.clientX - px0);
-      this.vy = vy0 + (e.clientY - py0);
-      apply();
-    });
-    document.addEventListener('mouseup', () => {
-      panning = false;
-      viewport.style.cursor = 'grab';
-    });
-    viewport.addEventListener('wheel', e => {
-      e.preventDefault();
-      const r = viewport.getBoundingClientRect();
-      const cx = e.clientX - r.left, cy = e.clientY - r.top;
-      const f = e.deltaY > 0 ? 0.9 : 1.1;
-      const ns = Math.max(0.1, Math.min(10, this.vs * f));
-      this.vx = cx - (cx - this.vx) * (ns / this.vs);
-      this.vy = cy - (cy - this.vy) * (ns / this.vs);
-      this.vs = ns;
-      apply();
-    }, { passive: false });
+  };
 
-    document.getElementById('sld-btn-fit')?.addEventListener('click', fit);
-    setTimeout(fit, 100);
+  const fit = () => {
+    const r = viewport.getBoundingClientRect();
+    const s = Math.min(r.width / SLD_W, r.height / SLD_H) * 0.96;
+    this.vs = s;
+    this.vx = (r.width - SLD_W * s) / 2;
+    this.vy = (r.height - SLD_H * s) / 2;
+    apply();
+  };
+
+  let panning = false, px0 = 0, py0 = 0, vx0 = 0, vy0 = 0;
+
+  viewport.addEventListener('mousedown', e => {
+    if ((e.target as HTMLElement).closest('#floatKpi,#floatAlerts,#floatCam,#deviceDrawer')) return;
+    if (this.editMode && (e.target as Element).closest('#dash-dots > g')) return;
+    panning = true; px0 = e.clientX; py0 = e.clientY; vx0 = this.vx; vy0 = this.vy;
+    viewport.style.cursor = 'grabbing';
+  });
+  document.addEventListener('mousemove', e => {
+    if (!panning) return;
+    this.vx = vx0 + (e.clientX - px0);
+    this.vy = vy0 + (e.clientY - py0);
+    apply();
+  });
+  document.addEventListener('mouseup', () => {
+    panning = false;
+    viewport.style.cursor = 'grab';
+  });
+  viewport.addEventListener('wheel', e => {
+    e.preventDefault();
+    const r = viewport.getBoundingClientRect();
+    const cx = e.clientX - r.left, cy = e.clientY - r.top;
+    const f = e.deltaY > 0 ? 0.9 : 1.1;
+    const ns = Math.max(0.1, Math.min(10, this.vs * f));
+    this.vx = cx - (cx - this.vx) * (ns / this.vs);
+    this.vy = cy - (cy - this.vy) * (ns / this.vs);
+    this.vs = ns;
+    apply();
+  }, { passive: false });
+
+  document.getElementById('sld-btn-fit')?.addEventListener('click', fit);
+  document.getElementById('sld-btn-rotate')?.addEventListener('click', () => {
+    this.vr = (this.vr + 90) % 360;
+    apply();
+    // Persist to LocalStorage only (safe, no server crash)
+    if (this.stationId) {
+      localStorage.setItem(`sld_vr_${this.stationId}`, String(this.vr));
+    }
+  });
+  setTimeout(fit, 100);
     this.initDotDrag();
-  }
+}
+
+  private screenToSvg(mx: number, my: number): { x: number, y: number } {
+  // 1. Un-translate and Un-scale
+  const x1 = (mx - this.vx) / this.vs;
+  const y1 = (my - this.vy) / this.vs;
+
+  // 2. Un-rotate around center
+  const cx = SLD_W / 2;
+  const cy = SLD_H / 2;
+  const rad = (-this.vr * Math.PI) / 180;
+  const cos = Math.cos(rad);
+  const sin = Math.sin(rad);
+
+  const dx = x1 - cx;
+  const dy = y1 - cy;
+
+  return {
+    x: cx + dx * cos - dy * sin,
+    y: cy + dx * sin + dy * cos
+  };
+}
 
   // ── Collapse toggles ─────────────────────────────────────────
   private initCollapse(): void {
-    const setup = (btnId: string, bodyId: string) => {
-      const btn = document.getElementById(btnId);
-      const body = document.getElementById(bodyId);
-      if (!btn || !body) return;
-      btn.addEventListener('click', () => {
-        const hidden = body.style.display === 'none';
-        body.style.display = hidden ? '' : 'none';
-        if (bodyId === 'alertsBody') {
-          const panel = document.getElementById('floatAlerts');
-          if (panel) panel.style.flex = hidden ? '1' : '0 0 auto';
-        }
-        btn.textContent = hidden ? '▲' : '▼';
-      });
-    };
-    setup('btnCollapseKpi', 'kpiBody');
+  const setup = (btnId: string, bodyId: string) => {
+    const btn = document.getElementById(btnId);
+    const body = document.getElementById(bodyId);
+    if (!btn || !body) return;
+    btn.addEventListener('click', () => {
+      const hidden = body.style.display === 'none';
+      body.style.display = hidden ? '' : 'none';
+      if (bodyId === 'alertsBody') {
+        const panel = document.getElementById('floatAlerts');
+        if (panel) panel.style.flex = hidden ? '1' : '0 0 auto';
+      }
+      btn.textContent = hidden ? '▲' : '▼';
+    });
+  };
+  setup('btnCollapseKpi', 'kpiBody');
     setup('btnCollapseAlerts', 'alertsBody');
     setup('btnCollapseCam', 'camBody');
     setup('btnCollapseHealth', 'healthBody');
-  }
+}
 
   // ── Color picker ─────────────────────────────────────────────
   private initColorPicker(): void {
-    const BG = { R: 0.059, G: 0.090, B: 0.165 };
-    document.getElementById('sld-color-picker')?.addEventListener('input', function () {
-      const hex = (this as HTMLInputElement).value;
-      const R = parseInt(hex.slice(1, 3), 16) / 255, G = parseInt(hex.slice(3, 5), 16) / 255, B = parseInt(hex.slice(5, 7), 16) / 255;
-      const m = [BG.R - R, 0, 0, 0, R, 0, BG.G - G, 0, 0, G, 0, 0, BG.B - B, 0, B, 0, 0, 0, 1, 0].join(' ');
-      document.getElementById('sld-color-matrix')?.setAttribute('values', m);
-    });
-  }
+  const BG = { R: 0.059, G: 0.090, B: 0.165 };
+  document.getElementById('sld-color-picker')?.addEventListener('input', function () {
+    const hex = (this as HTMLInputElement).value;
+    const R = parseInt(hex.slice(1, 3), 16) / 255, G = parseInt(hex.slice(3, 5), 16) / 255, B = parseInt(hex.slice(5, 7), 16) / 255;
+    const m = [BG.R - R, 0, 0, 0, R, 0, BG.G - G, 0, 0, G, 0, 0, BG.B - B, 0, B, 0, 0, 0, 1, 0].join(' ');
+    document.getElementById('sld-color-matrix')?.setAttribute('values', m);
+  });
+}
 
   // ── KPI (real API) ───────────────────────────────────────────
-  private async refreshKpi(): Promise<void> {
-    try {
-      const [points, devices, alerts] = await Promise.all([
-        stationApi.getLatestPoints(this.stationId),
-        this.stationId ? stationApi.getDevices(this.stationId) : Promise.resolve([]),
-        stationApi.getAlerts('open', undefined, undefined, 100),
-      ]);
+  private async refreshKpi(): Promise < void> {
+  try {
+    const [points, devices, alerts] = await Promise.all([
+      stationApi.getLatestPoints(this.stationId),
+      this.stationId ? stationApi.getDevices(this.stationId) : Promise.resolve([]),
+      stationApi.getAlerts('open', undefined, undefined, 100),
+    ]);
 
-      this.sensors = points;
+    console.log('[SLD] Sensor data received:', points);
+    this.sensors = points;
 
-      const temps = points.filter(p => p.pointId.startsWith('nhiet_do'));
-      const pd = points.find(p => p.pointId === 'phong_dien');
-      const online = devices.filter(d => d.status === 'online').length;
+    const temps = points.filter(p => p.pointId.startsWith('nhiet_do'));
+    const pd = points.find(p => p.pointId === 'phong_dien');
+    const online = devices.filter(d => d.status === 'online').length;
 
-      const rows = document.querySelectorAll<HTMLElement>('#floatKpi .kpi-row-item');
-      const val = (i: number) => rows[i]?.querySelector('.kpi-val');
+    const rows = document.querySelectorAll<HTMLElement>('#floatKpi .kpi-row-item');
+    const val = (i: number) => rows[i]?.querySelector('.kpi-val');
 
-      if (temps.length) val(0)!.textContent = Math.max(...temps.map(p => p.value)).toFixed(1);
-      if (pd) val(1)!.textContent = `${pd.value.toFixed(1)}`;
-      val(2)!.textContent = `${online}/${devices.length}`;
-      val(3)!.textContent = String(alerts.length);
+    if(temps.length) val(0)!.textContent = Math.max(...temps.map(p => p.value)).toFixed(1);
+  if(pd) val(1)!.textContent = `${pd.value.toFixed(1)}`;
+val(2)!.textContent = `${online}/${devices.length}`;
+val(3)!.textContent = String(alerts.length);
 
-      const statusEl = document.getElementById('statusPlc');
-      if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;"></span> PLC: Online`;
+const statusEl = document.getElementById('statusPlc');
+if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;"></span> PLC: Online`;
 
-      // Cập nhật màu dot theo status thiết bị
-      devices.forEach(d => {
-        const g = document.querySelector<SVGGElement>(`#dash-dots [data-device-id="${d.id}"]`);
-        if (!g) return;
-        const color = this.dotColor(d.type, d.status);
-        g.querySelector('circle')?.setAttribute('fill', color);
-        (g.querySelector('text') as SVGTextElement | null)?.setAttribute('fill', color);
-      });
+// Cập nhật màu dot theo status thiết bị
+devices.forEach(d => {
+  const g = document.querySelector<SVGGElement>(`#dash-dots [data-device-id="${d.id}"]`);
+  if (!g) return;
+  const color = this.dotColor(d.type, d.status);
+  g.querySelector('circle')?.setAttribute('fill', color);
+  (g.querySelector('text') as SVGTextElement | null)?.setAttribute('fill', color);
+});
+
+// Update SLD labels with the fresh data we just polled
+this.updateRealtimeData(points);
 
     } catch {
-      const statusEl = document.getElementById('statusPlc');
-      if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#ef4444;border-radius:50%;display:inline-block;"></span> PLC: Offline`;
-    }
+  const statusEl = document.getElementById('statusPlc');
+  if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#ef4444;border-radius:50%;display:inline-block;"></span> PLC: Offline`;
+}
   }
 
   // ── Alerts log ───────────────────────────────────────────────
-  private async refreshAlerts(): Promise<void> {
-    const listEl = document.getElementById('dashAlertList');
-    if (!listEl) return;
-    try {
-      const alerts = await stationApi.getAlerts(undefined, undefined, undefined, 8);
-      if (alerts.length === 0) {
-        listEl.innerHTML = '<div style="color:#94a3b8;font-size:12px;text-align:center;padding:20px;">Hệ thống ổn định</div>';
-        return;
-      }
-      const levelColor = (l: string) => l === 'alarm' ? '#ef4444' : '#f59e0b';
-      const statusBg = (s: string) => s === 'open' ? '#fef2f2' : s === 'acked' ? '#fffbeb' : '#f0fdf4';
-      listEl.innerHTML = alerts.map(a => `
+  private async refreshAlerts(): Promise < void> {
+  const listEl = document.getElementById('dashAlertList');
+  if(!listEl) return;
+  try {
+    const alerts = await stationApi.getAlerts(undefined, undefined, undefined, 8);
+    if(alerts.length === 0) {
+  listEl.innerHTML = '<div style="color:#94a3b8;font-size:12px;text-align:center;padding:20px;">Hệ thống ổn định</div>';
+  return;
+}
+const levelColor = (l: string) => l === 'alarm' ? '#ef4444' : '#f59e0b';
+const statusBg = (s: string) => s === 'open' ? '#fef2f2' : s === 'acked' ? '#fffbeb' : '#f0fdf4';
+listEl.innerHTML = alerts.map(a => `
         <div style="padding:6px 8px;border-left:3px solid ${levelColor(a.level)};
           background:${statusBg(a.status)};border-radius:0 4px 4px 0;margin-bottom:5px;">
           <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
@@ -995,70 +1227,70 @@ export class DashboardPage {
 
   // ── Filter dots ──────────────────────────────────────────────
   private applyDotFilter(): void {
-    const thermal = (document.querySelector('[data-filter="thermal"]') as HTMLInputElement)?.checked;
-    const pd = (document.querySelector('[data-filter="pd"]') as HTMLInputElement)?.checked;
-    const camera = (document.querySelector('[data-filter="camera"]') as HTMLInputElement)?.checked;
+  const thermal = (document.querySelector('[data-filter="thermal"]') as HTMLInputElement)?.checked;
+  const pd = (document.querySelector('[data-filter="pd"]') as HTMLInputElement)?.checked;
+  const camera = (document.querySelector('[data-filter="camera"]') as HTMLInputElement)?.checked;
 
-    document.querySelectorAll<SVGGElement>('#dash-dots [data-device-type]').forEach(g => {
-      const type = g.dataset['deviceType'] ?? '';
-      let show = false;
-      if (camera && type.startsWith('camera')) show = true;
-      if (thermal && type === 'plc_s7') show = true;
-      if (pd && type === 'plc_s7') show = true;
-      if (!type) show = true; // điểm không gắn thiết bị
-      g.style.display = show ? '' : 'none';
-    });
-  }
+  document.querySelectorAll<SVGGElement>('#dash-dots [data-device-type]').forEach(g => {
+    const type = g.dataset['deviceType'] ?? '';
+    let show = false;
+    if (camera && type.startsWith('camera')) show = true;
+    if (thermal && type === 'plc_s7') show = true;
+    if (pd && type === 'plc_s7') show = true;
+    if (!type) show = true; // điểm không gắn thiết bị
+    g.style.display = show ? '' : 'none';
+  });
+}
 
   // ── Nav events ───────────────────────────────────────────────
   private bindNavEvents(): void {
-    document.getElementById('btnSeeAllAlerts')?.addEventListener('click', () => router.navigate('alerts-history'));
-    document.getElementById('btnFullCam')?.addEventListener('click', () => router.navigate('realtime'));
-    document.querySelectorAll('.filter-cb').forEach(cb =>
-      cb.addEventListener('change', () => this.applyDotFilter())
-    );
-    // Đóng dot panel và data panel khi click ngoài
-    document.getElementById('sldViewport')?.addEventListener('mousedown', e => {
-      const t = e.target as Element;
-      if (!t.closest('#dot-edit-panel') && !t.closest('#dash-dots'))
-        this.hideDotPanel();
-      if (!t.closest('#dot-data-panel') && !t.closest('#dash-dots'))
-        this.hideDataPopup();
-    });
-  }
+  document.getElementById('btnSeeAllAlerts')?.addEventListener('click', () => router.navigate('alerts-history'));
+  document.getElementById('btnFullCam')?.addEventListener('click', () => router.navigate('realtime'));
+  document.querySelectorAll('.filter-cb').forEach(cb =>
+    cb.addEventListener('change', () => this.applyDotFilter())
+  );
+  // Đóng dot panel và data panel khi click ngoài
+  document.getElementById('sldViewport')?.addEventListener('mousedown', e => {
+    const t = e.target as Element;
+    if (!t.closest('#dot-edit-panel') && !t.closest('#dash-dots'))
+      this.hideDotPanel();
+    if (!t.closest('#dot-data-panel') && !t.closest('#dash-dots'))
+      this.hideDataPopup();
+  });
+}
 
   // ── Toast ─────────────────────────────────────────────────────
   private showToast(msg: string, type: 'success' | 'error'): void {
-    const t = document.createElement('div');
-    t.className = `toast toast-${type}`;
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => t.classList.add('toast-show'), 10);
-    setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  setTimeout(() => t.classList.add('toast-show'), 10);
+setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
   }
 
   // ── Health scores ─────────────────────────────────────────
-  private async refreshHealth(): Promise<void> {
-    const body = document.getElementById('healthBody');
-    if (!body) return;
-    try {
-      const scores = await stationApi.getHealthScores(this.stationId || undefined);
-      if (scores.length === 0) {
-        body.innerHTML = '<div style="color:#475569;font-size:0.68rem;text-align:center;padding:6px;">Chưa có dữ liệu</div>';
-        return;
-      }
-      const riskColor: Record<string, string> = {
-        good: '#10b981', fair: '#f59e0b', poor: '#f97316', critical: '#ef4444',
-      };
-      const riskLabel: Record<string, string> = {
-        good: 'Tốt', fair: 'Trung bình', poor: 'Kém', critical: 'Nguy hiểm',
-      };
-      body.innerHTML = scores.map((s: HealthScore) => {
-        const col = riskColor[s.risk] ?? '#64748b';
-        const lbl = riskLabel[s.risk] ?? s.risk;
-        const pct = s.score;
-        const icon = s.deviceType.startsWith('camera') ? '📷' : s.deviceType === 'plc_s7' ? '🔌' : '📡';
-        return `
+  private async refreshHealth(): Promise < void> {
+  const body = document.getElementById('healthBody');
+  if(!body) return;
+  try {
+    const scores = await stationApi.getHealthScores(this.stationId || undefined);
+    if(scores.length === 0) {
+  body.innerHTML = '<div style="color:#475569;font-size:0.68rem;text-align:center;padding:6px;">Chưa có dữ liệu</div>';
+  return;
+}
+const riskColor: Record<string, string> = {
+  good: '#10b981', fair: '#f59e0b', poor: '#f97316', critical: '#ef4444',
+};
+const riskLabel: Record<string, string> = {
+  good: 'Tốt', fair: 'Trung bình', poor: 'Kém', critical: 'Nguy hiểm',
+};
+body.innerHTML = scores.map((s: HealthScore) => {
+  const col = riskColor[s.risk] ?? '#64748b';
+  const lbl = riskLabel[s.risk] ?? s.risk;
+  const pct = s.score;
+  const icon = s.deviceType.startsWith('camera') ? '📷' : s.deviceType === 'plc_s7' ? '🔌' : '📡';
+  return `
           <div style="padding:3px 2px;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
               <span style="font-size:0.65rem;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">
@@ -1070,24 +1302,41 @@ export class DashboardPage {
               <div style="width:${pct}%;height:100%;background:${col};border-radius:3px;transition:width 0.4s;"></div>
             </div>
           </div>`;
-      }).join('');
+}).join('');
     } catch {
-      /* silently fail — backend mới có thể chưa tính */
-    }
+  /* silently fail — backend mới có thể chưa tính */
+}
   }
 
   private positionHealthWidget(): void {
-    const kpi = document.getElementById('floatKpi');
-    const health = document.getElementById('floatHealth');
-    if (!kpi || !health) return;
-    const kpiBottom = kpi.getBoundingClientRect().bottom;
-    const vpTop = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
-    health.style.top = (kpiBottom - vpTop + 8) + 'px';
+  const kpi = document.getElementById('floatKpi');
+  const health = document.getElementById('floatHealth');
+  if(!kpi || !health) return;
+const kpiBottom = kpi.getBoundingClientRect().bottom;
+const vpTop = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
+health.style.top = (kpiBottom - vpTop + 8) + 'px';
   }
 
-  destroy(): void {
-    clearInterval(this.kpiInterval);
-    clearInterval(this.alertInterval);
-    clearInterval(this.healthInterval);
-  }
+  private connectSignalR(): void {
+  const token = localStorage.getItem('station_jwt');
+  if(!token) return;
+
+  this.hubConnection = new signalR.HubConnectionBuilder()
+    .withUrl('/ws/realtime', { accessTokenFactory: () => token })
+    .withAutomaticReconnect()
+    .build();
+
+  this.hubConnection.on('SensorUpdate', (data: any[]) => {
+    this.updateRealtimeData(data);
+  });
+
+  this.hubConnection.start().catch(err => console.warn('[SignalR] Dashboard lỗi kết nối:', err));
+}
+
+destroy(): void {
+  clearInterval(this.kpiInterval);
+  clearInterval(this.alertInterval);
+  clearInterval(this.healthInterval);
+  if(this.hubConnection) this.hubConnection.stop();
+}
 }

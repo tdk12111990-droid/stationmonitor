@@ -45,14 +45,15 @@ public class SldController : ControllerBase
         var points = new List<object>();
         var pinnedDeviceIds = new HashSet<Guid>();
 
+        var sldFilePoints = new List<SldPoint>();
         if (sldFile != null)
         {
-            var rawPoints = await _db.SldPoints
+            sldFilePoints = await _db.SldPoints
                 .Where(p => p.SldFileId == sldFile.Id)
                 .Include(p => p.Device)
                 .ToListAsync();
 
-            foreach (var p in rawPoints)
+            foreach (var p in sldFilePoints)
             {
                 if (p.DeviceId.HasValue) pinnedDeviceIds.Add(p.DeviceId.Value);
                 points.Add(new
@@ -71,15 +72,46 @@ public class SldController : ControllerBase
             .Where(d => d.StationId == stationId)
             .ToListAsync();
 
-        var unpinned = allDevices
-            .Where(d => !pinnedDeviceIds.Contains(d.Id))
-            .Select(d => new { d.Id, d.Name, d.Type, d.Status })
-            .ToList();
+        var unpinned = new List<object>();
+        foreach (var d in allDevices)
+        {
+          if (d.Type == "plc_s7")
+          {
+            // 1. Unified PLC icon (shows all data)
+            if (!sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == d.Id.ToString()))
+            {
+              unpinned.Add(new { d.Id, name = $"{d.Name} (Tất cả)", d.Type, d.Status, sensorTag = (string?)null });
+            }
+
+            // 2. Specific sub-sensors
+            string[] plcTags = { "nhiet_do_pha_1", "nhiet_do_pha_2", "nhiet_do_pha_3", "phong_dien" };
+            foreach (var tag in plcTags)
+            {
+              if (!sldFilePoints.Any(p => p.DeviceId == d.Id && p.PointId == tag))
+              {
+                unpinned.Add(new { d.Id, name = $"{d.Name} ({tag.Replace("nhiet_do_", "").Replace("_", " ")})", d.Type, d.Status, sensorTag = tag });
+              }
+            }
+          }
+          else
+          {
+            // Other devices: 1 point per device
+            if (!pinnedDeviceIds.Contains(d.Id))
+            {
+              unpinned.Add(new { d.Id, d.Name, d.Type, d.Status, sensorTag = (string?)null });
+            }
+          }
+        }
+
+        // Nhúng version vào URL để browser cache đúng — mỗi lần upload mới URL thay đổi
+        var svgUrlVersioned = sldFile?.SvgUrl != null
+            ? $"{sldFile.SvgUrl}?v={sldFile.Version}"
+            : null;
 
         return Ok(new
         {
             sldFileId = sldFile?.Id,
-            svgUrl    = sldFile?.SvgUrl,
+            svgUrl    = svgUrlVersioned,
             version   = sldFile?.Version ?? 0,
             points,
             unpinned,
@@ -134,7 +166,7 @@ public class SldController : ControllerBase
         _db.SldFiles.Add(newFile);
         await _db.SaveChangesAsync();
 
-        return Ok(new { sldFileId = newFile.Id, svgUrl, version = newFile.Version });
+        return Ok(new { sldFileId = newFile.Id, svgUrl = $"{svgUrl}?v={newFile.Version}", version = newFile.Version });
     }
 
     // ── POST /api/v1/sld/{stationId}/points ──────────────────
@@ -162,11 +194,12 @@ public class SldController : ControllerBase
             await _db.SaveChangesAsync();
         }
 
-        // Nếu device đã được pin rồi → xóa điểm cũ (move thay vì duplicate)
+        // Cho phép nhiều điểm nếu DeviceId giống nhau nhưng PointId khác nhau (như PLC có nhiều cảm biến)
         if (req.DeviceId.HasValue)
         {
+            var pointIdToUse = req.PointId ?? req.DeviceId.Value.ToString();
             var existing = await _db.SldPoints
-                .Where(p => p.SldFileId == sldFile.Id && p.DeviceId == req.DeviceId)
+                .Where(p => p.SldFileId == sldFile.Id && p.DeviceId == req.DeviceId && p.PointId == pointIdToUse)
                 .FirstOrDefaultAsync();
             if (existing != null) _db.SldPoints.Remove(existing);
         }
@@ -179,7 +212,7 @@ public class SldController : ControllerBase
         {
             SldFileId = sldFile.Id,
             DeviceId  = req.DeviceId,
-            PointId   = req.DeviceId?.ToString() ?? Guid.NewGuid().ToString(),
+            PointId   = req.PointId ?? req.DeviceId?.ToString() ?? Guid.NewGuid().ToString(),
             Label     = req.Label ?? device?.Name ?? "Điểm",
             X         = req.X,
             Y         = req.Y,
@@ -236,7 +269,8 @@ public record AddPointRequest(
     double X,
     double Y,
     double R = 10,
-    string? Label = null
+    string? Label = null,
+    string? PointId = null
 );
 
 public record UpdatePointRequest(

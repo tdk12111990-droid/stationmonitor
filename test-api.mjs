@@ -584,6 +584,242 @@ if (testTaskId) {
     : fail('GET /maintenance (no auth)', `expect 401, got ${r.status}`);
 }
 
+// ── PHASE 9: Analytics ─────────────────────────────────────
+console.log('\n📈 PHASE 9 — Analytics\n');
+
+// Test: Health scores
+{
+  const r = await get('/analytics/health');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /analytics/health → ${r.body.length} thiết bị, scores: ${r.body.map(d => d.score).join(', ')}`)
+    : fail('GET /analytics/health', `status=${r.status}`);
+}
+
+// Test: Trend analysis
+{
+  const r = await get('/analytics/trend');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /analytics/trend → ${r.body.length} trend items`)
+    : fail('GET /analytics/trend', `status=${r.status}`);
+}
+
+// Test: Trend với tham số days
+{
+  const r = await get('/analytics/trend?days=3');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /analytics/trend?days=3 → ${r.body.length} items`)
+    : fail('GET /analytics/trend?days=3', `status=${r.status}`);
+}
+
+// ── PHASE 10: Cloud Sync ────────────────────────────────────
+console.log('\n☁️ PHASE 10 — Cloud Sync\n');
+
+// Test: Sync status
+{
+  const r = await get('/sync/status');
+  if (r.status === 200 && r.body != null) {
+    ok(`GET /sync/status → pending=${r.body.pendingCount}, sent=${r.body.sentCount}, failed=${r.body.failedCount}`);
+  } else {
+    fail('GET /sync/status', `status=${r.status}`);
+  }
+}
+
+// Test: Trigger sync (admin)
+{
+  const r = await post('/sync/trigger', {});
+  r.status === 200
+    ? ok(`POST /sync/trigger → ${r.body?.message ?? 'OK'}`)
+    : fail('POST /sync/trigger', `status=${r.status}`);
+}
+
+// ── PHASE 11: Protocol ──────────────────────────────────────
+console.log('\n📡 PHASE 11 — Protocol Discovery\n');
+
+// Test: Serial ports
+{
+  const r = await get('/protocol/serial-ports');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /protocol/serial-ports → ${r.body.length} ports`)
+    : fail('GET /protocol/serial-ports', `status=${r.status}`);
+}
+
+// Test: Scan IP cụ thể
+{
+  const r = await get('/protocol/scan?ip=192.168.10.100&port=102');
+  r.status === 200 && r.body != null
+    ? ok(`GET /protocol/scan?ip=192.168.10.100 → isOnline=${r.body.isOnline}`)
+    : fail('GET /protocol/scan', `status=${r.status}`);
+}
+
+// Test: Discover devices (subnet scan)
+{
+  const r = await get('/protocol/discover?subnet=192.168.10&timeout=1000');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /protocol/discover → ${r.body.length} thiết bị phát hiện`)
+    : fail('GET /protocol/discover', `status=${r.status}`);
+}
+
+// Test: ONVIF discovery
+{
+  const r = await get('/protocol/discover-onvif');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /protocol/discover-onvif → ${r.body.length} camera ONVIF`)
+    : fail('GET /protocol/discover-onvif', `status=${r.status}`);
+}
+
+// Test: Test connection (Modbus)
+{
+  const r = await post('/protocol/test-connection', {
+    ip: '127.0.0.1', port: 502, protocol: 'modbus_tcp'
+  });
+  // Có thể fail connection nhưng endpoint phải trả 200
+  r.status === 200
+    ? ok(`POST /protocol/test-connection → success=${r.body?.success}, latency=${r.body?.latencyMs}ms`)
+    : fail('POST /protocol/test-connection', `status=${r.status}`);
+}
+
+// ── EXPORT Endpoints ────────────────────────────────────────
+console.log('\n⬇ EXPORT — CSV Export\n');
+
+// Test: Export alerts CSV
+{
+  const token2 = token;
+  const res = await fetch(`${BASE}/alerts/export`, {
+    headers: { Authorization: `Bearer ${token2}` }
+  });
+  res.status === 200 && (res.headers.get('content-type') ?? '').includes('text/csv')
+    ? ok(`GET /alerts/export → CSV download (${res.headers.get('content-length') ?? '?'} bytes)`)
+    : fail('GET /alerts/export', `status=${res.status}, content-type=${res.headers.get('content-type')}`);
+}
+
+// Test: Export history CSV
+{
+  const res = await fetch(`${BASE}/history/export`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  res.status === 200 && (res.headers.get('content-type') ?? '').includes('text/csv')
+    ? ok(`GET /history/export → CSV download`)
+    : fail('GET /history/export', `status=${res.status}, content-type=${res.headers.get('content-type')}`);
+}
+
+// ── Reports ─────────────────────────────────────────────────
+console.log('\n📄 Reports\n');
+
+let testReportId = '';
+
+// Test: GET reports list
+{
+  const r = await get('/reports');
+  r.status === 200 && Array.isArray(r.body)
+    ? ok(`GET /reports → ${r.body.length} báo cáo`)
+    : fail('GET /reports', `status=${r.status}`);
+}
+
+// Test: Generate report
+{
+  const r = await post('/reports/generate', {
+    stationId,
+    reportType: 'daily',
+    from: new Date(Date.now() - 24*60*60*1000).toISOString(),
+    to:   new Date().toISOString(),
+  });
+  if (r.status === 200 || r.status === 201) {
+    testReportId = r.body?.id ?? '';
+    ok(`POST /reports/generate → id=${testReportId?.slice(0,8)}...`);
+  } else {
+    fail('POST /reports/generate', `status=${r.status}, body=${JSON.stringify(r.body)}`);
+  }
+}
+
+// Test: Download report
+if (testReportId) {
+  const res = await fetch(`${BASE}/reports/${testReportId}/download`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  res.status === 200
+    ? ok(`GET /reports/${testReportId.slice(0,8)}/download → file OK`)
+    : fail('GET /reports/{id}/download', `status=${res.status}`);
+}
+
+// Test: Delete report
+if (testReportId) {
+  const r = await del(`/reports/${testReportId}`);
+  r.status === 200 || r.status === 204
+    ? ok(`DELETE /reports/${testReportId.slice(0,8)} → xóa thành công`)
+    : fail('DELETE /reports/{id}', `status=${r.status}`);
+}
+
+// ── SLD ─────────────────────────────────────────────────────
+console.log('\n🗺 SLD\n');
+
+// Test: GET SLD
+{
+  const r = await get(`/sld/${stationId}`);
+  r.status === 200 || r.status === 404
+    ? ok(`GET /sld/${stationId.slice(0,8)} → status=${r.status} (404 = chưa upload SVG)`)
+    : fail('GET /sld/{stationId}', `status=${r.status}`);
+}
+
+// ── Notifications ────────────────────────────────────────────
+console.log('\n📧 Notifications\n');
+
+// Test: GET SMTP config
+{
+  const r = await get('/notifications/smtp-config');
+  r.status === 200 && r.body?.host !== undefined
+    ? ok(`GET /notifications/smtp-config → host=${r.body.host}, port=${r.body.port}`)
+    : fail('GET /notifications/smtp-config', `status=${r.status}`);
+}
+
+// ── Stations PUT/DELETE (mới thêm) ──────────────────────────
+console.log('\n🏭 Stations CRUD (PUT/DELETE)\n');
+
+let testStationId = '';
+
+// Test: Tạo trạm test
+{
+  const r = await post('/stations', {
+    name: '[AUTO TEST] Trạm kiểm tra',
+    code: 'TEST-99',
+    location: 'Test location',
+  });
+  if (r.status === 200 || r.status === 201) {
+    testStationId = r.body?.id ?? '';
+    ok(`POST /stations → tạo thành công (id: ${testStationId.slice(0,8)}...)`);
+  } else {
+    fail('POST /stations', `status=${r.status}`);
+  }
+}
+
+// Test: PUT cập nhật trạm
+if (testStationId) {
+  const r = await put(`/stations/${testStationId}`, {
+    name: '[AUTO TEST] Trạm kiểm tra (đã cập nhật)',
+    code: 'TEST-99',
+  });
+  r.status === 200
+    ? ok(`PUT /stations/${testStationId.slice(0,8)} → cập nhật thành công`)
+    : fail('PUT /stations/{id}', `status=${r.status}`);
+}
+
+// Test: DELETE trạm
+if (testStationId) {
+  const r = await del(`/stations/${testStationId}`);
+  r.status === 200 || r.status === 204
+    ? ok(`DELETE /stations/${testStationId.slice(0,8)} → xóa thành công`)
+    : fail('DELETE /stations/{id}', `status=${r.status}`);
+}
+
+// Test: 401 không có token
+{
+  const saved = token; token = '';
+  const r = await get('/analytics/health');
+  token = saved;
+  r.status === 401
+    ? ok('GET /analytics/health không có token → 401')
+    : fail('GET /analytics (no auth)', `expect 401, got ${r.status}`);
+}
+
 // ── KẾT QUẢ ────────────────────────────────────────────────
 console.log('\n' + '='.repeat(50));
 console.log(`  PASSED: ${passed}  |  FAILED: ${failed}  |  TOTAL: ${passed + failed}`);

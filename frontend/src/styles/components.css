@@ -74,7 +74,10 @@
 
 /* ── Tags / Badges ──────────────────────────────────────── */
 .tag {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
     padding: 3px 10px;
     border-radius: 20px;
     font-size: .72rem;

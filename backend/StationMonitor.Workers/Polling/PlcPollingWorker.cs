@@ -34,6 +34,9 @@ public class PlcPollingWorker : BackgroundService
     // Đọc mỗi 3 giây
     private const int PollIntervalMs = 3000;
 
+    // Theo dõi lần dọn dẹp cuối cùng
+    private DateTime _lastCleanup = DateTime.MinValue;
+
     public PlcPollingWorker(
         IServiceScopeFactory scopeFactory,
         IRealtimeNotifier notifier,
@@ -52,14 +55,53 @@ public class PlcPollingWorker : BackgroundService
         {
             try
             {
+                // Tự động dọn dẹp dữ liệu cũ mỗi 1 giờ
+                if ((DateTime.UtcNow - _lastCleanup).TotalHours >= 1)
+                {
+                    await CleanupOldDataAsync(stoppingToken);
+                    _lastCleanup = DateTime.UtcNow;
+                }
+
                 await PollAllPlcDevicesAsync(stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "[PLC] Lỗi polling");
+                _logger.LogError(ex, "[PLC] Lỗi trong vòng lặp chính");
             }
 
             await Task.Delay(PollIntervalMs, stoppingToken);
+        }
+    }
+
+    /// <summary>
+    /// Tự động xóa dữ liệu đo lường đã cũ để giải phóng ổ cứng (Retention Policy)
+    /// </summary>
+    private async Task CleanupOldDataAsync(CancellationToken ct)
+    {
+        try
+        {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            // Giữ lại 3 ngày gần nhất (Có thể nâng lên sau khi mở rộng đĩa)
+            var cutoff = DateTime.UtcNow.AddDays(-3);
+            _logger.LogInformation("[PLC] Đang dọn dẹp dữ liệu cũ trước {Time} (UTC)", cutoff);
+
+            // Sử dụng SQL trực tiếp để xóa nhanh nhất mà không tải bản ghi vào RAM
+            var deletedCount = await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM \"SensorReadings\" WHERE \"Time\" < {0}", 
+                new object[] { cutoff }, 
+                ct
+            );
+
+            if (deletedCount > 0)
+            {
+                _logger.LogInformation("[PLC] Đã dọn dẹp xong. Xóa thành công {Count} bản ghi cũ.", deletedCount);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "[PLC] Lỗi trong quá trình dọn dẹp dữ liệu");
         }
     }
 

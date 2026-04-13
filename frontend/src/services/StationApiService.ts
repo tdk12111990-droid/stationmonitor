@@ -272,7 +272,7 @@ class StationApiService {
   }
 
   async addSldPoint(stationId: string, data: {
-    deviceId?: string; x: number; y: number; r?: number; label?: string;
+    deviceId?: string; x: number; y: number; r?: number; label?: string; pointId?: string;
   }): Promise<SldPoint> {
     return apiMutate('POST', `/sld/${stationId}/points`, data);
   }
@@ -518,6 +518,7 @@ export interface SldUnpinnedDevice {
   name: string;
   type: string;
   status: string;
+  sensorTag?: string; // Specific sensor for multi-point devices
 }
 
 export interface SldData {
