@@ -72,6 +72,35 @@ services:
     networks:
       - sm-network
 
+  # 5. AI Engine: Xử lý nhiệt độ & hình ảnh (GPU support)
+  stationmonitor-ai:
+    build:
+      context: ./backend/StationMonitor.Api/AI
+      dockerfile: Dockerfile.ai
+    container_name: stationmonitor-ai
+    restart: always
+    privileged: true # Cần để truy cập driver NVIDIA
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    environment:
+      - API_URL=http://stationmonitor-backend:8080/api/v1
+      - CAMERA_IP=192.168.10.152
+      - CAMERA_USER=admin
+      - CAMERA_PASSWORD=Demo@2024
+      - WWWROOT_PATH=/app/wwwroot
+    volumes:
+      - ./data/media:/app/wwwroot/detections # Chia sẻ thư mục ảnh với backend
+      - ./data/media/videos:/app/wwwroot/videos # Chia sẻ thư mục video
+    depends_on:
+      - stationmonitor-backend
+    networks:
+      - sm-network
+
 networks:
   sm-network:
     name: stationmonitor-network

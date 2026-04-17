@@ -3,37 +3,55 @@ import numpy as np
 import ctypes
 from collections import deque
 
-# Path configurations
+# ── Cấu hình đường dẫn linh hoạt (Cross-platform) ──
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-TEST_SDK_DIR = r"d:\test_sdk"
-sys.path.insert(0, TEST_SDK_DIR)
+
+# Đường dẫn tới thư viện SDK (mặc định tìm cùng cấp hoặc cấp trên dự án)
+# Chúng ta sẽ ưu tiên lấy từ biến môi trường nếu có
+TEST_SDK_DIR = os.getenv("SDK_PATH", os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR))))
+if os.path.exists(os.path.join(CURRENT_DIR, "hcnet_sdk")):
+    # Nếu được đóng gói cùng cấp
+    sys.path.insert(0, CURRENT_DIR)
+else:
+    sys.path.insert(0, TEST_SDK_DIR)
 
 from core.hcnet_sdk import HCNetSDK, NET_DVR_THERMOMETRY_COND, NET_DVR_THERMOMETRY_UPLOAD, RemoteConfigCallback
 import core.hcnet_sdk as core_sdk
 
-# Cấu hình Camera
-try:
-    from config import CAMERA_IP, USER, PASSWORD
-except ImportError:
-    CAMERA_IP = "192.168.10.152"
-    USER = "admin"
-    PASSWORD = "Demo@2024"
+# ── Tham số từ môi trường (hoặc fix cứng Development) ──
+CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.152")
+USER = os.getenv("CAMERA_USER", "admin")
+PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024")
+API_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
+
+# ── Cấu hình FFmpeg và Thư mục dữ liệu ──
+if sys.platform == 'win32':
+    # Ưu tiên ffmpeg trong thư mục dự án trên Windows
+    FFMPEG_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR))), "frontend", "bin", "ffmpeg.exe")
+    if not os.path.exists(FFMPEG_BIN):
+        FFMPEG_BIN = "ffmpeg" # Fallback về system PATH
+else:
+    # Trên Linux (Jetson/Docker) dùng ffmpeg cài sẵn trong hệ thống
+    FFMPEG_BIN = "ffmpeg"
 
 import urllib.parse
 ENCODED_PASS = urllib.parse.quote(PASSWORD)
 OPTICAL_URL = f"rtsp://{USER}:{ENCODED_PASS}@{CAMERA_IP}:554/Streaming/Channels/101"
 THERMAL_URL = f"rtsp://{USER}:{ENCODED_PASS}@{CAMERA_IP}:554/Streaming/Channels/201"
 FFMPEG_LOG_PATH = os.path.join(CURRENT_DIR, "ffmpeg_relay.log")
-API_URL = "http://localhost:5056/api/v1"
-FFMPEG_BIN = r"d:\StationMonitor\frontend\bin\ffmpeg.exe"
-POINTS_FILE = os.path.join(TEST_SDK_DIR, "apps", "desktop_viewer", "points_local.json")
-# Thư mục lưu trữ bằng đường dẫn tuyệt đối để Web Dashboard truy cập được
-WWWROOT_DIR = r"D:\StationMonitor\backend\StationMonitor.Api\wwwroot"
+
+# Tự động tìm thư mục wwwroot (Development vs Docker)
+# Trong Docker, detections/videos thường được mount trực tiếp vào /app/wwwroot
+WWWROOT_DIR = os.getenv("WWWROOT_PATH", os.path.join(os.path.dirname(os.path.dirname(CURRENT_DIR)), "wwwroot"))
 ALERTS_DIR = os.path.join(WWWROOT_DIR, "detections")
 VIDEOS_DIR = os.path.join(WWWROOT_DIR, "videos")
 
+# Đảm bảo thư mục tồn tại
 for d in [ALERTS_DIR, VIDEOS_DIR]:
-    if not os.path.exists(d): os.makedirs(d, exist_ok=True)
+    try:
+        if not os.path.exists(d): os.makedirs(d, exist_ok=True)
+    except:
+        print(f"Warning: Could not create/access directory {d}")
 
 # Cờ báo hiệu (Event)
 SNAPSHOT_EVENT = threading.Event()
