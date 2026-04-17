@@ -10,6 +10,7 @@ public class Rule
     public Guid? DeviceId { get; set; }
     public Device? Device { get; set; }
     [Required] public string Name { get; set; } = string.Empty;
+    public string? RuleSet { get; set; }  // Tên bộ rule: "Tủ 471", "Camera Nhiệt", v.v.
     [Required] public string Condition { get; set; } = "{}"; // JSONB: {type, point, op, value, duration_s}
     [Required] public string Actions { get; set; } = "[]";   // JSONB: [{type, level/channel}]
     public bool Enabled { get; set; } = true;

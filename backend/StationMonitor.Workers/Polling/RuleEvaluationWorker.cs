@@ -26,6 +26,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using StationMonitor.Data;
 using StationMonitor.Data.Entities;
+using StationMonitor.Services.Camera;
 using StationMonitor.Services;
 
 namespace StationMonitor.Workers.Polling;
@@ -107,17 +108,26 @@ public class RuleEvaluationWorker : BackgroundService
         var condition = RuleEvaluator.ParseConditionExtended(rule.Condition);
         if (condition == null) return;
 
-        var (pointId, op, threshold, clearValue, cooldownMin, confirmReadings) = condition.Value;
+        var (pointId, op, threshold, warningValue, clearValue, cooldownMin, confirmReadings) = condition.Value;
 
         if (!latestReadings.TryGetValue(pointId, out var reading)) return;
         if (reading.Value == null) return;
 
         var currentValue = reading.Value.Value;
-        var triggered    = RuleEvaluator.Evaluate(currentValue, op, threshold);
+
+        // Dual threshold: alarm > pre_alarm. Xác định level thực tế bị vượt.
+        bool alarmTriggered   = RuleEvaluator.Evaluate(currentValue, op, threshold);
+        bool warningTriggered = warningValue.HasValue &&
+                                RuleEvaluator.Evaluate(currentValue, op, warningValue.Value) &&
+                                !alarmTriggered;
+
+        string? levelOverride = alarmTriggered ? "alarm" : (warningTriggered ? "warning" : null);
+        double  activeThreshold = (warningTriggered && warningValue.HasValue) ? warningValue.Value : threshold;
+        bool    triggered       = alarmTriggered || warningTriggered;
 
         if (hasAlert)
-            await HandleAlertActionAsync(services, db, rule, pointId, op, threshold, clearValue,
-                                         cooldownMin, confirmReadings, currentValue, triggered, ct);
+            await HandleAlertActionAsync(services, db, rule, pointId, op, activeThreshold, clearValue,
+                                         cooldownMin, confirmReadings, currentValue, triggered, levelOverride, ct);
 
         if (hasMaint && triggered)
             await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
@@ -128,7 +138,7 @@ public class RuleEvaluationWorker : BackgroundService
         IServiceProvider services, AppDbContext db, Rule rule,
         string pointId, string op, double threshold, double clearValue,
         int cooldownMin, int confirmReadings,
-        double currentValue, bool triggered, CancellationToken ct)
+        double currentValue, bool triggered, string? levelOverride, CancellationToken ct)
     {
         // ── Lấy alert đang open cho rule này ──────────────────
         var openAlert = await db.Alerts
@@ -177,7 +187,7 @@ public class RuleEvaluationWorker : BackgroundService
 
         _confirmCounts[rule.Id] = 0;
 
-        var level = RuleEvaluator.ParseAlertLevel(rule.Actions);
+        var level = levelOverride ?? RuleEvaluator.ParseAlertLevel(rule.Actions);
         var alert = new Alert
         {
             StationId   = rule.StationId,
@@ -220,6 +230,51 @@ public class RuleEvaluationWorker : BackgroundService
         });
 
         await db.SaveChangesAsync(ct);
+
+        DetectionEvent? detectionEvent = null;
+        try
+        {
+            var evidenceSvc = services.GetRequiredService<ThermalEvidenceService>();
+            var evidence = await evidenceSvc.CaptureForAlertAsync(db, rule.StationId, ct);
+            if (evidence != null)
+            {
+                alert.ImageUrl = evidence.ImageUrl;
+                alert.ThumbnailUrl = evidence.ThumbnailUrl;
+                alert.VideoUrl = evidence.VideoUrl;
+
+                detectionEvent = new DetectionEvent
+                {
+                    StationId = rule.StationId,
+                    CameraId = evidence.Camera.Id,
+                    Source = "rule_engine",
+                    DetectionType = "thermal_hotspot",
+                    Severity = alert.Level,
+                    Message = alert.Message,
+                    DetectedAt = alert.TriggeredAt,
+                    MaxTemp = (float?)currentValue,
+                    AlertId = alert.Id,
+                    Metadata = JsonSerializer.Serialize(new
+                    {
+                        snapshotUrl = evidence.ImageUrl,
+                        thumbnailUrl = evidence.ThumbnailUrl,
+                        videoUrl = evidence.VideoUrl,
+                        pointId,
+                        ruleName = rule.Name,
+                        cameraName = evidence.Camera.Name,
+                    }),
+                };
+                db.DetectionEvents.Add(detectionEvent);
+                await db.SaveChangesAsync(ct);
+
+                alert.DetectionId = detectionEvent.Id;
+                await db.SaveChangesAsync(ct);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "[Rules] Khong tao duoc bang chung media cho alert {AlertId}", alert.Id);
+        }
+
         _logger.LogWarning("[Rules] Alert [{Level}] ({confirmReadings} readings): {Msg}", level, confirmReadings, alert.Message);
 
         var emailSetting = await db.SystemSettings.FirstOrDefaultAsync(s => s.Key == "alert_email", ct);
@@ -241,7 +296,23 @@ public class RuleEvaluationWorker : BackgroundService
             id = alert.Id, level = alert.Level, status = alert.Status,
             message = alert.Message, value = alert.Value,
             triggeredAt = alert.TriggeredAt, ruleId = alert.RuleId, deviceId = alert.DeviceId,
+            imageUrl = alert.ImageUrl, thumbnailUrl = alert.ThumbnailUrl, videoUrl = alert.VideoUrl,
         });
+
+        if (detectionEvent != null)
+        {
+            await _notifier.SendCameraEventAsync(new
+            {
+                id = detectionEvent.Id,
+                cameraId = detectionEvent.CameraId,
+                cameraName = (await db.Devices.Where(d => d.Id == detectionEvent.CameraId).Select(d => d.Name).FirstOrDefaultAsync(ct)) ?? "Camera nhiet",
+                detectionType = detectionEvent.DetectionType,
+                detectedAt = detectionEvent.DetectedAt,
+                maxTemp = detectionEvent.MaxTemp,
+                alertId = detectionEvent.AlertId,
+                metadata = detectionEvent.Metadata,
+            });
+        }
     }
 
     // ── Xử lý action type=maintenance ─────────────────────────────────────

@@ -6,6 +6,7 @@
 
 import { stationApi, Device } from '@/services/StationApiService';
 import { confirmDialog } from '@/utils/confirm';
+import { API_BASE_URL } from '@/utils/env';
 
 const TYPE_LABELS: Record<string, string> = {
   plc_s7:         '⚙️ PLC S7-1200',
@@ -117,8 +118,8 @@ export class DeviceManagementPage {
                 </select>
               </label>
               <input id="devRtspPath" type="text" class="form-input" placeholder="/Streaming/Channels/101">
-              <label style="margin-top:8px">go2rtc Stream ID <small style="opacity:.6">(tự tạo nếu bỏ trống)</small></label>
-              <input id="devGo2rtcId" type="text" class="form-input" placeholder="vd: camera_152_main">
+              <label style="margin-top:8px">go2rtc Stream ID <small style="opacity:.6">(tự tạo nếu bỏ trống — sub-stream tự đăng ký: id_sub)</small></label>
+              <input id="devGo2rtcId" type="text" class="form-input" placeholder="vd: camera_152_normal">
             </div>
 
             <!-- Modbus fields -->
@@ -515,7 +516,7 @@ export class DeviceManagementPage {
       (document.getElementById('startScanBtn') as HTMLButtonElement).disabled = true;
       try {
         const token = localStorage.getItem('station_token') ?? '';
-        const res = await fetch(`http://localhost:5056/api/v1/devices/scan?subnet=${subnet}`, {
+        const res = await fetch(`${API_BASE_URL}/api/v1/devices/scan?subnet=${subnet}`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const found: any[] = await res.json();
@@ -547,7 +548,7 @@ export class DeviceManagementPage {
       (document.getElementById('startOnvifBtn') as HTMLButtonElement).disabled = true;
       try {
         const token = localStorage.getItem('station_token') ?? '';
-        const res = await fetch('http://localhost:5056/api/v1/protocol/discover-onvif', {
+        const res = await fetch(`${API_BASE_URL}/api/v1/protocol/discover-onvif`, {
           headers: { Authorization: `Bearer ${token}` }
         });
         const cameras: any[] = await res.json();
@@ -581,7 +582,7 @@ export class DeviceManagementPage {
       (document.getElementById('startTestConnBtn') as HTMLButtonElement).disabled = true;
       try {
         const token = localStorage.getItem('station_token') ?? '';
-        const res = await fetch('http://localhost:5056/api/v1/protocol/test-connection', {
+        const res = await fetch(`${API_BASE_URL}/api/v1/protocol/test-connection`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
           body: JSON.stringify({ ip, port, protocol })

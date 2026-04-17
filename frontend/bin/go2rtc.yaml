@@ -1,12 +1,15 @@
 
 ffmpeg:
-  bin: d:\Studies\Research\DETAITHAYGIAO\worldmonitor-main\worldmonitor-main\bin\ffmpeg.exe
+  bin: d:\StationMonitor\frontend\bin\ffmpeg.exe
 
 log:
-  level: debug
+  level: info
 
 streams:
-  # Using %40 to escape the @ in Tfc@khai2026
-  hikvision_main: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
-  # Sub-stream fallback
-  hikvision_sub: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/102
+  # Cấu hình ALIAS để ghi đè luồng thô bằng luồng đã xử lý (Enhanced)
+  # Frontend gọi "camera_152_normal" -> go2rtc sẽ lấy từ Relay Python
+  camera_152_normal: rtsp://127.0.0.1:8554/cam_152_opt_enhanced
+  camera_152_thermal: rtsp://127.0.0.1:8554/cam_152_thm_enhanced
+
+  # Camera Âm thanh (Acoustic - Cam 153) - Giữ nguyên luồng thô từ IP thật
+  camera_153_pd: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101

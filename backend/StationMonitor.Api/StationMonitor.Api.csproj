@@ -25,4 +25,12 @@
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
 
+  <!-- Loai tru thu muc AI khoi qua trinh compilation de tranh xung dot voi demo SDK -->
+  <ItemGroup>
+    <Compile Remove="AI\**" />
+    <Content Remove="AI\**" />
+    <EmbeddedResource Remove="AI\**" />
+    <None Remove="AI\**" />
+  </ItemGroup>
+
 </Project>

@@ -1,22 +1,23 @@
+using System;
 using System.ComponentModel.DataAnnotations;
 
 namespace StationMonitor.Data.Entities;
 
 public class MediaFile
 {
+    [Key]
     public Guid Id { get; set; } = Guid.NewGuid();
-    public Guid StationId { get; set; }
-    public Guid? DeviceId { get; set; }
-    public Guid? DetectionId { get; set; }
-    public Guid? TakenBy { get; set; }
-    [Required] public string FileType { get; set; } = string.Empty;  // image | video_clip | thermal_map
-    [Required] public string Source { get; set; } = string.Empty;    // ai_detection | manual_snapshot | event_trigger
-    [Required] public string Storage { get; set; } = "local";        // local | r2_cloud | both
-    public string? FilePath { get; set; }
-    public string? FileUrl { get; set; }
-    public int? FileSizeKb { get; set; }
-    public int? DurationS { get; set; }
-    public DateTime CapturedAt { get; set; }
-    public bool Synced { get; set; } = false;
-    public DateTime? SyncedAt { get; set; }
+
+    [Required]
+    public string Path { get; set; } = ""; // Relative path: wwwroot/detections/yyyy-MM-dd/filename.jpg
+
+    public long SizeBytes { get; set; }
+
+    [Required]
+    public string MimeType { get; set; } = "image/jpeg"; // image/jpeg, video/mp4
+
+    [Required]
+    public Guid CameraId { get; set; }
+
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

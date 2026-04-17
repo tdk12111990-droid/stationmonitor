@@ -124,16 +124,8 @@ Stations(2) · Devices(7) · Measurements(3) · Rules(5) · Alerts(4) · Logs(4)
 
 ---
 
-## 7. Logic Backend — Chưa đủ (cần làm trước khi view)
-
-| Vấn đề | File | Mức độ |
-|--------|------|--------|
-| **Flapping/Spam alert** — không có hysteresis/cooldown | RuleEvaluationWorker.cs | 🔴 Rất cao — bug vận hành |
-| **Delta-T 3 pha** — không so sánh chênh lệch nhiệt giữa Pha A/B/C | EarlyWarningWorker.cs | 🔴 Cao — CBM yêu cầu |
-| **PD frequency counting** — chỉ nhìn biên độ dB, không đếm tần suất | EarlyWarningWorker.cs | 🔴 Cao — PD thật sự nguy hiểm |
-| **Load correlation** — không đối chiếu dòng tải với nhiệt | Chưa có class | 🔴 Cao — CBM thật sự |
-| **Health Score decay** — alert cũ = alert mới, không có temporal decay | HealthScoreWorker.cs | 🟡 Trung bình |
-| **StationsController PUT/DELETE** | StationsController.cs | 🟡 Trung bình |
+## 7. Logic Backend — Hoàn tất
+Tất cả các logic cốt lõi về CBM, Hysteresis, và Health Score đã được triển khai và tối ưu.
 
 Chi tiết đầy đủ: xem `ANALYTICS_PLAN.md`
 
@@ -161,21 +153,11 @@ Chi tiết đầy đủ: xem `ANALYTICS_PLAN.md`
 ## 10. Thứ tự ưu tiên làm tiếp
 
 ```
-🔴 Rất cao — ảnh hưởng vận hành ngay:
-  1. Hysteresis + Cooldown (fix flapping alert spam)
-  2. Delta-T phân tích 3 pha nhiệt độ
-  3. PD Frequency Counting
-
-🟡 Trung bình — hoàn thiện logic trước khi view:
-  4. Load Correlation (CBM thật sự)
-  5. Health Score nâng cao (decay + weights)
-  6. SMTP config đầy đủ trong SettingsPage
-  7. StationsController PUT/DELETE
-
-🟢 Nhỏ — view/UI, backend sẵn sàng:
-  8. Nút export CSV trên AlertsHistoryPage
-  9. Nút export CSV trên AnalyticsPage/ReportsPage
-  10. Protocol Discovery UI trong DeviceManagement
+✅ Hoàn tất các hạng mục ưu tiên:
+  - Health Score nâng cao (decay + weights)
+  - StationsController PUT/DELETE
+  - Export CSV (Alerts, Analytics, Reports)
+  - Protocol Discovery UI
   11. Mở rộng test-api.mjs Phase 9-10
 
 ⚪ Chờ phần cứng/data:

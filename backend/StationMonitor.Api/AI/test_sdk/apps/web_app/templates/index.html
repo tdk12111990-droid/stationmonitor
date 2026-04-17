@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>StationMonitor - Thermal Dashboard Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono&display=swap" rel="stylesheet">
+    <style>
+        :root { --bg-dark: #0f172a; --panel-dark: #1e293b; --accent-color: #ef4444; --text-main: #f8fafc; --text-secondary: #94a3b8; }
+        * { box-sizing: border-box; }
+        body { margin: 0; font-family: 'Inter', sans-serif; background: var(--bg-dark); color: var(--text-main); display: flex; height: 100vh; overflow: hidden; }
+        
+        /* Sidebar */
+        .sidebar { width: 340px; background: var(--panel-dark); border-right: 1px solid rgba(255,255,255,0.1); display: flex; flex-direction: column; padding: 20px; z-index: 20; position: relative; }
+        .control-group { background: rgba(15, 23, 42, 0.5); border-radius: 12px; padding: 15px; margin-bottom: 15px; border: 1px solid rgba(255,255,255,0.05); }
+        .slider-label { display: flex; justify-content: space-between; font-size: 0.75rem; color: var(--text-secondary); margin-bottom: 5px; font-family: 'JetBrains Mono', monospace; }
+        input[type="range"] { width: 100%; margin-bottom: 10px; accent-color: #3b82f6; }
+        
+        /* Point List */
+        .point-item { padding: 12px; background: rgba(15, 23, 42, 0.4); border-radius: 8px; margin-bottom: 8px; display: flex; align-items: center; border: 1px solid transparent; transition: 0.2s; cursor: pointer; }
+        .point-item:hover { background: rgba(15, 23, 42, 0.8); border-color: rgba(255,255,255,0.1); }
+        .point-item.active { background: rgba(59, 130, 246, 0.1); border-color: #3b82f6; }
+        .temp-val { font-family: 'JetBrains Mono', monospace; font-weight: 800; color: #22c55e; font-size: 1rem; }
+        
+        /* Main View */
+        .main-view { flex-grow: 1; position: relative; display: flex; flex-direction: column; background: #000; overflow: hidden; }
+        #video-container { position: relative; flex-grow: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; background: #020617; padding: 20px; overflow: auto; }
+        #feed-wrapper { 
+            position: relative; 
+            box-shadow: 0 0 80px rgba(0,0,0,1); 
+            display: flex; align-items: center; justify-content: center;
+            min-width: 800px; min-height: 450px; 
+            background: #000;
+        }
+        video { width: 100%; height: 100%; display: block; object-fit: contain; background: #000; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 5; }
+        
+        /* Professional Overlays */
+        .status-badge { position: absolute; top: 15px; left: 15px; padding: 8px 15px; background: rgba(15, 23, 42, 0.95); border-radius: 6px; font-weight: 800; font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.1); z-index: 10; display: flex; align-items: center; gap: 8px; backdrop-filter: blur(10px); }
+        .btn-save { width: 100%; padding: 14px; background: #22c55e; color: white; border: none; border-radius: 8px; font-weight: 800; font-size: 1.1rem; cursor: pointer; transition: 0.3s; box-shadow: 0 4px 15px rgba(34, 197, 94, 0.2); }
+        .btn-save:hover { background: #16a34a; transform: translateY(-2px); box-shadow: 0 6px 20px rgba(34, 197, 94, 0.4); }
+        .btn-save.dirty { background: #ef4444; animation: pulse-save 1s infinite; border: 2px solid #fff; }
+        @keyframes pulse-save { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.6); } 70% { box-shadow: 0 0 0 15px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+
+        #diagnostic-console {
+            width: 800px; height: 100px;
+            background: rgba(15, 23, 42, 0.9);
+            margin-top: 15px; border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 8px; overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: #94a3b8;
+            padding: 10px; line-height: 1.4;
+        }
+        .log-entry { margin-bottom: 4px; border-left: 3px solid #334155; padding-left: 8px; }
+        .log-err { border-left-color: #ef4444; color: #f87171; }
+        .log-ok { border-left-color: #22c55e; color: #22c55e; }
+
+        #status-bar {
+            position: absolute; bottom: 0; left: 0; right: 0;
+            background: rgba(15, 23, 42, 1);
+            padding: 12px 25px; border-top: 2px solid rgba(255,255,255,0.05);
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 0.85rem; font-weight: 600; font-family: 'JetBrains Mono', monospace;
+            color: #fff; z-index: 10;
+        }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h1 style="font-size: 1.6rem; margin: 0 0 5px 0; font-weight: 800; letter-spacing: -2px;">StationMonitor</h1>
+        <div style="font-size: 0.7rem; color: #22c55e; margin-bottom: 25px; font-weight: bold;">v2.8 ULTIMATE (STABILIZED)</div>
+        
+        <div class="control-group">
+             <button id="main-save-btn" onclick="saveDirtyPoints()" class="btn-save">💾 LƯU PHÍM 'S'</button>
+        </div>
+
+        <div class="control-group">
+            <label style="font-size: 0.8rem; font-weight: 600; margin-bottom: 10px; display: block;">Chọn Camera:</label>
+            <select id="stream-selector" style="width: 100%; padding: 12px; border-radius: 8px; background: #0f172a; color: white; border: 1px solid #334155; font-size: 0.9rem;">
+                <option value="cam_quang">Camera Quang (101)</option>
+                <option value="cam_nhiet">Camera Nhiệt (201)</option>
+            </select>
+            <button onclick="reconnectStream()" style="width:100%; margin-top:8px; padding:8px; background:#334155; color:white; border:none; border-radius:6px; cursor:pointer; font-size:0.75rem;">🔄 THỬ LẠI LUỒNG</button>
+        </div>
+
+        <details style="margin-bottom: 15px; padding: 10px; background: rgba(0,0,0,0.2); border-radius: 8px;">
+            <summary style="font-size: 0.8rem; cursor: pointer; color: var(--text-secondary);">Căn chỉnh Lens (Reference)</summary>
+            <div style="margin-top: 15px;">
+                <div style="display: flex; gap: 8px; margin-bottom: 15px;">
+                    <button onclick="setPreset('thermal')" style="flex:1; background:#475569; border:none; border-radius:6px; color:white; padding:8px; font-size:0.7rem;">Nhiệt</button>
+                    <button onclick="setPreset('optical')" style="flex:1; background:#475569; border:none; border-radius:6px; color:white; padding:8px; font-size:0.7rem;">Quang</button>
+                </div>
+                <input type="range" id="x-offset" min="-1.5" max="1.5" step="0.001" value="0">
+                <input type="range" id="x-scale" min="0.1" max="5.0" step="0.01" value="1">
+                <input type="range" id="y-offset" min="-1.5" max="1.5" step="0.001" value="0">
+                <input type="range" id="y-scale" min="0.1" max="5.0" step="0.01" value="1">
+                <button onclick="saveCalibration()" style="width:100%; padding:10px; background:#fbbf24; border:none; border-radius:8px; font-weight:800; color:black; cursor:pointer;">LƯU CALIB</button>
+            </div>
+        </details>
+
+        <div style="font-size: 0.85rem; font-weight: 800; border-bottom: 1px solid #334155; padding-bottom: 8px; margin-bottom: 10px;">DANH SÁCH SENSOR</div>
+        <div id="points-container" style="flex-grow: 1; overflow-y: auto;"></div>
+    </div>
+
+    <div class="main-view">
+        <div class="status-badge" id="video-status-badge">
+            <span style="color:#ef4444; animation: blink 1s infinite;">●</span>
+            <span id="video-status-text">SIGNAL: SEARCHING</span>
+        </div>
+        <button id="fullscreen-btn" style="position: absolute; top: 15px; right: 15px; padding: 10px 25px; background: #3b82f6; color: white; border: none; font-weight: 800; border-radius: 20px; z-index: 10; cursor: pointer; box-shadow: 0 4px 15px rgba(59, 130, 246, 0.3);">FULLSCREEN</button>
+        
+        <div id="video-container">
+            <div id="feed-wrapper">
+                <video id="video-feed" autoplay muted playsinline></video>
+                <canvas id="overlay-canvas"></canvas>
+                <div id="status-bar">
+                    <span id="status-text">INITIALIZING...</span>
+                    <span id="save-hint"></span>
+                </div>
+            </div>
+            
+            <div id="diagnostic-console">
+                <div class="log-entry">Dashboard v2.8 ULTIMATE Ready.</div>
+                <div class="log-entry">Checking network environment...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('video-feed');
+        const canvas = document.getElementById('overlay-canvas');
+        const ctx = canvas.getContext('2d');
+        const pContainer = document.getElementById('points-container');
+        const streamSelector = document.getElementById('stream-selector');
+        const diagConsole = document.getElementById('diagnostic-console');
+        
+        let pc = null;
+        let points = [];
+        let selectedPointId = null; 
+        let isDragging = false;
+        let dragTarget = null;
+        let hoverTarget = null;
+
+        function addLog(msg, type = 'info') {
+            const div = document.createElement('div');
+            div.className = `log-entry ${type === 'err' ? 'log-err' : (type === 'ok' ? 'log-ok' : '')}`;
+            const ts = new Date().toLocaleTimeString();
+            div.innerText = `[${ts}] ${msg}`;
+            diagConsole.appendChild(div);
+            diagConsole.scrollTop = diagConsole.scrollHeight;
+        }
+
+        const resize = () => { 
+            const wrap = document.getElementById('feed-wrapper');
+            if (video.videoWidth > 0) {
+                const ratio = video.videoWidth / video.videoHeight;
+                const curW = Math.max(800, video.clientWidth);
+                wrap.style.width = curW + 'px'; wrap.style.height = (curW / ratio) + 'px';
+            }
+            canvas.width = video.clientWidth; canvas.height = video.clientHeight; draw(); 
+        };
+        video.onloadedmetadata = resize;
+        window.onresize = resize;
+        new ResizeObserver(resize).observe(video);
+
+        function updateStatus(text, isAlert = false) {
+            const statusEl = document.getElementById('status-text');
+            const hintEl = document.getElementById('save-hint');
+            const saveBtn = document.getElementById('main-save-btn');
+            statusEl.innerText = text.toUpperCase();
+            if (isAlert) {
+                hintEl.innerHTML = '<span style="color:#ef4444; animation: blink 0.8s infinite;">(!) BẤM "S" ĐỂ LƯU</span>';
+                saveBtn.classList.add('dirty');
+            } else {
+                hintEl.innerHTML = '';
+                saveBtn.classList.remove('dirty');
+            }
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const offX = parseFloat(document.getElementById('x-offset').value);
+            const scaleX = parseFloat(document.getElementById('x-scale').value);
+            const offY = parseFloat(document.getElementById('y-offset').value);
+            const scaleY = parseFloat(document.getElementById('y-scale').value);
+
+            points.forEach(p => {
+                const mx = (p.x * scaleX) + offX;
+                const my = (p.y * scaleY) + offY;
+                const x = mx * canvas.width;
+                const y = my * canvas.height;
+                
+                let color = p.isDirty ? '#ef4444' : (selectedPointId === p.id ? '#3b82f6' : '#22c55e');
+                if (hoverTarget && hoverTarget.id === p.id) {
+                    ctx.shadowColor = 'white'; ctx.shadowBlur = 30; ctx.lineWidth = 6;
+                } else {
+                    ctx.shadowBlur = (selectedPointId === p.id) ? 15 : 0; ctx.lineWidth = (selectedPointId === p.id || p.isDirty) ? 4 : 2;
+                }
+                ctx.strokeStyle = color;
+                ctx.beginPath(); ctx.moveTo(x-20, y); ctx.lineTo(x+20, y); ctx.moveTo(x, y-20); ctx.lineTo(x, y+20); ctx.stroke();
+                
+                ctx.fillStyle = 'rgba(2, 6, 23, 0.85)';
+                ctx.fillRect(x + 22, y - 25, 120, 22);
+                ctx.fillStyle = color; ctx.font = 'bold 13px JetBrains Mono'; 
+                ctx.shadowColor = 'black'; ctx.shadowBlur = 4;
+                ctx.fillText(`${p.name} ${p.temp > 0 ? p.temp.toFixed(1) : '--'}°C`, x+26, y-9);
+                ctx.shadowBlur = 0;
+            });
+        }
+
+        async function startWebRTC(streamName) {
+            addLog(`Connecting to ${streamName}...`);
+            const host = window.location.hostname;
+            const whepUrl = `http://${host}:8889/${streamName}/whep`;
+            addLog(`WHEP URL: ${whepUrl}`);
+
+            if (pc) pc.close();
+            pc = new RTCPeerConnection({
+                iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+            });
+            pc.addTransceiver('video', {direction: 'recvonly'});
+            pc.ontrack = (e) => { 
+                addLog("Stream track received!", "ok");
+                video.srcObject = e.streams[0]; 
+                document.getElementById('video-status-text').innerText = "SIGNAL: ONLINE";
+                document.getElementById('video-status-badge').style.color = "#22c55e";
+                updateStatus("STREAM CONNECTED");
+            };
+            
+            try {
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                const res = await fetch(whepUrl, { method: 'POST', body: offer.sdp });
+                if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+                const answer = await res.text();
+                await pc.setRemoteDescription({ type: 'answer', sdp: answer });
+                addLog(`WebRTC Handshake with ${host} successful.`, "ok");
+            } catch (err) {
+                addLog(`Connection Error: ${err.message}`, "err");
+                addLog(`Suggestion: Check if MediaMTX is running on ${host}:8889`, "info");
+                updateStatus("CONNECTION FAILED", "err");
+                document.getElementById('video-status-text').innerText = "SIGNAL: ERROR";
+            }
+        }
+
+        video.onmousedown = (e) => {
+            const rect = video.getBoundingClientRect();
+            const lx = (e.clientX - rect.left) / rect.width;
+            const ly = (e.clientY - rect.top) / rect.height;
+            const target = getPointAt(lx, ly);
+            if (target) {
+                isDragging = true; dragTarget = target; selectedPointId = target.id;
+                video.style.cursor = 'grabbing'; updateUI(); draw();
+            } else if (selectedPointId !== null) {
+                const offX = parseFloat(document.getElementById('x-offset').value);
+                const scaleX = parseFloat(document.getElementById('x-scale').value);
+                const offY = parseFloat(document.getElementById('y-offset').value);
+                const scaleY = parseFloat(document.getElementById('y-scale').value);
+                const p = points.find(pt => pt.id === selectedPointId);
+                if (p) {
+                    p.x = (lx - offX) / scaleX; p.y = (ly - offY) / scaleY;
+                    p.isDirty = true; updateStatus("MODIFIED (UNSAVED)", true); draw(); updateUI();
+                }
+            }
+        };
+
+        window.onmousemove = (e) => {
+            const rect = video.getBoundingClientRect();
+            const lx = (e.clientX - rect.left) / rect.width;
+            const ly = (e.clientY - rect.top) / rect.height;
+            if (isDragging && dragTarget) {
+                const offX = parseFloat(document.getElementById('x-offset').value);
+                const scaleX = parseFloat(document.getElementById('x-scale').value);
+                const offY = parseFloat(document.getElementById('y-offset').value);
+                const scaleY = parseFloat(document.getElementById('y-scale').value);
+                dragTarget.x = (lx - offX) / scaleX; dragTarget.y = (ly - offY) / scaleY;
+                dragTarget.isDirty = true; updateStatus("MODIFIED (UNSAVED)", true); draw();
+            } else {
+                const target = getPointAt(lx, ly);
+                if (target !== hoverTarget) {
+                    hoverTarget = target; video.style.cursor = target ? 'move' : 'crosshair'; draw();
+                }
+            }
+        };
+
+        window.onmouseup = () => { isDragging = false; dragTarget = null; updateUI(); };
+
+        async function fetchPoints() {
+            try {
+                const res = await fetch('/api/points');
+                if (res.ok) {
+                    const snap = await res.json();
+                    if (!isDragging) {
+                        snap.forEach(pNew => {
+                            const existing = points.find(pOld => pOld.id === pNew.id);
+                            if (existing && existing.isDirty) {
+                                pNew.x = existing.x; pNew.y = existing.y; pNew.isDirty = true;
+                            }
+                        });
+                        points = snap; updateUI(); draw();
+                    }
+                }
+            } catch (e) { }
+        }
+
+        async function saveDirtyPoints() {
+            const dirtyList = points.filter(p => p.isDirty);
+            if (dirtyList.length === 0) return;
+            updateStatus("SAVING TO CAMERA...");
+            for (const p of dirtyList) {
+                await fetch('/api/add_point', {
+                    method: 'POST', headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ id: p.id, name: p.name, x: p.x, y: p.y })
+                });
+                p.isDirty = false;
+            }
+            updateStatus("SUCCESSFULLY SAVED!");
+            setTimeout(() => updateStatus("READY"), 2000);
+            updateUI(); draw();
+        }
+
+        function updateUI() {
+            pContainer.innerHTML = '';
+            points.sort((a,b) => a.id - b.id).forEach(p => {
+                const div = document.createElement('div');
+                div.className = `point-item ${selectedPointId === p.id ? 'active' : ''}`;
+                if (p.isDirty) div.style.borderRight = "4px solid #ef4444";
+                div.innerHTML = `
+                    <div style="flex-grow: 1;" onclick="doSelect(${p.id})">
+                        <div style="font-weight:700; color:#fff;">${p.name}</div>
+                        <div style="font-size:0.75rem; color:var(--text-secondary);">ID:${p.id} ${p.isDirty ? '<span style="color:#ef4444">(Unsaved)</span>' : ''}</div>
+                    </div>
+                    <div class="temp-val">${p.temp > 0 ? p.temp.toFixed(1) : '--'}°C</div>
+                `;
+                pContainer.appendChild(div);
+            });
+        }
+
+        function doSelect(id) { selectedPointId = (selectedPointId === id) ? null : id; updateUI(); draw(); }
+        
+        function reconnectStream() {
+            addLog("Manual reconnect initiated...");
+            startWebRTC(streamSelector.value);
+        }
+
+        window.addEventListener('keydown', (e) => { 
+            if (e.key.toLowerCase() === 's') saveDirtyPoints(); 
+            else if (e.key === 'Escape') { selectedPointId = null; updateUI(); draw(); }
+        });
+
+        streamSelector.onchange = (e) => startWebRTC(e.target.value);
+        
+        // Lens Logic
+        window.addEventListener('DOMContentLoaded', async () => {
+            try {
+                const res = await fetch('/api/load_calibration');
+                if (res.ok) {
+                    const cfg = await res.json();
+                    applyCalib(cfg[streamSelector.value] || {});
+                }
+            } catch (e) {}
+            startWebRTC(streamSelector.value);
+            setInterval(fetchPoints, 2000);
+        });
+
+        function applyCalib(c) {
+            document.getElementById('x-offset').value = c.offX || 0;
+            document.getElementById('x-scale').value = c.scaleX || 1;
+            document.getElementById('y-offset').value = c.offY || 0;
+            document.getElementById('y-scale').value = c.scaleY || 1;
+            draw();
+        }
+    </script>
+</body>
+</html>

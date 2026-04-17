@@ -2,7 +2,9 @@
 // ScadaApiService – Tầng gọi API Backend .NET (local LAN)
 // ============================================================
 
-export const API_BASE_URL = 'http://localhost:5056';
+import { API_BASE_URL as ENV_API_BASE } from '@/utils/env';
+
+export const API_BASE_URL = ENV_API_BASE;
 
 const DEFAULT_HEADERS: HeadersInit = {
   'Content-Type': 'application/json',

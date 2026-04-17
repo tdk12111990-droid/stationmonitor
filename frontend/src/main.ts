@@ -35,7 +35,6 @@ import {
 } from '@/pages/OtherPages';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { RuleEnginePage } from '@/pages/RuleEnginePage';
-import { AiDebugPage } from '@/pages/AiDebugPage';
 applyStoredTheme();
 
 // ── Xóa data cũ khi schema thay đổi ─────────────────────────
@@ -113,8 +112,7 @@ router
   .register('audit-log', shellPage('audit-log', AuditLogPage))
   .register('maintenance', shellPage('maintenance', MaintenancePage))
   .register('multisite', shellPage('multisite', MultisitePage))
-  .register('rule-engine', shellPage('rule-engine', RuleEnginePage))
-  .register('ai-test', shellPage('ai-test', AiDebugPage));
+  .register('rule-engine', shellPage('rule-engine', RuleEnginePage));
 
 
 // Boot: navigate to dashboard if already logged in, else login

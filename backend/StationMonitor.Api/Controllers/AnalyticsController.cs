@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StationMonitor.Data;
+using StationMonitor.Workers.Polling;
 
 namespace StationMonitor.Api.Controllers;
 
@@ -17,8 +18,14 @@ namespace StationMonitor.Api.Controllers;
 [Authorize]
 public class AnalyticsController : ControllerBase
 {
-    private readonly AppDbContext _db;
-    public AnalyticsController(AppDbContext db) => _db = db;
+    private readonly AppDbContext       _db;
+    private readonly HealthScoreWorker  _healthWorker;
+
+    public AnalyticsController(AppDbContext db, HealthScoreWorker healthWorker)
+    {
+        _db           = db;
+        _healthWorker = healthWorker;
+    }
 
     // ── GET /api/v1/analytics/health?stationId= ──────────────
     [HttpGet("health")]
@@ -129,6 +136,39 @@ public class AnalyticsController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    // ── POST /api/v1/analytics/health/recalculate ────────────
+    // Xóa zone states cũ + tính lại điểm sức khỏe ngay lập tức
+    [HttpPost("health/recalculate")]
+    [Authorize(Roles = "admin,manager")]
+    public async Task<IActionResult> Recalculate([FromQuery] Guid? deviceId)
+    {
+        // Xóa zone states (bắt đầu lại từ 0 ngày trong vùng)
+        var zoneQuery = _db.SystemSettings.Where(s => s.Key.StartsWith("zonest_"));
+        if (deviceId.HasValue)
+            zoneQuery = zoneQuery.Where(s => s.Key.Contains(deviceId.Value.ToString()));
+        var zoneStates = await zoneQuery.ToListAsync();
+        _db.SystemSettings.RemoveRange(zoneStates);
+
+        // Xóa health score cũ (để UI không hiển thị số cũ trong khi đang tính)
+        var healthQuery = _db.SystemSettings.Where(s => s.Key.StartsWith("health_"));
+        if (deviceId.HasValue)
+            healthQuery = healthQuery.Where(s => s.Key == $"health_{deviceId.Value}");
+        var healthSettings = await healthQuery.ToListAsync();
+        _db.SystemSettings.RemoveRange(healthSettings);
+
+        await _db.SaveChangesAsync();
+
+        // Tính lại ngay (chạy trong background để không block HTTP response)
+        _ = Task.Run(() => _healthWorker.RecalculateNowAsync());
+
+        return Ok(new
+        {
+            message        = "Đang tính lại điểm sức khỏe...",
+            clearedZones   = zoneStates.Count,
+            clearedScores  = healthSettings.Count,
+        });
     }
 
     private static double LinearSlope(double[] xs, double[] ys)

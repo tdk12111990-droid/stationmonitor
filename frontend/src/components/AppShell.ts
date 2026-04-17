@@ -1,11 +1,7 @@
-// ============================================================
-// AppShell – Layout chung: Sidebar nav + Header + Content Area
-// Bao bọc tất cả pages sau khi đăng nhập thành công
-// ============================================================
-
 import { authService } from '@/services/AuthService';
 import { router } from '@/router/Router';
 import type { PageId } from '@/types/app.types';
+import * as signalR from '@microsoft/signalr';
 
 interface NavItem { id: PageId; icon: string; label: string; roles?: string[] }
 
@@ -18,7 +14,6 @@ const NAV_ITEMS: NavItem[] = [
   { id: 'maintenance', icon: '🔧', label: 'Bảo trì', roles: ['admin', 'manager'] },
   { id: 'audit-log', icon: '📋', label: 'Audit Log', roles: ['admin', 'manager'] },
   { id: 'multisite', icon: '🗺', label: 'Đa trạm' },
-  // { id: 'ai-test', icon: '🤖', label: 'AI Test' }, // ẨN TẠM — chưa hoàn thiện
 ];
 
 const ADMIN_NAV: NavItem[] = [
@@ -30,6 +25,7 @@ const ADMIN_NAV: NavItem[] = [
 export class AppShell {
   private activeNavId: PageId = 'dashboard';
   private clockInterval?: ReturnType<typeof setInterval>;
+  private hubConnection?: signalR.HubConnection;
 
   render(contentId: PageId): string {
     this.activeNavId = contentId;
@@ -135,11 +131,106 @@ export class AppShell {
       window.location.reload();
     });
 
+    // Start Global Notifications
+    this.connectSignalR();
+  }
 
+  // ── iOS Premium Toast Notification (Global) ──────────────────
+  private showToast(msg: string, type: 'success' | 'error' | 'warning' | 'alarm', thumb?: string): void {
+    const t = document.createElement('div');
+    const color = type === 'alarm' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#10b981';
+    
+    t.style.cssText = `
+      position:fixed; top:-120px; left:50%; transform:translateX(-50%); z-index:9999;
+      width:360px; background:rgba(30, 41, 59, 0.7); backdrop-filter:blur(20px) saturate(180%);
+      -webkit-backdrop-filter:blur(20px) saturate(180%);
+      color:#fff; padding:15px; border-radius:24px;
+      box-shadow:0 25px 50px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1);
+      transition:all 0.7s cubic-bezier(0.23, 1, 0.32, 1);
+      cursor:pointer; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    `;
+    
+    const apiBase = 'http://localhost:5056';
+    const imageUrl = thumb ? (thumb.startsWith('http') ? thumb : `${apiBase}${thumb}`) : '';
+
+    t.innerHTML = `
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; opacity:0.5; font-size:0.6rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
+        <div style="display:flex; align-items:center; gap:6px;">
+          <div style="width:18px; height:18px; background:#3b82f6; border-radius:5px; display:flex; align-items:center; justify-content:center; font-size:11px;">⚡</div>
+          STATION MONITOR
+        </div>
+        <div>bây giờ</div>
+      </div>
+      <div style="display:flex; gap:14px; align-items:center;">
+         <div style="flex:1;">
+            <div style="font-weight:800; color:${color}; font-size:0.9rem; margin-bottom:3px; letter-spacing:-0.2px;">${type === 'alarm' ? 'BÁO ĐỘNG KHẨN CẤP' : type === 'warning' ? 'CẢNH BÁO NHIỆT ĐỘ' : 'THÔNG BÁO'}</div>
+            <div style="font-size:0.82rem; line-height:1.45; opacity:0.95; font-weight:500;">${msg}</div>
+         </div>
+         ${imageUrl ? `<img src="${imageUrl}" style="width:60px; height:60px; border-radius:14px; object-fit:cover; border:1px solid rgba(255,255,255,0.15); background:#000;">` : ''}
+      </div>
+      <div style="margin-top:12px; height:3px; width:100%; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
+         <div id="gt-progress" style="height:100%; width:100%; background:${color}; transition: width 7s linear;"></div>
+      </div>
+    `;
+
+    document.body.appendChild(t);
+    setTimeout(() => t.style.top = '20px', 50);
+
+    // Subtle iOS-like notification sound
+    try {
+        const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+        audio.volume = 0.4;
+        audio.play().catch(() => {});
+    } catch {}
+
+    const closeToast = () => {
+      t.style.top = '-160px';
+      t.style.opacity = '0';
+      setTimeout(() => t.remove(), 700);
+    };
+
+    t.addEventListener('click', () => {
+      closeToast();
+      router.navigate('alerts-history');
+    });
+
+    setTimeout(() => {
+        const prog = t.querySelector('#gt-progress') as HTMLElement;
+        if(prog) prog.style.width = '0%';
+    }, 100);
+
+    setTimeout(closeToast, 7000);
+  }
+
+  private connectSignalR(): void {
+    if (this.hubConnection) return;
+    const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
+    if (!token) return;
+
+    // Sử dụng URL tuyệt đối vì Vite không cấu hình proxy cho /ws
+    const hubUrl = 'http://localhost:5056/ws/realtime';
+
+    this.hubConnection = new signalR.HubConnectionBuilder()
+      .withUrl(hubUrl, { accessTokenFactory: () => token })
+      .withAutomaticReconnect()
+      .build();
+
+    this.hubConnection.on('AlertNew', (a: any) => {
+      console.log('[Global] New Alert:', a);
+      const level = (a.level || 'warning').toLowerCase() as any;
+      this.showToast(a.message, level, a.thumbnailUrl);
+    });
+
+    this.hubConnection.start().catch(err => {
+        console.warn('[AppShell] SignalR error:', err);
+        // Retry after 5s if failed
+        setTimeout(() => this.connectSignalR(), 5000);
+    });
   }
 
   destroy(): void {
     if (this.clockInterval) clearInterval(this.clockInterval);
+    if (this.hubConnection) this.hubConnection.stop();
   }
 }
 

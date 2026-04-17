@@ -5,11 +5,11 @@
 
 import { stationApi, type SldPoint, type SldUnpinnedDevice, type SensorPoint, type HealthScore } from '@/services/StationApiService';
 import * as signalR from '@microsoft/signalr';
-import { GO2RTC_URL } from '@/utils/env';
+import { GO2RTC_URL, API_BASE_URL } from '@/utils/env';
 import { router } from '@/router/Router';
 import { confirmDialog } from '@/utils/confirm';
 
-const API_BASE = 'http://localhost:5056';
+const API_BASE = API_BASE_URL;
 const SLD_W = 792, SLD_H = 612; // landscape viewbox
 
 export class DashboardPage {
@@ -26,7 +26,9 @@ export class DashboardPage {
   private vs = 1; private vx = 0; private vy = 0; private vr = 0;
   private unpinnedDevices: SldUnpinnedDevice[] = [];
   private hubConnection: signalR.HubConnection | null = null;
-  private showLabels = false; // State cho viec hien nhãn
+  private showLabels = false;
+  private activeAlertMap: Map<string, string> = new Map(); // deviceId → 'warning'|'alarm'
+  private activePointAlertMap: Map<string, string> = new Map(); // pointId -> 'warning'|'alarm'
 
   render(): string {
     return `
@@ -296,8 +298,8 @@ export class DashboardPage {
           </div>
           <div id="camBody">
             <div style="position:relative;width:100%;aspect-ratio:16/9;background:#000;overflow:hidden;">
-              <iframe src="${GO2RTC_URL}/stream.html?src=camera_152_normal&mode=mse"
-                style="width:100%;height:calc(100% + 42px);border:none;pointer-events:none;display:block;">
+              <iframe src="${GO2RTC_URL}/stream.html?src=camera_152_normal&mode=mse&controls=0"
+                style="width:100%;height:100%;border:none;pointer-events:none;display:block;transform:scale(1.2) translateX(-4%);" allow="autoplay">
               </iframe>
             </div>
           </div>
@@ -448,7 +450,7 @@ export class DashboardPage {
       g.appendChild(circ);
 
       const isCamera = p.deviceType?.toLowerCase().startsWith('camera');
-      if (isCamera) {
+      if (false) { // Mở Badge cho cả Camera (bỏ qua điều kiện ẩn cũ)
           // Skip badge for cameras
       } else {
         // ══ Measurement Badge ══
@@ -515,10 +517,17 @@ export class DashboardPage {
         const isUnifiedIcon = pointTag === p.deviceId;
         const deviceSensors = isUnifiedIcon ? allSensors : allSensors.filter(s => s.pointId === pointTag);
 
-        const sensorHtml = deviceSensors.map(s => `
+        // Shortcut cho Camera: sắp xếp P1->P10
+        const sortedSensors = [...deviceSensors].sort((a,b) => {
+          const numA = parseInt(a.pointId.replace(/\D/g,'')) || 0;
+          const numB = parseInt(b.pointId.replace(/\D/g,'')) || 0;
+          return numA - numB;
+        });
+
+        const sensorHtml = sortedSensors.map(s => `
           <div style="display:flex;justify-content:space-between;gap:15px;margin-bottom:3px;">
             <span style="color:#94a3b8;">${s.pointId.replace('nhiet_do_', '').replace('_', ' ')}:</span>
-            <span style="color:#10b981;font-weight:600;">${s.value}${s.unit}</span>
+            <span style="color:#10b981;font-weight:600;">${s.value.toFixed(1)}${s.unit}</span>
           </div>
         `).join('') || '<div style="color:#64748b;font-style:italic;">Không có dữ liệu</div>';
 
@@ -540,6 +549,7 @@ export class DashboardPage {
       container.appendChild(g);
     });
 
+    this.applyAlertColors();
     this.applyDotFilter();
   }
 
@@ -555,9 +565,28 @@ export class DashboardPage {
         const incomingDeviceId = (item.deviceId || '').toLowerCase();
 
         const isUnified = pointTag === incomingDeviceId;
-        if (isUnified || pointTag === incomingPointId) {
+        const deviceType = g.getAttribute('data-device-type') || '';
+        const isCamera = deviceType.toLowerCase().startsWith('camera');
+
+        if (isCamera || isUnified || pointTag === incomingPointId) {
+          // Lưu dữ liệu mới vào bộ nhớ local của Page để tính MAX nếu là Camera
+          const existing = this.sensors.find(s => s.deviceId === item.deviceId && s.pointId === item.pointId);
+          if (existing) {
+            existing.value = item.value;
+          } else {
+            this.sensors.push(item);
+          }
+
           const mTxt = g.querySelector('.sld-measurement-text');
-          if (mTxt) mTxt.textContent = `${item.value.toFixed(1)}${item.unit}`;
+          if (mTxt) {
+              if (isCamera) {
+                  const allForDev = this.sensors.filter(s => s.deviceId === item.deviceId);
+                  const maxVal = Math.max(...allForDev.map(s => s.value));
+                  mTxt.textContent = `${maxVal.toFixed(1)}°C`;
+              } else {
+                  mTxt.textContent = `${item.value.toFixed(1)}${item.unit}`;
+              }
+          }
         }
       });
     });
@@ -568,6 +597,76 @@ export class DashboardPage {
     if (type.startsWith('camera')) return '#3b82f6';
     if (status === 'offline') return '#ef4444';
     return '#10b981';
+  }
+
+  private updateDotAlertColor(deviceId: string, level: string | null): void {
+    const id = deviceId.toLowerCase();
+    const groups = document.querySelectorAll<SVGGElement>(`#dash-dots g[data-device-id="${id}"]`);
+    groups.forEach(g => {
+      this.applyAlertVisual(g, level);
+    });
+  }
+
+  private updatePointAlertColor(pointId: string, level: string | null): void {
+    const tag = pointId.toLowerCase();
+    const groups = document.querySelectorAll<SVGGElement>(`#dash-dots g[data-point-tag="${tag}"]`);
+    groups.forEach(g => this.applyAlertVisual(g, level));
+  }
+
+  private applyAlertVisual(g: SVGGElement, level: string | null): void {
+    const circle = g.querySelector('circle');
+    const text = g.querySelector<SVGTextElement>('text');
+    if (!circle) return;
+
+    const deviceType = g.getAttribute('data-device-type') || '';
+    if (deviceType.startsWith('camera')) return;
+
+    let color = '#10b981';
+    if (level === 'alarm') color = '#ef4444';
+    else if (level === 'warning') color = '#f59e0b';
+
+    circle.setAttribute('fill', color);
+    if (text) text.setAttribute('fill', color);
+
+    const existing = g.querySelector('.alert-ring');
+    if (level === 'alarm') {
+      if (!existing) {
+        const ns = 'http://www.w3.org/2000/svg';
+        const r = parseFloat(circle.getAttribute('r') || '8');
+        const cx = circle.getAttribute('cx') || '0';
+        const cy = circle.getAttribute('cy') || '0';
+        const ring = document.createElementNS(ns, 'circle');
+        ring.setAttribute('cx', cx); ring.setAttribute('cy', cy);
+        ring.setAttribute('r', String(r + 5));
+        ring.setAttribute('fill', 'none');
+        ring.setAttribute('stroke', '#ef4444');
+        ring.setAttribute('stroke-width', '2');
+        ring.setAttribute('class', 'alert-ring');
+        ring.setAttribute('opacity', '0.7');
+        ring.style.animation = 'sld-float 1s ease-in-out infinite';
+        g.insertBefore(ring, circle);
+      }
+    } else {
+      existing?.remove();
+    }
+  }
+
+  private applyAlertColors(): void {
+    document.querySelectorAll<SVGGElement>('#dash-dots g[data-point-id]').forEach(g => {
+      const pointTag = (g.getAttribute('data-point-tag') || '').toLowerCase();
+      const deviceId = (g.getAttribute('data-device-id') || '').toLowerCase();
+      const level = this.activePointAlertMap.get(pointTag) ?? this.activeAlertMap.get(deviceId) ?? null;
+      this.applyAlertVisual(g, level);
+    });
+  }
+
+  private extractPointIdFromAlert(a: any): string | null {
+    const direct = typeof a?.pointId === 'string' ? a.pointId.trim() : '';
+    if (direct) return direct.toLowerCase();
+
+    const source = `${typeof a?.ruleName === 'string' ? a.ruleName : ''} ${typeof a?.message === 'string' ? a.message : ''}`;
+    const match = source.match(/\b(P\d+|nhiet_do_pha_\d+|phong_dien)\b/i);
+    return match?.[1] ? match[1].toLowerCase() : null;
   }
 
   // ── Drawer (unpinned devices) ────────────────────────────────
@@ -1193,6 +1292,7 @@ devices.forEach(d => {
 
 // Update SLD labels with the fresh data we just polled
 this.updateRealtimeData(points);
+this.applyAlertColors();
 
     } catch {
   const statusEl = document.getElementById('statusPlc');
@@ -1206,6 +1306,17 @@ this.updateRealtimeData(points);
   if(!listEl) return;
   try {
     const alerts = await stationApi.getAlerts(undefined, undefined, undefined, 8);
+    this.activeAlertMap.clear();
+    this.activePointAlertMap.clear();
+    alerts
+      .filter(a => a.status === 'open' || a.status === 'acked')
+      .forEach(a => {
+        const level = (a.level || '').toLowerCase();
+        if (a.deviceId) this.activeAlertMap.set(a.deviceId.toLowerCase(), level);
+        const pointId = this.extractPointIdFromAlert(a);
+        if (pointId) this.activePointAlertMap.set(pointId, level);
+      });
+    this.applyAlertColors();
     if(alerts.length === 0) {
   listEl.innerHTML = '<div style="color:#94a3b8;font-size:12px;text-align:center;padding:20px;">Hệ thống ổn định</div>';
   return;
@@ -1213,8 +1324,10 @@ this.updateRealtimeData(points);
 const levelColor = (l: string) => l === 'alarm' ? '#ef4444' : '#f59e0b';
 const statusBg = (s: string) => s === 'open' ? '#fef2f2' : s === 'acked' ? '#fffbeb' : '#f0fdf4';
 listEl.innerHTML = alerts.map(a => `
-        <div style="padding:6px 8px;border-left:3px solid ${levelColor(a.level)};
-          background:${statusBg(a.status)};border-radius:0 4px 4px 0;margin-bottom:5px;">
+        <div data-alert-id="${a.id}" style="padding:6px 8px;border-left:3px solid ${levelColor(a.level)};
+          background:${statusBg(a.status)};border-radius:0 4px 4px 0;margin-bottom:5px;
+          cursor:pointer;transition:background .15s;"
+          onmouseover="this.style.opacity='0.75'" onmouseout="this.style.opacity='1'">
           <div style="display:flex;justify-content:space-between;margin-bottom:2px;">
             <span style="font-size:0.68rem;font-weight:800;color:#1e293b;">${a.level.toUpperCase()}</span>
             <span style="font-size:0.62rem;color:#64748b;">${new Date(a.triggeredAt).toLocaleTimeString('vi-VN')}</span>
@@ -1222,6 +1335,14 @@ listEl.innerHTML = alerts.map(a => `
           <div style="font-size:0.68rem;color:#475569;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${a.message}</div>
           <span style="font-size:0.62rem;font-weight:700;color:${levelColor(a.level)};">${a.status.toUpperCase()}</span>
         </div>`).join('');
+
+    // Click vào alert → sang trang lịch sử và mở chi tiết
+    listEl.querySelectorAll<HTMLElement>('[data-alert-id]').forEach(el => {
+      el.addEventListener('click', () => {
+        const id = el.dataset.alertId!;
+        router.navigate('alerts-history', { alertId: id });
+      });
+    });
     } catch { }
   }
 
@@ -1259,14 +1380,9 @@ listEl.innerHTML = alerts.map(a => `
   });
 }
 
-  // ── Toast ─────────────────────────────────────────────────────
-  private showToast(msg: string, type: 'success' | 'error'): void {
-  const t = document.createElement('div');
-  t.className = `toast toast-${type}`;
-  t.textContent = msg;
-  document.body.appendChild(t);
-  setTimeout(() => t.classList.add('toast-show'), 10);
-setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 3000);
+  // ── Toast Notification ───────────────────
+  private showToast(msg: string, type: 'success' | 'error' | 'warning' | 'alarm', thumb?: string): void {
+     // Forward to AppShell or just let AppShell handle AlertNew globally
   }
 
   // ── Health scores ─────────────────────────────────────────
@@ -1328,6 +1444,52 @@ health.style.top = (kpiBottom - vpTop + 8) + 'px';
 
   this.hubConnection.on('SensorUpdate', (data: any[]) => {
     this.updateRealtimeData(data);
+  });
+
+  this.hubConnection.on('AlertNew', (a: any) => {
+    this.refreshAlerts();
+    this.refreshKpi();
+    const level = (a.level || '').toLowerCase();
+    const pointId = this.extractPointIdFromAlert(a);
+    if (pointId) {
+      this.activePointAlertMap.set(pointId, level);
+      this.updatePointAlertColor(pointId, level);
+    }
+    if (a?.deviceId) {
+      this.activeAlertMap.set(a.deviceId.toLowerCase(), level);
+      this.updateDotAlertColor(a.deviceId, level);
+    }
+  });
+
+  this.hubConnection.on('AlertUpdated', (a: any) => {
+    const statusStr = (a.status || '').toLowerCase();
+    const pointId = this.extractPointIdFromAlert(a);
+    if (pointId) {
+      if (statusStr === 'closed' || statusStr === 'resolved' || statusStr === 'acknowledged') {
+        this.activePointAlertMap.delete(pointId);
+        this.updatePointAlertColor(pointId, null);
+      } else {
+        const level = (a.level || '').toLowerCase();
+        this.activePointAlertMap.set(pointId, level);
+        this.updatePointAlertColor(pointId, level);
+      }
+    }
+    if (!a?.deviceId) {
+      this.refreshAlerts();
+      this.refreshKpi();
+      return;
+    }
+    const id = a.deviceId.toLowerCase();
+    if (statusStr === 'closed' || statusStr === 'resolved' || statusStr === 'acknowledged') {
+      this.activeAlertMap.delete(id);
+      this.updateDotAlertColor(a.deviceId, null);
+    } else {
+      const level = (a.level || '').toLowerCase();
+      this.activeAlertMap.set(id, level);
+      this.updateDotAlertColor(a.deviceId, level);
+    }
+    this.refreshAlerts();
+    this.refreshKpi();
   });
 
   this.hubConnection.start().catch(err => console.warn('[SignalR] Dashboard lỗi kết nối:', err));

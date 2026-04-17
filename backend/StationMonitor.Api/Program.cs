@@ -46,6 +46,7 @@ builder.Services.AddHttpClient(); // cho DeviceService gọi go2rtc API
 builder.Services.AddSingleton<IRealtimeNotifier, SignalRNotifier>(); // SignalR push
 builder.Services.AddScoped<OnvifService>();
 builder.Services.AddScoped<HikvisionIsapiService>();
+builder.Services.AddScoped<ThermalEvidenceService>();
 builder.Services.AddScoped<AutoDiscoveryService>();
 builder.Services.AddScoped<ProtocolConnectionTester>();
 builder.Services.AddScoped<SupabaseService>();
@@ -61,7 +62,9 @@ builder.Services.AddHostedService<MaintenanceReminderWorker>();
 // EarlyWarningWorker: phát hiện xu hướng tăng bất thường (linear regression, mỗi 30 phút)
 builder.Services.AddHostedService<EarlyWarningWorker>();
 // HealthScoreWorker: tính điểm sức khỏe 0-100 mỗi thiết bị (mỗi 1 giờ)
-builder.Services.AddHostedService<HealthScoreWorker>();
+// Đăng ký singleton để AnalyticsController có thể trigger recalculate thủ công
+builder.Services.AddSingleton<HealthScoreWorker>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthScoreWorker>());
 // StorageMonitorWorker: theo dõi dung lượng ổ đĩa, cảnh báo khi < 10%
 builder.Services.AddHostedService<StorageMonitorWorker>();
 // ModbusTcpWorker: đọc thiết bị Modbus TCP (FC3 holding registers)
@@ -74,6 +77,8 @@ builder.Services.AddHostedService<MqttSubscriberWorker>();
 builder.Services.AddHostedService<Iec104Worker>();
 // CloudSyncWorker: sync SyncQueue lên Supabase mỗi 5 phút
 builder.Services.AddHostedService<CloudSyncWorker>();
+// AIEngineManagedWorker: Quản lý Python AI Engine sidecar
+builder.Services.AddHostedService<StationMonitor.Api.Services.AIEngineManagedWorker>();
 
 // ── SignalR ───────────────────────────────────────────────
 // Client kết nối: ws://localhost:5056/ws/realtime
@@ -153,14 +158,32 @@ using (var scope = app.Services.CreateScope())
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
 
+    // Đảm bảo các cột được thêm vào kể cả khi migration đã bị đánh dấu "applied" mà DDL chưa chạy
+    await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Rules"" ADD COLUMN IF NOT EXISTS ""RuleSet"" text;");
+
     var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
     await authService.SeedAdminIfNotExistsAsync();
 
     // Seed trạm + thiết bị mặc định nếu chưa có
     await SeedDefaultStationAsync(db);
 
+    // Fix go2rtc_id sai cho Camera 153 nếu đang dùng "hikvision_main"
+    await FixCamera153Go2rtcIdAsync(db);
+
+    // Đổi tên PLC thành "Tủ 471" nếu vẫn còn tên cũ
+    await FixPlcNameAsync(db);
+
+    // Gán RuleSet cho các rule chưa có nhóm (mặc định thuộc "Tủ 471 — CBM")
+    await FixUngroupedRulesAsync(db);
+
     // Seed rules NETA MTS 2023 mặc định cho PD (nếu chưa có)
     await SeedNetaRulesAsync(db);
+
+    // Seed rules nhiệt độ (≥50°C cảnh báo, ≥65°C nguy hiểm) nếu chưa có
+    await SeedTemperatureRulesAsync(db);
+
+    // Seed 10 rules nhiệt độ cho Camera 152 (P1 -> P10)
+    await SeedThermalPointsRulesAsync(db);
 
     // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
     var deviceService = scope.ServiceProvider.GetRequiredService<DeviceService>();
@@ -183,6 +206,7 @@ static async Task SeedNetaRulesAsync(AppDbContext db)
         {
             StationId = station.Id,
             Name      = "NETA Monitor — Phóng điện",
+            RuleSet   = "Tủ 471",
             Condition = """{"point":"phong_dien","op":">","value":-37}""",
             Actions   = """[{"type":"health","penalty":5},{"type":"maintenance","taskType":"inspection","scheduledInDays":180}]""",
             Enabled   = true,
@@ -191,6 +215,7 @@ static async Task SeedNetaRulesAsync(AppDbContext db)
         {
             StationId = station.Id,
             Name      = "NETA Warning — Phóng điện",
+            RuleSet   = "Tủ 471",
             Condition = """{"point":"phong_dien","op":">","value":-27}""",
             Actions   = """[{"type":"health","penalty":15},{"type":"maintenance","taskType":"repair","scheduledInDays":45}]""",
             Enabled   = true,
@@ -199,6 +224,7 @@ static async Task SeedNetaRulesAsync(AppDbContext db)
         {
             StationId = station.Id,
             Name      = "NETA Critical — Phóng điện",
+            RuleSet   = "Tủ 471",
             Condition = """{"point":"phong_dien","op":">","value":-20}""",
             Actions   = """[{"type":"health","penalty":30},{"type":"maintenance","taskType":"repair","scheduledInDays":3}]""",
             Enabled   = true,
@@ -223,11 +249,11 @@ static async Task SeedDefaultStationAsync(AppDbContext db)
     db.Stations.Add(station);
     await db.SaveChangesAsync();
 
-    // Thiết bị 1: PLC S7-1200 (4 cảm biến nhiệt + PD)
+    // Thiết bị 1: Tủ 471 — PLC S7-1200 (3 cảm biến nhiệt + 1 PD)
     db.Devices.Add(new StationMonitor.Data.Entities.Device
     {
         StationId = station.Id,
-        Name = "PLC S7-1200 – Cảm biến nhiệt & PD",
+        Name = "Tủ 471",
         Type = "plc_s7",
         Protocol = "snap7",
         Config = """{"ip":"192.168.10.100","rack":0,"slot":1,"db":32,"offset":0,"length":10}""",
@@ -259,9 +285,141 @@ static async Task SeedDefaultStationAsync(AppDbContext db)
         Name = "HIKVISION – Phóng điện",
         Type = "camera_pd",
         Protocol = "rtsp",
-        Config = """{"ip":"192.168.10.153","rtsp_path":"/Streaming/Channels/101","go2rtc_id":"hikvision_main"}""",
+        Config = """{"ip":"192.168.10.153","rtsp_path":"/Streaming/Channels/101","go2rtc_id":"camera_153_pd"}""",
         Status = "online"
     });
 
     await db.SaveChangesAsync();
+}
+
+// ── Seed rules nhiệt độ 3 pha ────────────────────────────────
+static async Task SeedTemperatureRulesAsync(AppDbContext db)
+{
+    if (await db.Rules.AnyAsync(r => r.Name.StartsWith("Nhiệt độ"))) return;
+
+    var station = await db.Stations.FirstOrDefaultAsync();
+    if (station == null) return;
+
+    var phases = new[]
+    {
+        ("nhiet_do_pha_1", "Pha 1"),
+        ("nhiet_do_pha_2", "Pha 2"),
+        ("nhiet_do_pha_3", "Pha 3"),
+    };
+
+    foreach (var (pointId, label) in phases)
+    {
+        // Warning ≥50°C: kiểm tra, lên lịch bảo trì 30 ngày
+        db.Rules.Add(new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            Name      = $"Nhiệt độ {label} — Kiểm tra (≥50°C)",
+            RuleSet   = "Tủ 471",
+            Condition = System.Text.Json.JsonSerializer.Serialize(
+                new { point = pointId, op = ">=", value = 50, clearValue = 47 }),
+            Actions   = """[{"type":"alert","level":"warning"},{"type":"maintenance","taskType":"inspection","scheduledInDays":30}]""",
+            Enabled   = true,
+        });
+
+        // Alarm ≥65°C: nguy hiểm, sửa trong 3 ngày
+        db.Rules.Add(new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            Name      = $"Nhiệt độ {label} — Nguy hiểm (≥65°C)",
+            RuleSet   = "Tủ 471",
+            Condition = System.Text.Json.JsonSerializer.Serialize(
+                new { point = pointId, op = ">=", value = 65, clearValue = 62 }),
+            Actions   = """[{"type":"alert","level":"alarm"},{"type":"maintenance","taskType":"repair","scheduledInDays":3}]""",
+            Enabled   = true,
+        });
+    }
+    await db.SaveChangesAsync();
+    Console.WriteLine("[Startup] Đã seed 6 rules nhiệt độ 3 pha (50°C warning, 65°C alarm)");
+}
+
+// ── Fix go2rtc_id sai cho Camera 153 (chạy 1 lần) ──────────
+static async Task FixCamera153Go2rtcIdAsync(AppDbContext db)
+{
+    // Tìm camera_pd có go2rtc_id cũ "hikvision_main" và fix thành "camera_153_pd"
+    var allPdCams = await db.Devices
+        .Where(d => d.Type == "camera_pd")
+        .ToListAsync();
+
+    var cams = allPdCams
+        .Where(d => d.Config != null && d.Config.Contains("hikvision_main"))
+        .ToList();
+
+    foreach (var cam in cams)
+    {
+        try
+        {
+            var cfg = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(cam.Config!)!;
+            cfg["go2rtc_id"] = "camera_153_pd";
+            cam.Config = System.Text.Json.JsonSerializer.Serialize(cfg);
+            Console.WriteLine($"[Startup] Fixed {cam.Name}: go2rtc_id hikvision_main → camera_153_pd");
+        }
+        catch { }
+    }
+
+    if (cams.Count > 0)
+        await db.SaveChangesAsync();
+}
+
+// ── Đổi tên PLC thành "Tủ 471" (chạy 1 lần) ────────────────
+static async Task FixPlcNameAsync(AppDbContext db)
+{
+    var oldNames = new[] { "PLC S7-1200 – Cảm biến nhiệt & PD", "PLC S7-1200 — Tủ 471" };
+    var plc = await db.Devices
+        .FirstOrDefaultAsync(d => d.Type == "plc_s7" && oldNames.Contains(d.Name));
+    if (plc == null) return;
+
+    plc.Name = "Tủ 471";
+    await db.SaveChangesAsync();
+    Console.WriteLine($"[Startup] Đã đổi tên PLC → \"Tủ 471\"");
+}
+
+static async Task FixUngroupedRulesAsync(AppDbContext db)
+{
+    // Normalize tất cả RuleSet về "Tủ 471" (gộp các biến thể cũ)
+    var oldNames = new[] { (string?)null, "Tủ 471 — CBM", "Tủ 471 - CBM", "Tu 471" };
+    var toFix = await db.Rules.Where(r => oldNames.Contains(r.RuleSet)).ToListAsync();
+    if (toFix.Count == 0) return;
+
+    foreach (var r in toFix) r.RuleSet = "Tủ 471";
+    await db.SaveChangesAsync();
+    Console.WriteLine($"[Startup] Normalized RuleSet cho {toFix.Count} rule → \"Tủ 471\"");
+}
+
+// ── Seed 10 rules nhiệt độ cho Camera 152 (P1 -> P10) ─────
+static async Task SeedThermalPointsRulesAsync(AppDbContext db)
+{
+    if (await db.Rules.AnyAsync(r => r.RuleSet == "Các điểm đo của cam nhiệt")) return;
+
+    var station = await db.Stations.FirstOrDefaultAsync();
+    if (station == null) return;
+
+    // Tìm camera nhiệt để gán mặc định (nếu có)
+    var thermalCam = await db.Devices.FirstOrDefaultAsync(d => d.Type == "camera_thermal");
+
+    for (int i = 1; i <= 10; i++)
+    {
+        db.Rules.Add(new StationMonitor.Data.Entities.Rule
+        {
+            StationId = station.Id,
+            DeviceId  = thermalCam?.Id,
+            Name      = $"Cảnh báo điểm P{i}",
+            RuleSet   = "Các điểm đo của cam nhiệt",
+            Condition = System.Text.Json.JsonSerializer.Serialize(new { 
+                point = $"P{i}", 
+                op = ">=", 
+                pre_alarm = 50, 
+                alarm = 70,
+                type = "analog"
+            }),
+            Actions   = """[{"type":"alert","level":"hybrid"}]""",
+            Enabled   = true,
+        });
+    }
+    await db.SaveChangesAsync();
+    Console.WriteLine("[Startup] Đã seed 10 rules nhiệt độ camera (P1-P10)");
 }

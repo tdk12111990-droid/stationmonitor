@@ -1,12 +1,13 @@
 // ============================================================
 // StationApiService — Gọi backend StationMonitor API
-// Base: http://localhost:5056/api/v1
+// Base: từ VITE_API_URL env var, mặc định http://localhost:5056/api/v1
 // Tự động đính JWT từ localStorage vào mọi request
 // ============================================================
 
 import { authService } from './AuthService';
+import { API_BASE_URL } from '@/utils/env';
 
-const API_BASE = 'http://localhost:5056/api/v1';
+const API_BASE = `${API_BASE_URL}/api/v1`;
 
 export interface CameraDevice {
   id: string;
@@ -153,11 +154,11 @@ class StationApiService {
     return apiFetch<Rule[]>('/rules');
   }
 
-  async createRule(data: { name: string; condition: string; actions?: string; enabled?: boolean; deviceId?: string }): Promise<Rule> {
+  async createRule(data: { name: string; ruleSet?: string; condition: string; actions?: string; enabled?: boolean; deviceId?: string }): Promise<Rule> {
     return apiMutate('POST', '/rules', data);
   }
 
-  async updateRule(id: string, data: { name?: string; condition?: string; actions?: string; enabled?: boolean }): Promise<Rule> {
+  async updateRule(id: string, data: { name?: string; ruleSet?: string; condition?: string; actions?: string; enabled?: boolean }): Promise<Rule> {
     return apiMutate('PUT', `/rules/${id}`, data);
   }
 
@@ -425,6 +426,11 @@ class StationApiService {
     return apiFetch<TrendItem[]>(`/analytics/trend?${params}`);
   }
 
+  async recalculateHealth(deviceId?: string): Promise<{ message: string; clearedZones: number; clearedScores: number }> {
+    const q = deviceId ? `?deviceId=${deviceId}` : '';
+    return apiMutate('POST', `/analytics/health/recalculate${q}`);
+  }
+
   // ── Cloud Sync ────────────────────────────────────────────
   async getSyncStatus(): Promise<SyncStatus> {
     return apiFetch<SyncStatus>('/sync/status');
@@ -433,11 +439,17 @@ class StationApiService {
   async triggerSync(): Promise<{ message: string }> {
     return apiMutate('POST', '/sync/trigger');
   }
+
+  // ── Camera Detections ─────────────────────────────────────
+  async getDetections(query = ''): Promise<any[]> {
+    return apiFetch<any[]>(`/detections${query ? '?' + query : ''}`);
+  }
 }
 
 export interface Rule {
   id: string;
   name: string;
+  ruleSet?: string;   // Tên bộ rule: "Tủ 471 — CBM"
   condition: string;  // JSON: { point, op, value }
   actions: string;    // JSON: [{ type, level }]
   enabled: boolean;
@@ -459,6 +471,9 @@ export interface AlertItem {
   ackedAt?: string;
   closedAt?: string;
   ackNote?: string;
+  imageUrl?: string;
+  videoUrl?: string;
+  thumbnailUrl?: string;
 }
 
 export interface AlertHistoryEntry {

@@ -2,7 +2,7 @@
 title StationMonitor - Khoi dong he thong
 echo.
 echo  ================================================
-echo   STATION MONITOR - KHOI DONG HE THONG
+echo   STATION MONITOR - KHOI DONG HE THONG (EXEC MODE)
 echo  ================================================
 echo.
 
@@ -48,6 +48,9 @@ echo.
 echo   Frontend : http://localhost:5173
 echo   Backend  : http://localhost:5056
 echo   go2rtc   : http://localhost:1984
+echo.
+echo   * Chế độ Enhanced Viewer tự động kích hoạt
+echo     khi bạn xem Camera 152 trên Web.
 echo  ================================================
 echo.
 echo   Dang mo trinh duyet...

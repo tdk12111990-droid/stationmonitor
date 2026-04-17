@@ -132,5 +132,4 @@ export type PageId =
     | 'audit-log'
     | 'maintenance'
     | 'multisite'
-    | 'rule-engine'
-    | 'ai-test';
+    | 'rule-engine';

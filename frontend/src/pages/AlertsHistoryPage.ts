@@ -6,6 +6,7 @@
 import { stationApi, type AlertItem, type AlertHistoryEntry } from '@/services/StationApiService';
 import { confirmDialog } from '@/utils/confirm';
 import { router } from '@/router/Router';
+import { API_BASE_URL } from '@/utils/env';
 
 type SortCol = 'time' | 'level';
 type SortDir = 'asc' | 'desc';
@@ -51,14 +52,14 @@ export class AlertsHistoryPage {
       /* ── Grid list ── */
       .ah-grid-header, .ah-grid-row {
         display: grid;
-        grid-template-columns: 155px 100px minmax(0, 1fr) 70px 120px 100px;
+        grid-template-columns: 80px 155px 100px minmax(0, 1fr) 70px 120px 100px;
         align-items: center;
         width: 100%;
         box-sizing: border-box;
       }
       .ah-detail-panel.open ~ * .ah-grid-header,
       .ah-detail-panel.open ~ * .ah-grid-row {
-        grid-template-columns: 140px 90px minmax(0, 1fr) 60px 110px 90px;
+        grid-template-columns: 60px 140px 90px minmax(0, 1fr) 60px 110px 90px;
       }
       .ah-grid-header {
         border-bottom: 1px solid var(--admin-border);
@@ -110,27 +111,31 @@ export class AlertsHistoryPage {
       }
       .ah-sort-dropdown {
         position:fixed;
-        background:var(--admin-card-bg); border:1px solid var(--admin-border);
-        border-radius:8px; box-shadow:0 8px 24px rgba(0,0,0,.4);
-        z-index:9999; min-width:220px; overflow:hidden;
-        animation: ah-pop .12s ease;
+        background: rgba(30, 41, 59, 0.95); /* Darker, more solid background */
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        backdrop-filter: blur(12px); /* Premium glass effect */
+        border-radius: 10px; 
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6);
+        z-index: 9999; min-width: 220px; overflow: hidden;
+        animation: ah-pop .15s ease-out;
       }
-      @keyframes ah-pop { from { opacity:0; transform:translateY(-6px) } to { opacity:1; transform:translateY(0) } }
+      @keyframes ah-pop { from { opacity:0; transform:translateY(-8px) scale(0.98) } to { opacity:1; transform:translateY(0) scale(1) } }
       .ah-sort-dropdown-title {
-        padding:8px 14px; font-size:.65rem; font-weight:800; letter-spacing:.5px;
-        text-transform:uppercase; color:var(--admin-text); opacity:.4;
-        border-bottom:1px solid var(--admin-border);
+        padding: 10px 14px; font-size: .68rem; font-weight: 800; letter-spacing: .8px;
+        text-transform: uppercase; color: var(--admin-text); opacity: .7; /* Increased opacity from .4 */
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        background: rgba(255, 255, 255, 0.03);
       }
       .ah-sort-opt {
-        display:flex; align-items:center; gap:10px;
-        padding:10px 14px; cursor:pointer; font-size:.85rem; color:var(--admin-text);
-        transition:background .1s;
+        display: flex; align-items: center; gap: 12px;
+        padding: 12px 14px; cursor: pointer; font-size: .88rem; color: #fff;
+        transition: all .15s;
       }
-      .ah-sort-opt:hover { background:rgba(255,255,255,.06); }
-      .ah-sort-opt.active { background:rgba(59,130,246,.12); color:var(--admin-accent); font-weight:600; }
-      .ah-sort-opt .opt-icon { font-size:1rem; width:20px; text-align:center; }
-      .ah-sort-opt .opt-check { margin-left:auto; opacity:0; }
-      .ah-sort-opt.active .opt-check { opacity:1; }
+      .ah-sort-opt:hover { background: rgba(59, 130, 246, 0.2); }
+      .ah-sort-opt.active { background: rgba(59, 130, 246, 0.25); color: #60a5fa; font-weight: 700; }
+      .ah-sort-opt .opt-icon { font-size: 1.1rem; width: 22px; text-align: center; }
+      .ah-sort-opt .opt-check { margin-left: auto; opacity: 0; font-weight: 900; }
+      .ah-sort-opt.active .opt-check { opacity: 1; }
 
       /* ── Detail panel nội dung ── */
       .ah-detail-inner {
@@ -221,18 +226,17 @@ export class AlertsHistoryPage {
           <div class="admin-card" style="padding:0;overflow:hidden;">
             <div style="overflow-y:scroll;max-height:calc(100vh - 260px);">
               <div class="ah-grid-header" id="ahGridHeader">
-                <div class="ah-sortable-th" data-sort="time">
-                  <span class="ah-th-icon">🕒</span> Thời gian
-                  <span id="sort-time" class="ah-sort-badge">↓</span>
+                <div>ẢNH</div>
+                <div class="ah-sortable-th" id="sort-time" data-sort="time">
+                  THỜI GIAN <span class="ah-sort-badge">↓</span>
                 </div>
-                <div class="ah-sortable-th" data-sort="level">
-                  <span class="ah-th-icon">⚡</span> Mức độ
-                  <span id="sort-level" class="ah-sort-badge ah-sort-inactive">⇅</span>
+                <div class="ah-sortable-th" id="sort-level" data-sort="level" style="justify-content:flex-start">
+                  MỨC ĐỘ <span class="ah-sort-badge ah-sort-inactive">⇅</span>
                 </div>
-                <div>Thông báo</div>
-                <div>Giá trị</div>
-                <div>Trạng thái</div>
-                <div>Hành động</div>
+                <div>NỘI DUNG</div>
+                <div>GIÁ TRỊ</div>
+                <div>TRẠNG THÁI</div>
+                <div>HÀNH ĐỘNG</div>
               </div>
               <div id="alertTableBody">
                 <div style="text-align:center;padding:40px;color:#94a3b8">Đang tải...</div>
@@ -288,6 +292,52 @@ export class AlertsHistoryPage {
 
     await this.loadAlerts();
     this.bindEvents();
+    this.setupRealtime();
+
+    // Nếu từ Dashboard navigate kèm alertId → tự động mở chi tiết
+    const params = router.getParams();
+    if (params.alertId) {
+      await this.openDetail(params.alertId);
+    }
+  }
+
+  private async setupRealtime(): Promise<void> {
+    const token = localStorage.getItem('station_token');
+    if (!token) return;
+
+    const { HubConnectionBuilder } = await import('@microsoft/signalr');
+    const connection = new HubConnectionBuilder()
+      .withUrl('/ws/realtime', { accessTokenFactory: () => token })
+      .withAutomaticReconnect()
+      .build();
+
+    // Khi có cảnh báo mới -> Insert vào đầu danh sách
+    connection.on('AlertNew', (alert: AlertItem) => {
+      // Chỉ insert nếu nó khớp với bộ lọc hiện tại (về mặt thời gian/status)
+      if (this.filterStatus && this.filterStatus !== alert.status) return;
+      
+      // Kiểm tra xem đã tồn tại chưa
+      const exists = this.alerts.find(a => a.id === alert.id);
+      if (!exists) {
+        this.alerts.unshift(alert);
+        this.renderTable();
+      }
+    });
+
+    // Khi cập nhật video hoặc trạng thái
+    connection.on('AlertUpdated', (data: any) => {
+      const idx = this.alerts.findIndex(a => a.id === data.id);
+      if (idx !== -1) {
+        const alert = this.alerts[idx]!;
+        if (data.videoUrl) alert.videoUrl = data.videoUrl;
+        if (data.status) alert.status = data.status;
+        this.renderTable();
+        // Nếu đang mở chi tiết thằng này thì reload chi tiết
+        if (this.selectedId === data.id) this.openDetail(data.id);
+      }
+    });
+
+    try { await connection.start(); } catch {}
   }
 
   private calculateDates(): void {
@@ -336,14 +386,15 @@ export class AlertsHistoryPage {
 
   private updateSortIndicators(): void {
     ['time', 'level'].forEach(col => {
-      const el = document.getElementById(`sort-${col}`);
-      if (!el) return;
+      const parent = document.getElementById(`sort-${col}`);
+      const badge = parent?.querySelector('.ah-sort-badge');
+      if (!badge) return;
       if (col === this.sortBy) {
-        el.textContent = this.sortDir === 'asc' ? '↑' : '↓';
-        el.className = 'ah-sort-badge';
+        badge.textContent = this.sortDir === 'asc' ? '↑' : '↓';
+        badge.className = 'ah-sort-badge';
       } else {
-        el.textContent = '⇅';
-        el.className = 'ah-sort-badge ah-sort-inactive';
+        badge.textContent = '⇅';
+        badge.className = 'ah-sort-badge ah-sort-inactive';
       }
     });
   }
@@ -386,8 +437,13 @@ export class AlertsHistoryPage {
           : '';
       const sel = a.id === this.selectedId ? ' ah-selected' : '';
 
+      const thumb = a.thumbnailUrl 
+        ? `<div style="position:relative;width:40px;height:40px;"><img src="${a.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;border:1px solid rgba(255,255,255,0.1);"> ${a.videoUrl ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.8rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));">▶️</div>` : ''}</div>` 
+        : '<div style="width:40px;height:40px;background:rgba(255,255,255,0.05);border-radius:4px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.2);font-size:0.6rem;">NO IMG</div>';
+
       return `
       <div class="ah-grid-row alert-row${sel}" data-id="${a.id}" title="Nhấn để xem chi tiết">
+        <div>${thumb}</div>
         <div style="font-size:.78rem;white-space:nowrap;">${time}</div>
         <div>${levelBadge}</div>
         <div class="ah-col-msg">${a.message}</div>
@@ -517,6 +573,15 @@ export class AlertsHistoryPage {
       )),
     ].join('');
 
+    // Khối Hiển Thị Bằng Chứng Media
+    const mediaSection = (a.imageUrl || a.videoUrl) ? `
+    <div class="ah-detail-section" style="padding:0;border-bottom:1px solid rgba(255,255,255,.05);background:#000;">
+      ${a.videoUrl 
+        ? `<video src="${a.videoUrl}" style="width:100%;max-height:260px;object-fit:contain;display:block;" controls autoplay loop muted></video>` 
+        : `<img src="${a.imageUrl}" style="width:100%;max-height:260px;object-fit:contain;display:block;">`
+      }
+    </div>` : '';
+
     return `
     <!-- Header -->
     <div class="ah-detail-header">
@@ -526,29 +591,20 @@ export class AlertsHistoryPage {
       <button id="adClosePanel" class="btn-industrial" style="padding:4px 10px;font-size:.8rem;">✕</button>
     </div>
 
+    ${mediaSection}
+
     <!-- Thông báo -->
     <div class="ah-detail-section">
-      <div style="font-size:.88rem;line-height:1.5;opacity:.85;">${a.message}</div>
-      <div style="margin-top:8px;font-size:.78rem;opacity:.4;">${fmt(a.triggeredAt)}</div>
+      <div style="font-size:.88rem;line-height:1.5;opacity:.85;font-weight:600;color:${color}">${a.message}</div>
+      <div style="margin-top:8px;font-size:.78rem;opacity:.4;">Phát tín hiệu lúc: ${fmt(a.triggeredAt)}</div>
     </div>
 
     <!-- Thông tin -->
     <div class="ah-detail-section">
-      <div class="ah-section-title">Thông tin</div>
+      <div class="ah-section-title">THÔNG TIN XÁC THỰC</div>
       ${infoRow('Trạng thái', statusLabel[a.status] ?? a.status)}
       ${infoRow('Nguồn', sourceLabel[a.source] ?? a.source)}
-      ${a.value != null ? infoRow('Giá trị', `<b style="color:${color}">${a.value.toFixed(2)}</b>`) : ''}
-      ${infoRow('ACK lúc', fmt(a.ackedAt))}
-      ${infoRow('Đóng lúc', fmt(a.closedAt))}
-      ${a.ackNote ? infoRow('Ghi chú', `<em style="opacity:.7">${a.ackNote}</em>`) : ''}
-    </div>
-
-    <!-- IDs -->
-    <div class="ah-detail-section">
-      <div class="ah-section-title">Tham chiếu</div>
-      ${infoRow('Alert ID', `<code style="font-size:.68rem;opacity:.6">${a.id}</code>`)}
-      ${a.deviceId ? infoRow('Device ID', `<code style="font-size:.68rem;opacity:.6">${a.deviceId}</code>`) : ''}
-      ${a.ruleId ? infoRow('Rule ID', `<code style="font-size:.68rem;opacity:.6">${a.ruleId}</code>`) : ''}
+      ${a.value != null ? infoRow('Giá trị Kích Nổ', `<b style="color:${color};font-size:1rem">${a.value.toFixed(2)} °C</b>`) : ''}
     </div>
 
     <!-- Timeline -->
@@ -561,9 +617,8 @@ export class AlertsHistoryPage {
 
     <!-- Actions -->
     <div class="ah-detail-actions">
-      ${a.status === 'open' ? `<button id="adAckBtn"   class="btn-industrial btn-primary" style="flex:1">✓ ACK cảnh báo</button>` : ''}
-      ${a.status === 'acked' ? `<button id="adCloseBtn" class="btn-industrial btn-danger"  style="flex:1">✕ Đóng cảnh báo</button>` : ''}
-      <button id="adAnalyticsBtn" class="btn-industrial" style="flex:1">📈 Phân tích</button>
+      ${a.status !== 'closed' ? `<button id="adCloseBtn" class="btn-industrial btn-danger" style="flex:1;font-weight:700;">🚨 ĐÓNG CẢNH BÁO NÀY</button>` : ''}
+      ${a.status === 'open' ? `<button id="adAckBtn" class="btn-industrial btn-primary" style="flex:1">✓ ACK</button>` : ''}
     </div>`;
   }
 
@@ -664,7 +719,7 @@ export class AlertsHistoryPage {
     if (this.fromDate) params.set('from', new Date(this.fromDate).toISOString());
     if (this.toDate) params.set('to', new Date(this.toDate).toISOString());
     const token = localStorage.getItem('station_token') ?? '';
-    const url = `http://localhost:5056/api/v1/alerts/export?${params}`;
+    const url = `${API_BASE_URL}/api/v1/alerts/export?${params}`;
     fetch(url, { headers: { Authorization: `Bearer ${token}` } })
       .then(r => r.blob())
       .then(blob => {

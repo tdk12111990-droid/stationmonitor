@@ -20,6 +20,12 @@ public class SignalRNotifier : IRealtimeNotifier
     public Task SendAlertAsync(object alert)
         => _hub.Clients.All.SendAsync("AlertNew", alert);
 
+    public Task SendAlertUpdatedAsync(object alert)
+        => _hub.Clients.All.SendAsync("AlertUpdated", alert);
+
     public Task SendDeviceStatusAsync(Guid deviceId, string status)
         => _hub.Clients.All.SendAsync("DeviceStatus", new { deviceId, status });
+
+    public Task SendCameraEventAsync(object evt)
+        => _hub.Clients.All.SendAsync("CameraEvent", evt);
 }

@@ -4,11 +4,12 @@
 // ============================================================
 
 import type { User, UserRole } from '@/types/app.types';
+import { API_BASE_URL } from '@/utils/env';
 
 const SESSION_KEY = 'station_session';
 const TOKEN_KEY   = 'station_token';
 
-const API_BASE = 'http://localhost:5056/api/v1';
+const API_BASE = `${API_BASE_URL}/api/v1`;
 
 class AuthService {
     private currentUser: User | null = null;

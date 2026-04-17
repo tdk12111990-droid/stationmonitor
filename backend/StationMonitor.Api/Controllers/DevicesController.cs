@@ -42,6 +42,26 @@ public class DevicesController : ControllerBase
     }
 
     /// <summary>
+    /// Lấy danh sách toàn bộ thiết bị (Hỗ trợ AI Engine tự nhận diện ID)
+    /// </summary>
+    [HttpGet("devices")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetAll()
+    {
+        // Chỉ cho phép localhost
+        var remoteIp = Request.HttpContext.Connection.RemoteIpAddress?.ToString();
+        var isLocal = remoteIp == "127.0.0.1" || remoteIp == "::1" || remoteIp == "localhost" || (remoteIp != null && remoteIp.Contains("127.0.0.1"));
+        
+        if (!isLocal && !User.Identity!.IsAuthenticated)
+            return Unauthorized();
+
+        var devices = await _db.Devices
+            .Select(d => new { d.Id, d.Name, d.Type, d.Config, d.Status })
+            .ToListAsync();
+        return Ok(devices);
+    }
+
+    /// <summary>
     /// Lấy danh sách thiết bị theo trạm
     /// Query: ?type=camera để lọc theo loại
     /// </summary>

@@ -20,4 +20,6 @@ public class Alert
     public string? AckNote { get; set; }
     public DateTime? ClosedAt { get; set; }
     public string? ImageUrl { get; set; }
+    public string? VideoUrl { get; set; }
+    public string? ThumbnailUrl { get; set; }
 }

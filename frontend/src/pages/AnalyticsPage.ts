@@ -6,6 +6,7 @@
 import Chart from 'chart.js/auto';
 import 'chartjs-adapter-date-fns';
 import { stationApi, type AlertItem, type Device, type SensorPoint, type Rule } from '@/services/StationApiService';
+import { API_BASE_URL } from '@/utils/env';
 
 type TimeRange = '1H' | '6H' | '1D' | '1W' | '1M';
 type TabId = 'overview' | 'temp' | 'pd' | 'correlation' | 'alerts' | 'health';
@@ -112,7 +113,7 @@ export class AnalyticsPage {
   private bindExportHistory(): void {
     document.getElementById('btnExportHistory')?.addEventListener('click', () => {
       const token = localStorage.getItem('station_token') ?? '';
-      const url = `http://localhost:5056/api/v1/history/export`;
+      const url = `${API_BASE_URL}/api/v1/history/export`;
       fetch(url, { headers: { Authorization: `Bearer ${token}` } })
         .then(r => r.blob())
         .then(blob => {
@@ -974,7 +975,14 @@ export class AnalyticsPage {
     this.setTabHTML('health', `
       <!-- Health scores -->
       <div style="background:#1e293b;border-radius:10px;padding:16px;border:1px solid #334155;">
-        <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:12px;">Điểm sức khỏe thiết bị (dựa trên alert 30 ngày)</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;">Điểm sức khỏe thiết bị (CBM — NETA 2023)</div>
+          <button id="btnRecalcHealth"
+            style="padding:4px 12px;background:#1e3a5f;border:1px solid #2563eb;border-radius:5px;
+            color:#60a5fa;font-size:0.68rem;font-weight:700;cursor:pointer;display:flex;align-items:center;gap:5px;">
+            ↻ Tính lại
+          </button>
+        </div>
         <div style="display:flex;flex-direction:column;gap:10px;">
           ${scores.map(d => `
             <div style="display:grid;grid-template-columns:140px 60px 1fr 80px;align-items:center;gap:12px;">
@@ -1074,6 +1082,34 @@ export class AnalyticsPage {
         </div>
       </div>
     `);
+
+    // Nút Tính lại sức khỏe
+    document.getElementById('btnRecalcHealth')?.addEventListener('click', async () => {
+      const btn = document.getElementById('btnRecalcHealth') as HTMLButtonElement;
+      btn.disabled = true;
+      btn.textContent = '⟳ Đang tính...';
+      btn.style.color = '#94a3b8';
+      try {
+        await stationApi.recalculateHealth();
+        btn.textContent = '✓ Xong!';
+        btn.style.color = '#10b981';
+        btn.style.borderColor = '#10b981';
+        // Sau 3 giây: load lại tab để hiển thị điểm mới
+        setTimeout(async () => {
+          this.tabReady.delete('health');
+          await this.buildHealth();
+        }, 3000);
+      } catch (e) {
+        btn.textContent = '✗ Lỗi';
+        btn.style.color = '#ef4444';
+        setTimeout(() => {
+          btn.textContent = '↻ Tính lại';
+          btn.style.color = '#60a5fa';
+          btn.style.borderColor = '#2563eb';
+          btn.disabled = false;
+        }, 2000);
+      }
+    });
   }
 
   // ── Helper: chart factory ─────────────────────────────────────

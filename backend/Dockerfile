@@ -37,6 +37,7 @@ WORKDIR /app
 # - libsnap7-dev: Siemens S7 communication
 # - iputils-ping: Hỗ trợ AutoDiscovery (ping quét mạng)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
     iputils-ping \
     libsnap7-dev \
     && rm -rf /var/lib/apt/lists/*

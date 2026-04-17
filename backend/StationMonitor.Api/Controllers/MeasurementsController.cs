@@ -7,8 +7,11 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.SignalR;
+using StationMonitor.Api.Hubs;
 using StationMonitor.Data;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace StationMonitor.Api.Controllers;
 
@@ -18,7 +21,13 @@ namespace StationMonitor.Api.Controllers;
 public class MeasurementsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    public MeasurementsController(AppDbContext db) => _db = db;
+    private readonly IHubContext<RealtimeHub> _hubContext;
+
+    public MeasurementsController(AppDbContext db, IHubContext<RealtimeHub> hubContext)
+    {
+        _db = db;
+        _hubContext = hubContext;
+    }
 
     /// <summary>
     /// Lấy giá trị mới nhất của tất cả điểm đo trong trạm
@@ -200,5 +209,74 @@ public class MeasurementsController : ControllerBase
         var bytes = System.Text.Encoding.UTF8.GetPreamble()
             .Concat(System.Text.Encoding.UTF8.GetBytes(sb.ToString())).ToArray();
         return File(bytes, "text/csv", $"history_{DateTime.Now:yyyyMMdd_HHmm}.csv");
+    }
+
+    /// <summary>
+    /// Tiếp nhận dữ liệu đo lường thô từ AI Engine (Localhost only)
+    /// </summary>
+    [HttpPost("measurements/ingest")]
+    [AllowAnonymous]
+    public async Task<IActionResult> IngestMeasurements([FromBody] List<IngestReadingDto> readings)
+    {
+        // Ghi log ra file để debug (Local path)
+        var logFile = Path.Combine(AppContext.BaseDirectory, "api_debug.log");
+        var logMsg = $"[{DateTime.Now:HH:mm:ss}] Ingest attempt from {Request.HttpContext.Connection.RemoteIpAddress}";
+        try { System.IO.File.AppendAllText(logFile, logMsg + "\n"); } catch {}
+
+        // Chế độ bảo mật: hỗ trợ IPv4, IPv6 local và IPv4-mapped IPv6
+        var remoteIp = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
+        var isLocal = remoteIp == "127.0.0.1" || remoteIp == "::1" || remoteIp.EndsWith("127.0.0.1") || remoteIp == "localhost";
+
+        if (!isLocal)
+        {
+            var err = $"[Ingest] Blocked unauthorized access from {remoteIp}";
+            try { System.IO.File.AppendAllText(logFile, err + "\n"); } catch {}
+            Console.WriteLine(err);
+            return Unauthorized("Only localhost AI Engine can ingest raw data.");
+        }
+
+        if (readings == null || !readings.Any()) return BadRequest();
+
+        var okMsg = $"[Ingest] Received {readings.Count} points for Device {readings[0].DeviceId}";
+        try { System.IO.File.AppendAllText(logFile, okMsg + "\n"); } catch {}
+        Console.WriteLine(okMsg);
+
+        // Broadcast ngay lập tức qua SignalR để Dashboard cập nhật mượt mà
+        await _hubContext.Clients.All.SendAsync("SensorUpdate", readings.Select(r => new {
+            deviceId = r.DeviceId,
+            pointId  = r.PointId,
+            value    = r.Value,
+            unit     = r.Unit ?? "°C",
+            time     = DateTime.UtcNow
+        }));
+
+        // Lưu vào DB (Không bắt buộc, nhưng lưu để có lịch sử cho trang Analytics)
+        try
+        {
+            var stationId = (await _db.Stations.FirstOrDefaultAsync())?.Id ?? Guid.Empty;
+            var entities = readings.Select(r => new StationMonitor.Data.Entities.SensorReading
+            {
+                StationId = stationId,
+                DeviceId  = r.DeviceId,
+                PointId   = r.PointId,
+                Value     = r.Value,
+                Unit      = r.Unit ?? "°C",
+                Time      = DateTime.UtcNow,
+                Quality   = 0
+            });
+            _db.SensorReadings.AddRange(entities);
+            await _db.SaveChangesAsync();
+        }
+        catch { /* Bỏ qua lỗi DB nếu bận, ưu tiên Realtime */ }
+
+        return Ok(new { success = true, count = readings.Count });
+    }
+
+    public class IngestReadingDto
+    {
+        public Guid DeviceId { get; set; }
+        public string PointId { get; set; } = string.Empty;
+        public double Value { get; set; }
+        public string? Unit { get; set; }
     }
 }

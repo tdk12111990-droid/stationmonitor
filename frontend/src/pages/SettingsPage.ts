@@ -15,7 +15,7 @@ export class SettingsPage {
 
       <!-- Settings inner tab nav -->
       <div class="settings-tabs">
-        ${['Cài đặt chung', 'Thông báo', 'Database & Backup', 'Giao diện', 'Cloud Sync'].map((t, i) =>
+        ${['Cài đặt chung', 'Thông báo', 'Database & Backup', 'Giao diện', 'Cloud Sync', 'Hành động Liên kết (Camera)'].map((t, i) =>
       `<div class="stab ${i === 0 ? 'active' : ''}" data-stab="${i}">${t}</div>`).join('')}
       </div>
 
@@ -48,6 +48,66 @@ export class SettingsPage {
         <div style="display:flex;gap:10px;margin-top:20px">
           <button id="saveSettingsBtn" class="btn-industrial btn-primary">💾 Lưu cài đặt</button>
           <span id="saveStatus" style="align-self:center;font-size:.85rem"></span>
+        </div>
+      </div>
+
+      <!-- Tab 5: Linkage Actions (Camera) -->
+      <div id="stab-5" class="stab-content admin-card" style="padding:20px;display:none">
+        <div class="card-title" style="color:#f59e0b;font-size:1.1rem;margin-bottom:20px;">LINKAGE ACTIONS (HÀNH ĐỘNG LIÊN KẾT)</div>
+        <div style="font-size:0.85rem;color:#94a3b8;margin-bottom:24px;">Cấu hình áp dụng chung cho toàn bộ các điểm báo cháy của Camera Đo Nhiệt Độ (P1-P10). Hoạt động đồng bộ hóa chuẩn VMS.</div>
+
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:20px;margin-bottom:20px;">
+          <div style="font-size:0.75rem;font-weight:700;color:#94a3b8;margin-bottom:16px;text-transform:uppercase;">Nâng cao (Filter & Limit)</div>
+          
+          <div class="form-group">
+            <label>THỜI GIAN LỌC NHIỄU (FILTER TIME)</label>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <input id="s_cam_filter" type="number" class="form-input" style="width:120px" min="0" max="60" value="10">
+              <span style="font-size:0.8rem;color:#cbd5e1;">giây liên tục vượt ngưỡng để kích hoạt báo động.</span>
+            </div>
+            <div style="font-size:.75rem;opacity:.5;margin-top:4px">Khuyên dùng: 5-10 giây để chống báo giả do chim/lá cây.</div>
+          </div>
+          
+          <div class="form-group" style="margin-top:20px;">
+            <label>ANTI-SPAM COOLDOWN (TẠM NGHỈ)</label>
+            <div style="display:flex;align-items:center;gap:10px;">
+              <input id="s_cam_cooldown" type="number" class="form-input" style="width:120px" min="1" max="60" value="15">
+              <span style="font-size:0.8rem;color:#cbd5e1;">phút nghỉ giữa 2 lần đẩy Alert.</span>
+            </div>
+          </div>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:8px;padding:20px;margin-bottom:20px;">
+          <div style="font-size:0.75rem;font-weight:700;color:#94a3b8;margin-bottom:16px;text-transform:uppercase;">Hành động Thu thập (Capture)</div>
+          
+          <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
+            <input type="checkbox" id="s_cam_photo" style="accent-color:#0ea5e9;width:18px;height:18px;" checked>
+            <div>
+              <span style="font-weight:600;font-size:0.9rem;">📸 Capture Photo (Chụp hình chứng cứ)</span>
+              <div style="font-size:.75rem;opacity:.55;margin-top:2px;">Tạo 1 ảnh HD và 1 ảnh Thumbnail 10KB.</div>
+            </div>
+          </label>
+
+          <label style="display:flex;align-items:center;gap:12px;cursor:pointer;margin-bottom:16px;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
+            <input type="checkbox" id="s_cam_video" style="accent-color:#f59e0b;width:18px;height:18px;" checked>
+            <div>
+              <span style="font-weight:600;font-size:0.9rem;">🎥 Record Video Playback (Lưu hình vòng lặp 10 Giây)</span>
+              <div style="font-size:.75rem;opacity:.55;margin-top:2px;">Kích hoạt luồng FFMPEG nén x264 CRF-28 tự động ghi lại quá khứ 5s và tương lai 5s.</div>
+            </div>
+          </label>
+
+          <label style="display:flex;align-items:center;gap:12px;cursor:pointer;padding:12px;background:rgba(255,255,255,0.02);border-radius:6px;border:1px solid rgba(255,255,255,0.05);">
+            <input type="checkbox" id="s_cam_notify" style="accent-color:#ef4444;width:18px;height:18px;" checked>
+            <div>
+              <span style="font-weight:600;font-size:0.9rem;">🔔 Đẩy thông báo khẩn (Notify Center)</span>
+              <div style="font-size:.75rem;opacity:.55;margin-top:2px;">Kích hoạt Viền Nhấp nháy Đỏ trên Realtime UI và Gửi dữ liệu SignalR.</div>
+            </div>
+          </label>
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:20px;">
+          <button id="saveLinkageBtn" class="btn-industrial btn-primary">💾 Cập nhật Linkage</button>
+          <span id="linkageSaveStatus" style="align-self:center;font-size:.85rem"></span>
         </div>
       </div>
 
@@ -260,9 +320,23 @@ export class SettingsPage {
       const email = document.getElementById('s_email') as HTMLInputElement;
       const tz = document.getElementById('s_timezone') as HTMLSelectElement;
 
+      // Tab Linkage
+      const filter = document.getElementById('s_cam_filter') as HTMLInputElement;
+      const cooldown = document.getElementById('s_cam_cooldown') as HTMLInputElement;
+      const chkPhoto = document.getElementById('s_cam_photo') as HTMLInputElement;
+      const chkVideo = document.getElementById('s_cam_video') as HTMLInputElement;
+      const chkNotify = document.getElementById('s_cam_notify') as HTMLInputElement;
+
       if (polling) polling.value = this.settings['polling_interval_s'] ?? '3';
       if (email) email.value = this.settings['alert_email'] ?? '';
       if (tz) tz.value = this.settings['timezone'] ?? 'Asia/Ho_Chi_Minh';
+      
+      if (filter) filter.value = this.settings['camera_filter_time_s'] ?? '10';
+      if (cooldown) cooldown.value = this.settings['camera_cooldown_m'] ?? '15';
+      if (chkPhoto) chkPhoto.checked = (this.settings['camera_take_photo'] ?? 'true') === 'true';
+      if (chkVideo) chkVideo.checked = (this.settings['camera_record_video'] ?? 'true') === 'true';
+      if (chkNotify) chkNotify.checked = (this.settings['camera_notify_ui'] ?? 'true') === 'true';
+
     } catch {
       if (statusEl) statusEl.textContent = 'Không thể tải cài đặt từ server';
     }
@@ -296,6 +370,32 @@ export class SettingsPage {
           stationApi.updateSetting('timezone', tz),
         ]);
         status.textContent = '✓ Đã lưu';
+        status.style.color = '#10b981';
+        setTimeout(() => { status.textContent = ''; }, 3000);
+      } catch (e) {
+        status.textContent = `Lỗi: ${(e as Error).message}`;
+        status.style.color = '#ef4444';
+      }
+    });
+
+    // ── Tab Linkage (Camera Actions) ───────────────────────────
+    document.getElementById('saveLinkageBtn')?.addEventListener('click', async () => {
+      const filter = (document.getElementById('s_cam_filter') as HTMLInputElement).value;
+      const cooldown = (document.getElementById('s_cam_cooldown') as HTMLInputElement).value;
+      const photo = (document.getElementById('s_cam_photo') as HTMLInputElement).checked.toString();
+      const video = (document.getElementById('s_cam_video') as HTMLInputElement).checked.toString();
+      const notify = (document.getElementById('s_cam_notify') as HTMLInputElement).checked.toString();
+      const status = document.getElementById('linkageSaveStatus')!;
+
+      try {
+        await Promise.all([
+          stationApi.updateSetting('camera_filter_time_s', filter),
+          stationApi.updateSetting('camera_cooldown_m', cooldown),
+          stationApi.updateSetting('camera_take_photo', photo),
+          stationApi.updateSetting('camera_record_video', video),
+          stationApi.updateSetting('camera_notify_ui', notify),
+        ]);
+        status.textContent = '✓ Dây chuyền Linkage đã được khóa kích hoạt!';
         status.style.color = '#10b981';
         setTimeout(() => { status.textContent = ''; }, 3000);
       } catch (e) {

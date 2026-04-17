@@ -47,10 +47,10 @@ public static class RuleEvaluator
     }
 
     /// <summary>
-    /// Parse condition mở rộng gồm: clearValue, cooldownMin, confirmReadings
-    /// Trả về null nếu JSON không hợp lệ.
+    /// Parse condition mở rộng. Hỗ trợ cả format cũ {"value":X} lẫn format UI mới {"alarm":X,"pre_alarm":Y}.
+    /// warningValue = pre_alarm threshold (null nếu không có).
     /// </summary>
-    public static (string point, string op, double value,
+    public static (string point, string op, double value, double? warningValue,
                    double clearValue, int cooldownMin, int confirmReadings)?
         ParseConditionExtended(string json)
     {
@@ -59,11 +59,30 @@ public static class RuleEvaluator
             var doc  = JsonDocument.Parse(json);
             var root = doc.RootElement;
 
-            var point   = root.GetProperty("point").GetString() ?? "";
-            var op      = root.GetProperty("op").GetString() ?? ">";
-            var value   = root.GetProperty("value").GetDouble();
+            var point = root.GetProperty("point").GetString() ?? "";
+            var op    = root.GetProperty("op").GetString() ?? ">";
 
-            // Hysteresis: mặc định clearValue = value - 3% (hoặc -3°C với nhiệt)
+            // Ưu tiên: alarm → value (cũ) → pre_alarm
+            double value;
+            double? warningValue = null;
+            if (root.TryGetProperty("alarm", out var alarmEl) && alarmEl.ValueKind == JsonValueKind.Number)
+            {
+                value = alarmEl.GetDouble();
+                if (root.TryGetProperty("pre_alarm", out var preEl) && preEl.ValueKind == JsonValueKind.Number)
+                    warningValue = preEl.GetDouble();
+            }
+            else if (root.TryGetProperty("value", out var valEl))
+            {
+                value = valEl.GetDouble();
+                if (root.TryGetProperty("pre_alarm", out var preEl2) && preEl2.ValueKind == JsonValueKind.Number)
+                    warningValue = preEl2.GetDouble();
+            }
+            else if (root.TryGetProperty("pre_alarm", out var preOnlyEl) && preOnlyEl.ValueKind == JsonValueKind.Number)
+            {
+                value = preOnlyEl.GetDouble();
+            }
+            else return null;
+
             var clearValue = root.TryGetProperty("clearValue", out var cvEl)
                 ? cvEl.GetDouble()
                 : (op is ">" or ">=" ? value - 3.0 : value + 3.0);
@@ -74,12 +93,12 @@ public static class RuleEvaluator
             var confirmReadings = root.TryGetProperty("confirmReadings", out var crEl)
                 ? crEl.GetInt32() : 1;
 
-            return (point, op, value, clearValue, cooldownMin, confirmReadings);
+            return (point, op, value, warningValue, clearValue, cooldownMin, confirmReadings);
         }
         catch { return null; }
     }
 
-    /// <summary>Parse JSON actions → level (warning | alarm)</summary>
+    /// <summary>Parse JSON actions → level (warning | alarm). "hybrid" → "alarm".</summary>
     public static string ParseAlertLevel(string actionsJson)
     {
         try
@@ -87,7 +106,10 @@ public static class RuleEvaluator
             var arr = JsonDocument.Parse(actionsJson).RootElement;
             foreach (var action in arr.EnumerateArray())
                 if (action.TryGetProperty("level", out var lvl))
-                    return lvl.GetString() ?? "warning";
+                {
+                    var l = lvl.GetString() ?? "warning";
+                    return l == "hybrid" ? "alarm" : l;
+                }
         }
         catch { }
         return "warning";

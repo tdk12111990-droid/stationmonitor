@@ -48,7 +48,6 @@ public class AlertsController : ControllerBase
         return Ok(new { success = true, message = "Đã gửi thông báo test tới SignalR", alert = testAlert });
     }
 
-    // GET /api/v1/alerts?status=open&from=2026-01-01&to=2026-12-31&limit=50
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] string? status,
@@ -75,7 +74,8 @@ public class AlertsController : ControllerBase
                 a.Message, a.Value,
                 a.DeviceId, a.RuleId,
                 a.TriggeredAt, a.AckedAt, a.ClosedAt,
-                a.AckNote
+                a.AckNote,
+                a.ImageUrl, a.VideoUrl, a.ThumbnailUrl
             })
             .ToListAsync();
 
@@ -100,6 +100,7 @@ public class AlertsController : ControllerBase
             alert.Message, alert.Value,
             alert.DeviceId, alert.RuleId,
             alert.TriggeredAt, alert.AckedAt, alert.ClosedAt, alert.AckNote,
+            alert.ImageUrl, alert.VideoUrl, alert.ThumbnailUrl,
             History = history
         });
     }
@@ -130,6 +131,7 @@ public class AlertsController : ControllerBase
         });
 
         await _db.SaveChangesAsync();
+        await _notifier.SendAlertUpdatedAsync(new { alert.Id, alert.Status, alert.DeviceId, alert.Level });
         return Ok(new { alert.Id, alert.Status, alert.AckedAt });
     }
 
@@ -155,6 +157,7 @@ public class AlertsController : ControllerBase
         });
 
         await _db.SaveChangesAsync();
+        await _notifier.SendAlertUpdatedAsync(new { alert.Id, alert.Status, alert.DeviceId, alert.Level });
         return Ok(new { alert.Id, alert.Status, alert.ClosedAt });
     }
 

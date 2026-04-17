@@ -101,11 +101,17 @@ namespace StationMonitor.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("ThumbnailUrl")
+                        .HasColumnType("text");
+
                     b.Property<DateTime>("TriggeredAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<double?>("Value")
                         .HasColumnType("double precision");
+
+                    b.Property<string>("VideoUrl")
+                        .HasColumnType("text");
 
                     b.HasKey("Id");
 
@@ -189,13 +195,25 @@ namespace StationMonitor.Data.Migrations
                     b.Property<Guid?>("AlertId")
                         .HasColumnType("uuid");
 
+                    b.Property<float?>("BboxHeight")
+                        .HasColumnType("real");
+
+                    b.Property<float?>("BboxWidth")
+                        .HasColumnType("real");
+
+                    b.Property<float?>("BboxX")
+                        .HasColumnType("real");
+
+                    b.Property<float?>("BboxY")
+                        .HasColumnType("real");
+
                     b.Property<string>("BoundingBoxes")
                         .HasColumnType("jsonb");
 
                     b.Property<Guid>("CameraId")
                         .HasColumnType("uuid");
 
-                    b.Property<float?>("Confidence")
+                    b.Property<float>("Confidence")
                         .HasColumnType("real");
 
                     b.Property<DateTime>("DetectedAt")
@@ -205,23 +223,41 @@ namespace StationMonitor.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("Label")
+                        .HasColumnType("text");
+
                     b.Property<float?>("MaxTemp")
                         .HasColumnType("real");
+
+                    b.Property<Guid?>("MediaFileId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Message")
+                        .HasColumnType("text");
 
                     b.Property<string>("Metadata")
                         .HasColumnType("jsonb");
 
-                    b.Property<Guid?>("ModelVersionId")
-                        .HasColumnType("uuid");
+                    b.Property<string>("Severity")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasColumnType("text");
 
                     b.Property<Guid>("StationId")
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AlertId");
+
                     b.HasIndex("CameraId");
 
-                    b.HasIndex("ModelVersionId");
+                    b.HasIndex("MediaFileId");
+
+                    b.HasIndex("StationId");
 
                     b.ToTable("DetectionEvents");
                 });
@@ -349,50 +385,22 @@ namespace StationMonitor.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
-                    b.Property<DateTime>("CapturedAt")
+                    b.Property<Guid>("CameraId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
-                    b.Property<Guid?>("DetectionId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid?>("DeviceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<int?>("DurationS")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("FilePath")
-                        .HasColumnType("text");
-
-                    b.Property<int?>("FileSizeKb")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("FileType")
+                    b.Property<string>("MimeType")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<string>("FileUrl")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Source")
+                    b.Property<string>("Path")
                         .IsRequired()
                         .HasColumnType("text");
 
-                    b.Property<Guid>("StationId")
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("Storage")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<bool>("Synced")
-                        .HasColumnType("boolean");
-
-                    b.Property<DateTime?>("SyncedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid?>("TakenBy")
-                        .HasColumnType("uuid");
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
 
                     b.HasKey("Id");
 
@@ -491,6 +499,9 @@ namespace StationMonitor.Data.Migrations
 
                     b.Property<string>("Name")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("RuleSet")
                         .HasColumnType("text");
 
                     b.Property<Guid>("StationId")
@@ -836,19 +847,33 @@ namespace StationMonitor.Data.Migrations
 
             modelBuilder.Entity("StationMonitor.Data.Entities.DetectionEvent", b =>
                 {
+                    b.HasOne("StationMonitor.Data.Entities.Alert", "Alert")
+                        .WithMany()
+                        .HasForeignKey("AlertId");
+
                     b.HasOne("StationMonitor.Data.Entities.Device", "Camera")
                         .WithMany()
                         .HasForeignKey("CameraId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
-                    b.HasOne("StationMonitor.Data.Entities.AiModelVersion", "ModelVersion")
+                    b.HasOne("StationMonitor.Data.Entities.MediaFile", "MediaFile")
                         .WithMany()
-                        .HasForeignKey("ModelVersionId");
+                        .HasForeignKey("MediaFileId");
+
+                    b.HasOne("StationMonitor.Data.Entities.Station", "Station")
+                        .WithMany()
+                        .HasForeignKey("StationId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Alert");
 
                     b.Navigation("Camera");
 
-                    b.Navigation("ModelVersion");
+                    b.Navigation("MediaFile");
+
+                    b.Navigation("Station");
                 });
 
             modelBuilder.Entity("StationMonitor.Data.Entities.Device", b =>

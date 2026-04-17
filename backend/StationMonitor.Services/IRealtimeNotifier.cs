@@ -10,5 +10,7 @@ public interface IRealtimeNotifier
 {
     Task SendSensorUpdateAsync(object payload);
     Task SendAlertAsync(object alert);
+    Task SendAlertUpdatedAsync(object alert);
     Task SendDeviceStatusAsync(Guid deviceId, string status);
+    Task SendCameraEventAsync(object evt);
 }

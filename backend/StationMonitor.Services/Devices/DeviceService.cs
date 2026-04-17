@@ -117,6 +117,7 @@ public class DeviceService
     /// <summary>
     /// Đăng ký camera stream với go2rtc API
     /// go2rtc sẽ kết nối RTSP và chuẩn bị stream cho frontend
+    /// Với Hikvision /Channels/101: tự động đăng ký thêm sub-stream /Channels/102
     /// </summary>
     public async Task RegisterCameraStreamAsync(Device device)
     {
@@ -133,6 +134,13 @@ public class DeviceService
         // Encode password để tránh ký tự đặc biệt trong URL (@, #, ...)
         var encodedPassword = Uri.EscapeDataString(password);
         var rtspUrl = $"rtsp://{username}:{encodedPassword}@{ip}:554{rtspPath}";
+
+        // Auto-derive sub-stream cho Hikvision: /Channels/101 → /Channels/102
+        var subRtspPath = DeriveHikvisionSubPath(rtspPath);
+        var subStreamId = subRtspPath != null ? streamId + "_sub" : null;
+        var subRtspUrl  = subRtspPath != null
+            ? $"rtsp://{username}:{encodedPassword}@{ip}:554{subRtspPath}"
+            : null;
 
         try
         {
@@ -164,16 +172,21 @@ public class DeviceService
             }
             catch { /* go2rtc chưa sẵn sàng, bỏ qua */ }
 
-            // Bước 2: Thêm/cập nhật stream mới vào map
+            // Bước 2: Thêm/cập nhật main stream
             existingStreams[streamId] = rtspUrl;
+
+            // Bước 2b: Thêm sub-stream nếu Hikvision có /Channels/101
+            if (subStreamId != null && subRtspUrl != null)
+                existingStreams[subStreamId] = subRtspUrl;
 
             // Bước 3: PUT toàn bộ map → go2rtc sync lại tất cả
             var response = await client.PutAsJsonAsync(
                 $"{Go2RtcUrl}/api/streams",
                 existingStreams
             );
-            _logger.LogInformation("[go2rtc] Đăng ký stream {StreamId} → {Status} (tổng: {Count} streams)",
-                streamId, response.StatusCode, existingStreams.Count);
+            var subInfo = subStreamId != null ? $" + sub ({subStreamId})" : "";
+            _logger.LogInformation("[go2rtc] Đăng ký stream {StreamId}{SubInfo} → {Status} (tổng: {Count} streams)",
+                streamId, subInfo, response.StatusCode, existingStreams.Count);
         }
         catch (Exception ex)
         {
@@ -197,17 +210,27 @@ public class DeviceService
 
     /// <summary>
     /// Xóa camera stream khỏi go2rtc khi xóa thiết bị
+    /// Cũng xóa sub-stream nếu có
     /// </summary>
     public async Task UnregisterCameraStreamAsync(Device device)
     {
         var config = ParseConfig(device.Config);
         var streamId = config?.GetValueOrDefault("go2rtc_id")?.ToString()
                        ?? device.Id.ToString()[..8];
+        var rtspPath = config?.GetValueOrDefault("rtsp_path")?.ToString();
         try
         {
             var client = _http.CreateClient();
             await client.DeleteAsync($"{Go2RtcUrl}/api/streams?src={streamId}");
             _logger.LogInformation("[go2rtc] Đã xóa stream {StreamId}", streamId);
+
+            // Xóa sub-stream nếu camera có /Channels/101
+            if (rtspPath != null && DeriveHikvisionSubPath(rtspPath) != null)
+            {
+                var subStreamId = streamId + "_sub";
+                await client.DeleteAsync($"{Go2RtcUrl}/api/streams?src={subStreamId}");
+                _logger.LogInformation("[go2rtc] Đã xóa sub-stream {SubStreamId}", subStreamId);
+            }
         }
         catch (Exception ex)
         {
@@ -243,6 +266,23 @@ public class DeviceService
         if (await CheckPortAsync(ip, 554)) return "camera";
         if (await CheckPortAsync(ip, 502)) return "modbus_tcp";
         return "unknown";
+    }
+
+    /// <summary>
+    /// Tự sinh sub-stream path cho Hikvision:
+    ///   /Streaming/Channels/101 → /Streaming/Channels/102
+    ///   /Streaming/Channels/201 → null (thermal, không có sub)
+    /// </summary>
+    private static string? DeriveHikvisionSubPath(string rtspPath)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(
+            rtspPath, @"^(.*?/Channels/)(\d+)(.*)$",
+            System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        if (!m.Success) return null;
+        if (!int.TryParse(m.Groups[2].Value, out var ch)) return null;
+        if (ch % 100 != 1) return null;  // Chỉ main stream (x01: 101, 301, ...)
+        if (ch / 100 >= 2) return null;  // Bỏ thermal channel 201+
+        return m.Groups[1].Value + (ch + 1) + m.Groups[3].Value;
     }
 }
 

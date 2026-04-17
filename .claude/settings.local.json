@@ -31,7 +31,12 @@
       "Bash(grep -n \"^\\\\[Http\" /d/StationMonitor/backend/StationMonitor.Api/Controllers/*.cs)",
       "Bash(grep -l \"stationApi\\\\|MockDataService\" /d/StationMonitor/frontend/src/pages/*.ts)",
       "Bash(xargs -I {} bash -c 'echo \"=== {} ===\"; grep \"stationApi\\\\|MockDataService\\\\|mock\\\\|stub\" \"{}\" | head -3')",
-      "Bash(grep -h \"^\\\\s*\\\\[Http\" /d/StationMonitor/backend/StationMonitor.Api/Controllers/*.cs)"
+      "Bash(grep -h \"^\\\\s*\\\\[Http\" /d/StationMonitor/backend/StationMonitor.Api/Controllers/*.cs)",
+      "Bash(rm \"D:/StationMonitor/frontend/src/pages/AiDebugPage.ts\")",
+      "Bash(rm \"D:/StationMonitor/frontend/src/pages/DetectionsPage.ts\")",
+      "Bash(dotnet ef:*)",
+      "Bash(/c/Program Files/PostgreSQL/16/bin/psql.exe:*)",
+      "Bash(cmd:*)"
     ]
   }
 }

@@ -1,415 +1,863 @@
-// Realtime Monitor Page
+// ============================================================
+// RealtimeMonitorPage — NVR-style grid + integrated events panel
+// Layout: 1×1 / 2×2 / 3×3  |  Double-click → fullscreen + cam events
+// Panel: collapsible, filter by type + date, realtime via SignalR
+// ============================================================
+
 import { stationApi, CameraDevice } from '@/services/StationApiService';
 import * as signalR from '@microsoft/signalr';
-import { GO2RTC_URL } from '@/utils/env';
+import { GO2RTC_URL, API_BASE_URL } from '@/utils/env';
+
+type Layout = 'l1' | 'l4' | 'l9';
+
+interface DetectionEvent {
+  id: string;
+  cameraId: string;
+  cameraName: string | null;
+  detectionType: string;
+  detectedAt: string;
+  maxTemp: number | null;
+  affectedZone: string | null;
+  alertId: string | null;
+  metadata: string | null;
+}
+
+interface EvtMeta { snapshotUrl?: string; videoUrl?: string; }
+
+const EVT_CFG: Record<string, { label: string; icon: string; color: string }> = {
+  thermal_hotspot:   { label: 'Nhiệt bất thường', icon: '🌡️', color: '#ef4444' },
+  fire:              { label: 'Cháy',              icon: '🔥', color: '#ef4444' },
+  smoke:             { label: 'Khói',              icon: '💨', color: '#f97316' },
+  intrusion:         { label: 'Xâm nhập',          icon: '🚨', color: '#f59e0b' },
+  partial_discharge: { label: 'Phóng điện',        icon: '⚡', color: '#a855f7' },
+  tampering:         { label: 'Che camera',         icon: '🎭', color: '#f59e0b' },
+  video_loss:        { label: 'Mất tín hiệu',      icon: '📵', color: '#64748b' },
+  motion:            { label: 'Chuyển động',        icon: '👁️', color: '#3b82f6' },
+  storage_error:     { label: 'Lỗi lưu trữ',       icon: '💾', color: '#f59e0b' },
+};
 
 export class RealtimeMonitorPage {
-  private logs: any[] = [];
   private cameras: CameraDevice[] = [];
+  private detections: DetectionEvent[] = [];
   private hubConnection: signalR.HubConnection | null = null;
-
-  private currentModalCamId: string | null = null;
-  private aiInterval: any = null;
+  private clockInterval?: ReturnType<typeof setInterval>;
+  private currentLayout: Layout = 'l4';
+  private expandedId: string | null = null;
+  private panelCamFilter = '';
+  private panelTypeFilter = '';
+  private panelDateFilter = '';
 
   render(): string {
-    const cameras = this.cameras;
+    return `
+    <style>
+      #pageContent { padding:0!important; overflow:hidden!important; height:100%!important; }
+      .rtm-page { display:flex; flex-direction:column; height:100%; background:#000; overflow:hidden; }
+
+      /* ── Toolbar ── */
+      .rtm-bar {
+        height:44px; background:#0b0f18; border-bottom:1px solid #131c2a;
+        display:flex; align-items:center; padding:0 14px; gap:10px;
+        flex-shrink:0; z-index:30;
+      }
+      .rtm-title { font-size:10px; font-weight:900; color:#1a2744; letter-spacing:2px; text-transform:uppercase; }
+      .rtm-sep   { width:1px; height:22px; background:#131c2a; flex-shrink:0; }
+
+      .nvr-lb {
+        background:transparent; border:1px solid #131c2a; color:#2d4060;
+        width:30px; height:30px; border-radius:5px; cursor:pointer;
+        display:flex; align-items:center; justify-content:center;
+        transition:all .15s; padding:0; flex-shrink:0;
+      }
+      .nvr-lb.active { background:rgba(59,130,246,.18); border-color:#3b82f6; color:#3b82f6; }
+      .nvr-lb:hover:not(.active) { border-color:#1e2d40; color:#475569; }
+
+      .nvr-sel {
+        background:#0b0f18; border:1px solid #131c2a; color:#475569;
+        padding:0 8px; border-radius:4px; font-size:11px; height:28px; max-width:180px;
+      }
+      .nvr-sel:focus { outline:none; border-color:#3b82f6; }
+
+      #nvrBackBtn {
+        display:none; align-items:center; gap:6px;
+        background:rgba(59,130,246,.15); border:1px solid #3b82f6; color:#3b82f6;
+        padding:0 12px; height:28px; border-radius:5px; font-size:11px; font-weight:700;
+        cursor:pointer; transition:background .15s; white-space:nowrap;
+      }
+      #nvrBackBtn:hover { background:rgba(59,130,246,.3); }
+      #nvrBackBtn.visible { display:flex; }
+      #nvrFsCam { display:none; font-size:11px; font-weight:700; color:#3b82f6; white-space:nowrap; }
+
+      .nvr-stats { margin-left:auto; display:flex; gap:16px; align-items:center; }
+      .nvr-stat  { font-size:11px; color:#1a2744; display:flex; gap:5px; align-items:center; }
+      .nvr-stat b { font-weight:800; }
+      .nvr-clock-txt { font-size:12px; font-weight:700; font-family:'Courier New',monospace; color:#1a2744; letter-spacing:1px; }
+
+      /* ── Main area ── */
+      .rtm-main { flex:1; display:flex; overflow:hidden; min-height:0; }
+
+      /* ── Camera grid ── */
+      .nvr-wrap { flex:1; min-width:0; overflow:hidden; background:#000; position:relative; padding:2px; box-sizing:border-box; }
+      .nvr-grid { display:grid; gap:2px; height:100%; width:100%; position:relative; box-sizing:border-box; }
+      .nvr-grid.l1 { grid-template-columns:1fr; grid-template-rows:1fr; }
+      .nvr-grid.l4 { grid-template-columns:1fr 1fr; grid-template-rows:1fr 1fr; }
+      .nvr-grid.l9 { grid-template-columns:repeat(3,1fr); grid-template-rows:repeat(3,1fr); }
+
+      .nvr-cell { position:relative; background:#070a10; overflow:hidden; cursor:pointer; user-select:none; transition:box-shadow .12s; }
+      .nvr-cell:hover { box-shadow:inset 0 0 0 1px #1e3050; }
+      .nvr-cell.expanded { position:absolute!important; inset:0!important; z-index:20; box-shadow:0 0 0 2px #3b82f6!important; }
+      .nvr-cell iframe { width:100%; height:100%; border:none; pointer-events:none; display:block; background:#000; }
+
+      /* No signal */
+      .nvr-nosig { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; pointer-events:none; }
+      .nvr-nosig-ico { font-size:1.8rem; opacity:.1; }
+      .nvr-nosig-txt { font-size:9px; font-weight:900; color:#131c2a; letter-spacing:3px; text-transform:uppercase; }
+      .nvr-ch { position:absolute; top:8px; left:10px; font-size:10px; font-weight:700; color:#131c2a; pointer-events:none; }
+
+      /* HUD top (on hover) */
+      .nvr-hud-t { position:absolute; top:0; left:0; right:0; padding:7px 10px 20px; background:linear-gradient(180deg,rgba(0,0,0,.78) 0%,transparent 100%); display:flex; justify-content:space-between; align-items:flex-start; pointer-events:none; z-index:5; opacity:0; transition:opacity .2s; }
+      .nvr-cam-info { display:flex; align-items:center; gap:6px; min-width:0; }
+      .nvr-dot { width:7px; height:7px; border-radius:50%; flex-shrink:0; transition:background .3s,box-shadow .3s; }
+      .nvr-dot.online  { background:#10b981; box-shadow:0 0 6px #10b981; }
+      .nvr-dot.offline { background:#ef4444; box-shadow:0 0 6px #ef4444; }
+      .nvr-dot.unknown { background:#334155; }
+      .nvr-cname { font-size:11px; font-weight:700; color:rgba(255,255,255,.82); text-shadow:0 1px 4px rgba(0,0,0,.9); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:160px; }
+      .nvr-rec { display:flex; align-items:center; gap:3px; font-size:9px; font-weight:900; color:#ef4444; letter-spacing:1px; flex-shrink:0; }
+      .nvr-recdot { width:6px; height:6px; border-radius:50%; background:#ef4444; animation:nvr-blink 1.2s infinite; }
+      @keyframes nvr-blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+      /* HUD bottom (on hover) */
+      .nvr-hud-b { position:absolute; bottom:0; left:0; right:0; padding:18px 10px 7px; background:linear-gradient(0deg,rgba(0,0,0,.74) 0%,transparent 100%); display:flex; justify-content:space-between; align-items:flex-end; z-index:5; opacity:0; transition:opacity .2s; pointer-events:none; }
+      .nvr-cell:hover .nvr-hud-t, .nvr-cell:hover .nvr-hud-b { opacity:1; }
+      .nvr-ts   { font-size:10px; font-weight:500; color:rgba(255,255,255,.45); font-family:'Courier New',monospace; }
+      .nvr-acts { display:flex; gap:4px; pointer-events:all; }
+      .nvr-abtn { background:rgba(0,0,0,.6); border:1px solid rgba(255,255,255,.15); color:rgba(255,255,255,.7); width:26px; height:26px; border-radius:4px; font-size:12px; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:all .15s; }
+      .nvr-abtn:hover { background:rgba(59,130,246,.45); border-color:#3b82f6; color:#fff; }
+
+      /* ── Events Panel ── */
+      .nvr-ep { display:flex; width:300px; flex-shrink:0; background:#0b0f18; border-left:1px solid #131c2a; overflow:hidden; transition:width .25s ease; position:relative; }
+      .nvr-ep.collapsed { width:28px; }
+
+      /* Vertical toggle tab */
+      .nvr-ep-tab { width:28px; flex-shrink:0; background:transparent; border:none; border-right:1px solid #131c2a; color:#1e3050; cursor:pointer; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; padding:0; transition:all .15s; }
+      .nvr-ep-tab:hover { color:#3b82f6; background:rgba(59,130,246,.06); }
+      .nvr-ep-tab-arrow { font-size:9px; transition:transform .25s; line-height:1; }
+      .nvr-ep.collapsed .nvr-ep-tab-arrow { transform:rotate(180deg); }
+      .nvr-ep-tab-label { font-size:8px; font-weight:900; letter-spacing:1.5px; writing-mode:vertical-rl; transform:rotate(180deg); opacity:.4; color:inherit; }
+
+      /* Panel body */
+      .nvr-ep-body { flex:1; display:flex; flex-direction:column; overflow:hidden; min-width:272px; }
+
+      /* Panel header */
+      .nvr-ep-hdr { padding:10px 12px 8px; border-bottom:1px solid #131c2a; flex-shrink:0; }
+      .nvr-ep-hdr-row { display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+      .nvr-ep-title { font-size:10px; font-weight:900; color:#2d4060; letter-spacing:1.5px; text-transform:uppercase; }
+      .nvr-ep-cnt { background:rgba(59,130,246,.15); border:1px solid rgba(59,130,246,.3); color:#3b82f6; font-size:9px; font-weight:800; padding:1px 7px; border-radius:10px; }
+
+      /* Filters */
+      .nvr-ep-filters { display:flex; gap:5px; align-items:center; }
+      .nvr-ep-fsel { background:#0d1117; border:1px solid #1a2332; color:#475569; padding:3px 6px; border-radius:4px; font-size:10px; height:26px; flex:1; min-width:0; cursor:pointer; }
+      .nvr-ep-fdate { background:#0d1117; border:1px solid #1a2332; color:#475569; padding:3px 5px; border-radius:4px; font-size:10px; height:26px; width:100px; flex-shrink:0; }
+      .nvr-ep-fsel:focus,.nvr-ep-fdate:focus { outline:none; border-color:#3b82f6; }
+      .nvr-ep-rbtn { background:transparent; border:1px solid #1a2332; color:#334155; width:26px; height:26px; border-radius:4px; cursor:pointer; font-size:13px; display:flex; align-items:center; justify-content:center; flex-shrink:0; transition:all .15s; }
+      .nvr-ep-rbtn:hover { border-color:#3b82f6; color:#3b82f6; }
+
+      /* Events list */
+      .nvr-ep-list { flex:1; overflow-y:auto; padding:5px; }
+      .nvr-ep-list::-webkit-scrollbar { width:3px; }
+      .nvr-ep-list::-webkit-scrollbar-track { background:#0b0f18; }
+      .nvr-ep-list::-webkit-scrollbar-thumb { background:#1a2332; border-radius:2px; }
+
+      .nvr-evt { display:flex; gap:8px; padding:7px 7px; border-radius:6px; cursor:pointer; transition:background .12s; margin-bottom:3px; border:1px solid transparent; }
+      .nvr-evt:hover { background:#0f1620; border-color:#1a2332; }
+
+      .nvr-evt-thumb {
+        width:54px; height:38px; border-radius:4px; flex-shrink:0; overflow:hidden;
+        background:#0d1117; display:flex; align-items:center; justify-content:center; font-size:1.3rem;
+      }
+      .nvr-evt-thumb img { width:54px; height:38px; object-fit:cover; display:block; }
+
+      .nvr-evt-body { flex:1; min-width:0; display:flex; flex-direction:column; gap:2px; justify-content:center; }
+      .nvr-evt-badge { display:inline-flex; align-items:center; gap:4px; font-size:9px; font-weight:800; letter-spacing:.3px; }
+      .nvr-evt-cam  { font-size:9px; color:#334155; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+      .nvr-evt-time { font-size:9px; color:#1e3050; font-family:monospace; }
+      .nvr-evt-temp { font-size:10px; font-weight:800; color:#ef4444; }
+
+      .nvr-ep-empty { padding:40px 12px; text-align:center; color:#1e3050; font-size:11px; }
+      .nvr-ep-loading { padding:20px; text-align:center; color:#1e3050; font-size:11px; }
+
+      @keyframes nvr-flash { 0%{background:rgba(59,130,246,.14)} 100%{background:transparent} }
+      .nvr-evt.new { animation:nvr-flash .9s ease-out; }
+
+      /* Visual Alarm Pulse */
+      @keyframes nvr-alarm-pulse {
+        0% { box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.4); }
+        50% { box-shadow: inset 0 0 10px 4px rgba(239, 68, 68, 0.8); }
+        100% { box-shadow: inset 0 0 0 2px rgba(239, 68, 68, 0.4); }
+      }
+      .nvr-cell.alarm-triggered {
+        animation: nvr-alarm-pulse 1.5s infinite;
+        z-index: 10;
+        border: 1px solid #ef4444;
+      }
+
+      /* ── Toast Notifications ── */
+      .nvr-toast-container {
+        position: fixed; bottom: 20px; left: 20px;
+        display: flex; flex-direction: column; gap: 10px; z-index: 10000;
+      }
+      .nvr-alert-toast {
+        background: #ef4444; color: white; padding: 12px 16px; border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5); font-size: 0.85rem; font-weight: 700;
+        display: flex; align-items: center; gap: 12px; min-width: 280px;
+        animation: toast-slide-in 0.3s ease-out; cursor: pointer;
+      }
+      @keyframes toast-slide-in { from { transform: translateX(-100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+      /* ── Lightbox Extended ── */
+      #nvrLB { display:none; position:fixed; inset:0; background:rgba(0,0,0,.92); z-index:9999; align-items:center; justify-content:center; }
+      #nvrLB.open { display:flex; }
+      #nvrLB .lb-content { max-width:92vw; max-height:90vh; position:relative; }
+      #nvrLB img, #nvrLB video { width:100%; height:100%; border-radius:8px; box-shadow:0 0 60px rgba(0,0,0,.8); }
+      #nvrLBClose { position:absolute; top:16px; right:20px; color:#fff; font-size:1.4rem; cursor:pointer; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; transition:background .15s; }
+      #nvrLBClose:hover { background:rgba(255,255,255,.2); }
+    </style>
+
+    <div class="rtm-page">
+      <!-- ── Toolbar ── -->
+      <div class="rtm-bar">
+        <span class="rtm-title">Camera Live</span>
+        <div class="rtm-sep"></div>
+
+        <!-- Layout: 1×1 -->
+        <button class="nvr-lb" data-layout="l1" title="1×1 — Một camera">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor"><rect width="13" height="13" rx="1.5"/></svg>
+        </button>
+        <!-- Layout: 2×2 -->
+        <button class="nvr-lb active" data-layout="l4" title="2×2 — Bốn camera">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+            <rect x="0"   y="0"   width="5.5" height="5.5" rx=".8"/>
+            <rect x="7.5" y="0"   width="5.5" height="5.5" rx=".8"/>
+            <rect x="0"   y="7.5" width="5.5" height="5.5" rx=".8"/>
+            <rect x="7.5" y="7.5" width="5.5" height="5.5" rx=".8"/>
+          </svg>
+        </button>
+        <!-- Layout: 3×3 -->
+        <button class="nvr-lb" data-layout="l9" title="3×3 — Chín camera">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="currentColor">
+            <rect x="0"    y="0"    width="3.2" height="3.2" rx=".5"/>
+            <rect x="4.9"  y="0"    width="3.2" height="3.2" rx=".5"/>
+            <rect x="9.8"  y="0"    width="3.2" height="3.2" rx=".5"/>
+            <rect x="0"    y="4.9"  width="3.2" height="3.2" rx=".5"/>
+            <rect x="4.9"  y="4.9"  width="3.2" height="3.2" rx=".5"/>
+            <rect x="9.8"  y="4.9"  width="3.2" height="3.2" rx=".5"/>
+            <rect x="0"    y="9.8"  width="3.2" height="3.2" rx=".5"/>
+            <rect x="4.9"  y="9.8"  width="3.2" height="3.2" rx=".5"/>
+            <rect x="9.8"  y="9.8"  width="3.2" height="3.2" rx=".5"/>
+          </svg>
+        </button>
+
+        <div class="rtm-sep"></div>
+        <select class="nvr-sel" id="nvrSel">
+          <option value="">Tất cả camera</option>
+        </select>
+
+        <button id="nvrBackBtn" title="Quay về lưới (ESC)">← Quay về lưới</button>
+        <span id="nvrFsCam"></span>
+
+        <div class="nvr-stats">
+          <div class="nvr-stat">
+            <span class="nvr-dot online" style="width:8px;height:8px;flex-shrink:0;"></span>
+            Online: <b id="nvrOnline" style="color:#10b981">—</b>
+          </div>
+          <span class="nvr-clock-txt" id="nvrClock">00:00:00</span>
+        </div>
+      </div>
+
+      <!-- ── Main area: grid + events panel ── -->
+      <div class="rtm-main">
+
+        <!-- Camera grid -->
+        <div class="nvr-wrap">
+          <div class="nvr-grid l4" id="nvrGrid"></div>
+        </div>
+
+        <!-- Events panel (collapsible) -->
+        <div class="nvr-ep" id="nvrEP">
+          <button class="nvr-ep-tab" id="nvrEPTab" title="Thu/mở nhật ký sự kiện">
+            <span class="nvr-ep-tab-arrow">◀</span>
+            <span class="nvr-ep-tab-label">NHẬT KÝ</span>
+          </button>
+          <div class="nvr-ep-body">
+            <div class="nvr-ep-hdr">
+              <div class="nvr-ep-hdr-row">
+                <span class="nvr-ep-title" id="nvrEPTitle">SỰ KIỆN CAM</span>
+                <span class="nvr-ep-cnt" id="nvrEPCnt">0</span>
+              </div>
+              <div class="nvr-ep-filters">
+                <select class="nvr-ep-fsel" id="nvrEPType">
+                  <option value="">Tất cả loại</option>
+                  ${Object.entries(EVT_CFG).map(([k, v]) =>
+                    `<option value="${k}">${v.icon} ${v.label}</option>`
+                  ).join('')}
+                </select>
+                <input type="date" class="nvr-ep-fdate" id="nvrEPDate" title="Lọc theo ngày">
+                <button class="nvr-ep-rbtn" id="nvrEPRefresh" title="Làm mới">↻</button>
+              </div>
+            </div>
+            <div class="nvr-ep-list" id="nvrEPList">
+              <div class="nvr-ep-loading">Đang tải...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Lightbox -->
+    <div id="nvrLB">
+      <span id="nvrLBClose">✕</span>
+      <div class="lb-content" id="nvrLBContent">
+        <!-- Render img or video dynamically -->
+      </div>
+    </div>
+    
+    <!-- Toasts -->
+    <div class="nvr-toast-container" id="nvrToastContainer"></div>`;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Lifecycle
+  // ════════════════════════════════════════════════════════════
+
+  async mount(): Promise<void> {
+    // Override page-content padding for full-height layout
+    const pc = document.getElementById('pageContent');
+    if (pc) { pc.style.padding = '0'; pc.style.overflow = 'hidden'; pc.style.height = '100%'; }
+
+    try { this.cameras = await stationApi.getCamerasFromFirstStation(); }
+    catch { this.cameras = []; }
+
+    this.renderGrid();
+    this.bindEvents();
+    this.loadDetections();
+    this.connectSignalR();
+    this.syncAlarmStates();
+    this.startClock();
+  }
+
+  destroy(): void {
+    if (this.clockInterval) clearInterval(this.clockInterval);
+    if (this.hubConnection) this.hubConnection.stop();
+    document.removeEventListener('keydown', this._onKey);
+    const pc = document.getElementById('pageContent');
+    if (pc) { pc.style.padding = ''; pc.style.overflow = ''; pc.style.height = ''; }
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Camera grid
+  // ════════════════════════════════════════════════════════════
+
+  private cellCount(): number {
+    return this.currentLayout === 'l1' ? 1 : this.currentLayout === 'l4' ? 4 : 9;
+  }
+
+  private renderGrid(override?: (CameraDevice | null)[]): void {
+    const grid = document.getElementById('nvrGrid');
+    if (!grid) return;
+
+    // Rebuild camera select
+    const sel = document.getElementById('nvrSel') as HTMLSelectElement | null;
+    if (sel) {
+      const prev = sel.value;
+      sel.innerHTML = `<option value="">Tất cả camera</option>` +
+        this.cameras.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+      sel.value = prev;
+    }
+
+    // Online count
+    const online = this.cameras.filter(c => (c.status as string) === 'online').length;
+    const onlineEl = document.getElementById('nvrOnline');
+    if (onlineEl) {
+      onlineEl.textContent = `${online}/${this.cameras.length}`;
+      onlineEl.style.color = online > 0 ? '#10b981' : '#ef4444';
+    }
+
+    const src = override ?? this.cameras;
+    let html = '';
+    for (let i = 0; i < this.cellCount(); i++) {
+      html += this.renderCell(src[i] ?? null, i + 1);
+    }
+    grid.innerHTML = html;
+  }
+
+  private renderCell(cam: CameraDevice | null, num: number, fullscreen = false): string {
+    const ch = String(num).padStart(2, '0');
+    if (!cam) {
+      return `
+      <div class="nvr-cell" data-cam-id="">
+        <div class="nvr-nosig">
+          <span class="nvr-nosig-ico">📷</span>
+          <span class="nvr-nosig-txt">No Signal</span>
+        </div>
+        <div class="nvr-ch">CH${ch}</div>
+      </div>`;
+    }
+
+    const cfg       = (cam as any).config ?? {};
+    const go2rtcId: string  = cfg.go2rtc_id ?? '';
+    if (!go2rtcId) {
+      // go2rtc_id chưa được cấu hình — hiện no signal
+      return `
+      <div class="nvr-cell" data-cam-id="${cam.id}">
+        <div class="nvr-nosig">
+          <span class="nvr-nosig-ico">⚙️</span>
+          <span class="nvr-nosig-txt">Chưa cấu hình stream</span>
+        </div>
+        <div class="nvr-ch">CH${ch} · ${cam.name}</div>
+      </div>`;
+    }
+    // Grid dùng _sub (nếu có cấu hình), nếu không thì fallback về luồng thường.
+    const subId: string  = cfg.go2rtc_sub_id ?? go2rtcId;
+    const mainId: string = cfg.go2rtc_main_id ?? go2rtcId;
+    const activeId       = fullscreen ? mainId : subId;
+    const status: string    = (cam.status as string) ?? 'unknown';
+
+    // mse: kết nối nhanh, ổn định hơn webrtc qua iframe
+    const streamUrl = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(activeId)}&mode=mse&controls=0`;
 
     return `
-    <div class="realtime-monitor-v2">
-      <!-- Toolbar -->
-      <div class="monitor-toolbar admin-card">
-        <div class="tool-group">
-          <span class="tool-label">🔍 LỌC CAMERA:</span>
-          <select id="camFilterSelect" class="form-select" style="min-width: 150px;">
-            <option value="ALL">Tất cả Camera</option>
-            ${cameras.map(c => `<option value="${c.id}">${c.name}</option>`).join('')}
-          </select>
+    <div class="nvr-cell" data-cam-id="${cam.id}" data-go2rtc="${go2rtcId}"
+         data-sub="${subId}" data-main="${mainId}" data-cam-name="${cam.name}">
+      <iframe src="${streamUrl}" id="nvr-frame-${cam.id}" allow="autoplay; camera; microphone"></iframe>
+      <div class="nvr-hud-t">
+        <div class="nvr-cam-info">
+          <span class="nvr-dot ${status}" id="nvr-dot-${cam.id}"></span>
+          <span class="nvr-cname">CH${ch} · ${cam.name}</span>
         </div>
-        <div style="flex: 1"></div>
-        <div class="status-summary">
-           <span class="stat-item"><b style="color: #10b981">${cameras.filter(c => (c as any).status === 'ONLINE').length}</b> Online</span>
-        </div>
+        <div class="nvr-rec"><span class="nvr-recdot"></span>REC</div>
       </div>
-
-      <div class="monitor-main-content">
-        <!-- Lưới Camera chính -->
-        <div class="camera-grid-section">
-          <div class="camera-grid-scroll-wrap">
-            <div class="camera-grid-v2">
-              ${cameras.map(d => {
-      const deviceId = d.id;
-      return `
-              <div class="cam-card-v2" data-cam-id="${deviceId}" data-cam-name="${d.name.toLowerCase()}">
-                <div class="cam-viewport" id="viewport-${deviceId}">
-                  <div class="cam-hud-top">
-                    <div class="cam-title-group">
-                      <span class="status-dot ${(d as any).status === 'ONLINE' ? 'dot-green' : 'dot-red'}"></span>
-                      <span class="cam-name">${d.name}</span>
-                    </div>
-                    <div class="cam-actions">
-                      <button title="Xem chỉ số" class="cam-btn-hud" onclick="router.navigate('analytics', { deviceId: '${deviceId}' })">📈</button>
-                      <button title="Chụp ảnh" class="cam-btn-hud btn-capture">📸</button>
-                      <button title="Phóng to & Xem lại" class="cam-btn-hud btn-expand-live" data-id="${deviceId}">⛶</button>
-                    </div>
-                  </div>
-
-                  <div class="cam-overlay-container" id="ai-overlay-${deviceId}">
-                    <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">AI ACTIVE</span></div>
-                  </div>
-                  <div class="breaker-ai-panel" id="breaker-panel-${deviceId}" style="display:none;"></div>
-                  <div class="real-stream-container">
-                    <iframe 
-                      src="${GO2RTC_URL}/stream.html?src=${deviceId}&mode=mse&controls=0"
-                      style="width:100%; height:100%; border:none; pointer-events: none;" 
-                      id="hik-rtc-frame-${deviceId}">
-                    </iframe>
-                  </div>
-                </div>
-              </div>`;
-    }).join('')}
-            </div>
-          </div>
-
-          <div class="camera-captures-bottom-section" id="bottomCaptures">
-            <button id="capturesToggleBtnBottom" class="sidebar-edge-toggle-bottom">∨</button>
-            <div class="sidebar-content-wrapper-bottom">
-              <div class="logs-header-bottom">
-                  <span class="logs-title-bottom">ẢNH GẦN ĐÂY</span>
-              </div>
-              <div id="primaryRecentCaptures" class="captures-bottom-list">
-                <div style="padding: 10px; text-align: center; color: #94a3b8; font-size: 11px; font-style: italic;">
-                  Bạn hãy chụp một vài bức ảnh để thấy kết quả tại đây...
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="camera-logs-section" id="sidebarLogs">
-          <button id="sidebarToggleBtn" class="sidebar-edge-toggle">›</button>
-          
-          <div class="sidebar-content-wrapper">
-            <div class="logs-header">
-              <span class="logs-title">NHẬT KÝ CHI TIẾT</span>
-              <select id="sideLogFilter" class="form-select-sm">
-                <option value="ALL">Tất cả sự kiện</option>
-                <option value="INTRUDER">Người xâm nhập</option>
-                <option value="PPE">An toàn PPE</option>
-                <option value="CURFEW">Giờ giới nghiêm</option>
-                <option value="BREAKER">Máy cắt</option>
-                <option value="THERMAL">Nhiệt độ</option>
-              </select>
-            </div>
-            <div class="logs-list-wrapper">
-              ${this.logs.map(log => `
-              <div class="cam-log-item forensic-log-item-light" 
-                   data-ai-type="${log.type}" data-cam-id="${log.device_id}" data-video="${log.video || ''}">
-                <div style="flex: 0 0 60px;">
-                  <img src="${log.img}" style="width: 60px; height: 40px; border-radius: 4px; object-fit: cover; border: 1px solid #e2e8f0;">
-                </div>
-                <div style="flex: 1;">
-                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                    <span style="font-size: 9px; font-weight: 800; color: ${log.level === 'crit' ? '#ef4444' : '#f59e0b'}; text-transform: uppercase;">${log.type}</span>
-                    <span style="font-size: 9px; color: #94a3b8;">${log.time}</span>
-                  </div>
-                  <div style="font-size: 11px; font-weight: 700; color: #1e293b; margin-bottom: 2px;">${log.msg}</div>
-                  <div style="font-size: 9px; color: #0284c7; font-weight: 600;">▶ Nhấn để xem lại</div>
-                </div>
-              </div>`).join('')}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Modal -->
-      <div id="cameraLiveModal" class="modal-overlay">
-        <div class="modal-content" style="width: 98%; max-width: 1600px; height: 95vh; background: rgba(0, 0, 0, 0.4); backdrop-filter: blur(20px); display:flex; flex-direction:column; border: 1px solid rgba(255, 255, 255, 0.15); overflow:hidden; box-shadow: 0 0 100px rgba(0,0,0,0.5);">
-           <div class="modal-header" style="background: rgba(255, 255, 255, 0.03); padding: 12px 24px; display:flex; justify-content:space-between; align-items:center; border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
-              <div style="display:flex; align-items:center; gap: 20px;">
-                 <h3 id="cameraLiveTitle" style="color: #fff; font-size: 1.1rem; margin: 0; font-weight: 800; letter-spacing: 1px; text-shadow: 0 2px 10px rgba(0,0,0,0.3);">CHI TIẾT CAMERA HỆ THỐNG</h3>
-                 <div id="monitorModeBadge" style="background: rgba(16, 185, 129, 0.8); color: white; padding: 4px 14px; border-radius: 20px; font-size: 11px; font-weight: 800; box-shadow: 0 2px 10px rgba(16,185,129,0.4);">🔴 LIVE</div>
-              </div>
-              <div style="display:flex; gap: 15px; align-items:center;">
-                 <button id="btnReturnToLive" class="btn-industrial btn-sm" style="display:none; background: #10b981; color: white; border:none; padding: 6px 18px; font-size: 11px; border-radius: 6px; cursor: pointer;">QUAY LẠI LIVE</button>
-                 <button id="cameraLiveClose" style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); width: 36px; height: 36px; border-radius: 50%; font-size: 1rem; color: #fff; cursor: pointer; display:flex; align-items:center; justify-content:center; transition: all 0.2s;">✕</button>
-              </div>
-           </div>
-           
-           <div style="flex: 1; display: flex; overflow: hidden; background: transparent; position: relative;">
-              <div style="flex: 1; background: #000; position: relative; display: flex; align-items: center; justify-content: center; height: 100%;">
-                 <div id="modalVideoContainer" style="width:100%; height:100%; background: #000;"></div>
-                 <video id="playbackVideo" style="display:none; width:100%; height:100%; object-fit: contain; background: black; z-index: 5;" controls></video>
-              </div>
-
-              <div id="modalSidebar" style="width: 320px; min-width: 320px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(15px); display: flex; flex-direction: column; border-left: 1px solid rgba(255, 255, 255, 0.1); z-index: 100; transition: margin-right 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative;">
-                 <button id="modalSidebarToggle" title="Đóng/Mở Nhật ký" style="position: absolute; left: -24px; top: 50%; transform: translateY(-50%); width: 24px; height: 70px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(5px); color: white; border: 1px solid rgba(255,255,255,0.1); border-right: none; border-radius: 10px 0 0 10px; cursor: pointer; font-size: 14px; display:flex; align-items:center; justify-content:center; z-index: 101;">‹</button>
-                 
-                 <div style="padding: 15px; background: rgba(255, 255, 255, 0.05); border-bottom: 1px solid rgba(255, 255, 255, 0.08); display:flex; justify-content:space-between; align-items:center;">
-                    <span style="font-size: 10px; font-weight: 900; color: #fff; letter-spacing: 1px; opacity: 0.8;">NHẬT KÝ AI PHÂN TÍCH</span>
-                    <span id="modalLogCount" style="font-size: 9px; background: rgba(255,255,255,0.1); color: #fff; padding: 2px 8px; border-radius: 10px;">0 sự kiện</span>
-                 </div>
-                 <div id="modalCameraLogsGroup" style="flex: 1; overflow-y: auto; padding: 10px;"></div>
-              </div>
-           </div>
-
-           <div id="modalShelf" style="height: 120px; background: rgba(15, 23, 42, 0.7); backdrop-filter: blur(15px); border-top: 1px solid rgba(255, 255, 255, 0.1); display: flex; align-items: center; padding: 0 24px; gap: 20px; z-index: 90; transition: margin-bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1); position: relative;">
-              <button id="modalShelfToggle" title="Đóng/Mở Ảnh chụp" style="position: absolute; top: -20px; left: 50%; transform: translateX(-50%); width: 60px; height: 20px; background: rgba(15, 23, 42, 0.8); backdrop-filter: blur(5px); border: 1px solid rgba(255, 255, 255, 0.1); border-bottom: none; border-radius: 10px 10px 0 0; cursor: pointer; font-size: 12px; color: #fff; display:flex; align-items:center; justify-content:center; z-index: 91;">∨</button>
-              
-              <div style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; font-weight: 900; color: #fff; letter-spacing: 2px; border-left: 4px solid #0ea5e9; padding-left: 10px; height: 50px; opacity: 0.7;">ẢNH TRÍ TUỆ NHÂN TẠO</div>
-              <div id="recentCapturesContainer" style="display: flex; gap: 15px; align-items: center; flex: 1; overflow-x: auto; padding: 5px 0;">
-                  <span style="font-size: 11px; color: rgba(255,255,255,0.4); font-style: italic;">Đang đồng bộ hóa kho ảnh từ biên...</span>
-              </div>
-           </div>
+      <div class="nvr-hud-b">
+        <span class="nvr-ts" id="nvr-ts-${cam.id}"></span>
+        <div class="nvr-acts">
+          <button class="nvr-abtn btn-snap" data-src="${activeId}" title="Chụp ảnh">📸</button>
+          <button class="nvr-abtn btn-full" data-id="${cam.id}" data-name="${cam.name}" title="Xem toàn màn hình (double-click)">⛶</button>
         </div>
       </div>
     </div>`;
   }
 
-  mount(): void {
-    this.loadCamerasAndConnect();
-    this.startAISimulation();
-    this._realMount();
-  }
+  // ════════════════════════════════════════════════════════════
+  // Events panel
+  // ════════════════════════════════════════════════════════════
 
-  private async loadCamerasAndConnect(): Promise<void> {
+  private async loadDetections(): Promise<void> {
+    const list = document.getElementById('nvrEPList');
+    if (list) list.innerHTML = `<div class="nvr-ep-loading">Đang tải...</div>`;
     try {
-      this.cameras = await stationApi.getCamerasFromFirstStation();
-    } catch (err) {
-      console.warn('[RealtimeMonitor] Không load được camera từ API, dùng danh sách rỗng', err);
-      this.cameras = [];
+      const params = new URLSearchParams({ limit: '80' });
+      if (this.panelCamFilter)  params.set('deviceId', this.panelCamFilter);
+      if (this.panelTypeFilter) params.set('type', this.panelTypeFilter);
+      if (this.panelDateFilter) {
+        params.set('from', new Date(this.panelDateFilter).toISOString());
+        params.set('to',   new Date(this.panelDateFilter + 'T23:59:59').toISOString());
+      }
+      this.detections = await stationApi.getDetections(params.toString());
+    } catch {
+      this.detections = [];
     }
-    this.renderCameraGrid();
-    this.connectSignalR();
+    this.renderDetections();
   }
 
-  private renderCameraGrid(): void {
-    const grid = document.querySelector('.camera-grid-v2');
-    const filterSelect = document.getElementById('camFilterSelect') as HTMLSelectElement;
-    if (!grid) return;
+  private renderDetections(): void {
+    const list = document.getElementById('nvrEPList');
+    const cnt  = document.getElementById('nvrEPCnt');
+    if (!list) return;
 
-    if (filterSelect) {
-      filterSelect.innerHTML = `<option value="ALL">Tất cả Camera</option>` +
-        this.cameras.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    if (cnt) cnt.textContent = String(this.detections.length);
+
+    if (!this.detections.length) {
+      list.innerHTML = `<div class="nvr-ep-empty">Chưa có sự kiện nào</div>`;
+      return;
     }
+    list.innerHTML = this.detections.map(e => this.evtCardHtml(e, false)).join('');
+  }
 
-    const onlineCount = this.cameras.filter(c => c.status === 'online').length;
-    const statEl = document.querySelector('.status-summary .stat-item b');
-    if (statEl) statEl.textContent = String(onlineCount);
+  private evtCardHtml(e: DetectionEvent, isNew: boolean): string {
+    const cfg  = EVT_CFG[e.detectionType] ?? { label: e.detectionType, icon: '📷', color: '#64748b' };
+    const meta: EvtMeta = (() => {
+      try { return e.metadata ? JSON.parse(e.metadata) : {}; } catch { return {}; }
+    })();
+    const snap    = meta.snapshotUrl ? `${API_BASE_URL}${meta.snapshotUrl}` : '';
+    const time    = new Date(e.detectedAt).toLocaleString('vi-VN', {
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      day: '2-digit', month: '2-digit',
+    });
+    const camName = e.cameraName ?? 'Camera';
 
-    let html = '';
+    const vidUrl = meta.videoUrl ? `${API_BASE_URL}${meta.videoUrl}` : '';
 
-    // Render data thực từ API
-    html += this.cameras.map((d, idx) => {
-      const go2rtcId = d.config?.go2rtc_id ?? d.id;
-      let camName = d.name;
-      let aiLabel = "LIVE VIEWING";
-      let streamContent = `
-              <iframe
-                src="${GO2RTC_URL}/stream.html?src=${go2rtcId}&mode=mse&controls=0"
-                style="width:100%;height:100%;border:none;pointer-events:none;display:block;"
-                id="hik-rtc-frame-${d.id}">
-              </iframe>`;
+    return `
+    <div class="nvr-evt${isNew ? ' new' : ''}" data-snap="${snap}" data-video="${vidUrl}" title="${cfg.label} — ${camName}">
+      <div class="nvr-evt-thumb">
+        ${snap
+          ? `<img src="${snap}" alt="" loading="lazy" onerror="this.parentElement.textContent='${cfg.icon}'">`
+          : cfg.icon}
+        ${vidUrl ? `<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);border-radius:2px;padding:1px 3px;font-size:8px;">📹</div>` : ''}
+      </div>
+      <div class="nvr-evt-body">
+        <span class="nvr-evt-badge" style="color:${cfg.color}">${cfg.icon} ${cfg.label}</span>
+        <span class="nvr-evt-cam">📷 ${camName}</span>
+        ${e.maxTemp != null ? `<span class="nvr-evt-temp">🌡 ${e.maxTemp.toFixed(1)}°C</span>` : ''}
+        <span class="nvr-evt-time">${time}</span>
+      </div>
+    </div>`;
+  }
 
-      if (idx === 3) {
-        camName = "Camera Quét Nhiệt (Thermal)";
-        aiLabel = "THERMAL SCAN";
-        streamContent = `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`;
+  private prependDetection(evt: DetectionEvent): void {
+    if (this.panelCamFilter  && evt.cameraId       !== this.panelCamFilter)  return;
+    if (this.panelTypeFilter && evt.detectionType  !== this.panelTypeFilter) return;
+
+    this.detections.unshift(evt);
+    const cnt  = document.getElementById('nvrEPCnt');
+    const list = document.getElementById('nvrEPList');
+    if (!list) return;
+
+    if (cnt) cnt.textContent = String(this.detections.length);
+    list.querySelector('.nvr-ep-empty')?.remove();
+
+    const div = document.createElement('div');
+    div.innerHTML = this.evtCardHtml(evt, true);
+    const card = div.firstElementChild as HTMLElement;
+    
+    // Gán dataset cho thẻ vừa tạo để lightbox có thể đọc
+    try {
+      const m: any = JSON.parse(evt.metadata ?? '{}');
+      if (m.snapshotUrl) card.dataset.snap = `${API_BASE_URL}${m.snapshotUrl}`;
+      if (m.videoUrl)    card.dataset.video = `${API_BASE_URL}${m.videoUrl}`;
+    } catch {}
+
+    list.insertBefore(card, list.firstChild);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Expand / collapse camera
+  // ════════════════════════════════════════════════════════════
+
+  private toggleExpand(cell: HTMLElement, camId: string, camName: string): void {
+    if (this.expandedId === camId) {
+      this.collapseExpanded();
+    } else {
+      if (this.expandedId) this.collapseExpanded();
+
+      this.expandedId = camId;
+      cell.classList.add('expanded');
+      document.getElementById('nvrGrid')
+        ?.querySelectorAll<HTMLElement>('.nvr-cell:not(.expanded)')
+        .forEach(c => { c.style.display = 'none'; });
+
+      // Switch to main (high-res) stream for fullscreen
+      const mainId = cell.dataset.main ?? cell.dataset.go2rtc ?? '';
+      const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
+      if (iframe && mainId) {
+        iframe.src = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(mainId)}&mode=mse&controls=0`;
       }
 
-      return `
-        <div class="cam-card-v2" data-cam-id="${d.id}" data-go2rtc-id="${go2rtcId}" data-cam-name="${d.name.toLowerCase()}">
-          <div class="cam-viewport" id="viewport-${d.id}">
-            <div class="cam-hud-top">
-              <div class="cam-title-group">
-                <span class="status-dot ${d.status === 'online' ? 'dot-green' : 'dot-red'}"></span>
-                <span class="cam-name">${camName}</span>
-              </div>
-              <div class="cam-actions">
-                <button title="Chụp ảnh" class="cam-btn-hud btn-capture" data-go2rtc="${go2rtcId}">📸</button>
-                <button title="Phóng to" class="cam-btn-hud btn-expand-live" data-id="${d.id}" data-go2rtc="${go2rtcId}">⛶</button>
-              </div>
-            </div>
-            <div class="cam-overlay-container" id="ai-overlay-${d.id}">
-              <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">${aiLabel}</span></div>
-            </div>
-            <div class="real-stream-container" style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;background:#000;">
-              ${streamContent}
-            </div>
-          </div>
-        </div>`;
-    }).join('');
+      // Toolbar: show back + camera name
+      document.getElementById('nvrBackBtn')?.classList.add('visible');
+      const fsCam = document.getElementById('nvrFsCam');
+      if (fsCam) { fsCam.textContent = camName; fsCam.style.display = 'block'; }
 
-    // Nếu ít hơn 4 cam, bơm thêm các thẻ ảo vào frontend
-    let currentLen = this.cameras.length;
-    while (currentLen < 4) {
-      const isThermal = currentLen === 3;
-      const camName = isThermal ? "Camera Quét Nhiệt (Thermal)" : `Camera Bổ Sung ${currentLen + 1}`;
-      const aiLabel = isThermal ? "THERMAL SCAN" : "LIVE VIEWING";
-      const streamContent = isThermal
-        ? `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`
-        : `<div style="width:100%;height:100%;background:#000;display:flex;align-items:center;justify-content:center;color:#333;font-size:12px;">NO STREAM</div>`;
-
-      html += `
-        <div class="cam-card-v2" data-cam-id="fake_${currentLen}" data-cam-name="${camName}">
-          <div class="cam-viewport" id="viewport-fake_${currentLen}">
-            <div class="cam-hud-top">
-              <div class="cam-title-group">
-                <span class="status-dot dot-green"></span>
-                <span class="cam-name">${camName}</span>
-              </div>
-              <div class="cam-actions">
-                <button title="Chụp ảnh" class="cam-btn-hud btn-capture">📸</button>
-                <button title="Phóng to" class="cam-btn-hud btn-expand-live">⛶</button>
-              </div>
-            </div>
-            <div class="cam-overlay-container" id="ai-overlay-fake_${currentLen}">
-              <div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">${aiLabel}</span></div>
-            </div>
-            <div class="real-stream-container" style="position:relative;overflow:hidden;width:100%;height:100%;flex:1;background:#000;">
-              ${streamContent}
-            </div>
-          </div>
-        </div>`;
-      currentLen++;
+      // Panel: filter to this camera
+      this.setPanelCamFilter(camId, camName);
     }
-
-    grid.innerHTML = html;
   }
 
+  private collapseExpanded(): void {
+    const grid = document.getElementById('nvrGrid');
+    const expanded = grid?.querySelector<HTMLElement>('.nvr-cell.expanded');
+
+    // Switch back to sub-stream
+    if (expanded) {
+      const camId = expanded.dataset.camId ?? '';
+      const subId = expanded.dataset.sub ?? expanded.dataset.go2rtc ?? '';
+      const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
+      if (iframe && subId) {
+        iframe.src = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(subId)}&mode=mse&controls=0`;
+      }
+      expanded.classList.remove('expanded');
+    }
+
+    grid?.querySelectorAll<HTMLElement>('.nvr-cell').forEach(c => { c.style.display = ''; });
+    this.expandedId = null;
+
+    // Toolbar: hide back
+    document.getElementById('nvrBackBtn')?.classList.remove('visible');
+    const fsCam = document.getElementById('nvrFsCam');
+    if (fsCam) { fsCam.textContent = ''; fsCam.style.display = 'none'; }
+
+    // Panel: show all cameras
+    this.setPanelCamFilter('', '');
+  }
+
+  private setPanelCamFilter(camId: string, camName: string): void {
+    this.panelCamFilter = camId;
+    const title = document.getElementById('nvrEPTitle');
+    if (title) title.textContent = camId ? camName : 'SỰ KIỆN CAM';
+    this.loadDetections();
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // Event bindings
+  // ════════════════════════════════════════════════════════════
+
+  private bindEvents(): void {
+    // Layout switcher
+    document.querySelectorAll<HTMLElement>('.nvr-lb').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const layout = btn.dataset.layout as Layout | undefined;
+        if (!layout || layout === this.currentLayout) return;
+        document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.currentLayout = layout;
+        document.getElementById('nvrGrid')!.className = `nvr-grid ${layout}`;
+        this.collapseExpanded();
+        this.renderGrid();
+      });
+    });
+
+    // Camera select → 1×1 for that cam
+    document.getElementById('nvrSel')?.addEventListener('change', (e) => {
+      const camId = (e.target as HTMLSelectElement).value;
+      if (camId) {
+        const cam = this.cameras.find(c => c.id === camId) ?? null;
+        this.setLayout('l1');
+        this.renderGrid(cam ? [cam] : [null]);
+      } else {
+        this.setLayout('l4');
+        this.renderGrid();
+      }
+    });
+
+    // Back button
+    document.getElementById('nvrBackBtn')?.addEventListener('click', () => this.collapseExpanded());
+
+    // Grid delegation
+    const grid = document.getElementById('nvrGrid');
+    if (grid) {
+      // Double-click cell → expand
+      grid.addEventListener('dblclick', (e) => {
+        const cell = (e.target as HTMLElement).closest<HTMLElement>('.nvr-cell');
+        if (!cell?.dataset.camId) return;
+        this.toggleExpand(cell, cell.dataset.camId, cell.dataset.camName ?? '');
+      });
+
+      grid.addEventListener('click', (e) => {
+        // Button: fullscreen
+        const btnFull = (e.target as HTMLElement).closest<HTMLElement>('.btn-full');
+        if (btnFull) {
+          const cell = btnFull.closest<HTMLElement>('.nvr-cell')!;
+          this.toggleExpand(cell, btnFull.dataset.id!, btnFull.dataset.name ?? '');
+          return;
+        }
+        // Button: snapshot
+        const btnSnap = (e.target as HTMLElement).closest<HTMLElement>('.btn-snap');
+        if (btnSnap && btnSnap.dataset.src) {
+          const url = `${GO2RTC_URL}/api/frame.jpeg?src=${encodeURIComponent(btnSnap.dataset.src)}`;
+          Object.assign(document.createElement('a'), { href: url, download: `snap_${Date.now()}.jpg`, target: '_blank' }).click();
+        }
+      });
+    }
+
+    // Panel toggle (collapse/expand)
+    document.getElementById('nvrEPTab')?.addEventListener('click', () => {
+      document.getElementById('nvrEP')?.classList.toggle('collapsed');
+    });
+
+    // Panel filters
+    document.getElementById('nvrEPType')?.addEventListener('change', (e) => {
+      this.panelTypeFilter = (e.target as HTMLSelectElement).value;
+      this.loadDetections();
+    });
+    document.getElementById('nvrEPDate')?.addEventListener('change', (e) => {
+      this.panelDateFilter = (e.target as HTMLInputElement).value;
+      this.loadDetections();
+    });
+    document.getElementById('nvrEPRefresh')?.addEventListener('click', () => {
+      (document.getElementById('nvrEPDate') as HTMLInputElement).value = '';
+      this.panelDateFilter = '';
+      this.panelTypeFilter = '';
+      (document.getElementById('nvrEPType') as HTMLSelectElement).value = '';
+      this.loadDetections();
+    });
+
+    // Events list: click → lightbox
+    document.getElementById('nvrEPList')?.addEventListener('click', (e) => {
+      const card = (e.target as HTMLElement).closest<HTMLElement>('.nvr-evt');
+      if (!card) return;
+      const snap = card.dataset.snap;
+      const video = card.dataset.video;
+      if (video) this.openLightbox(video, true);
+      else if (snap) this.openLightbox(snap, false);
+    });
+
+    // Lightbox
+    document.getElementById('nvrLBClose')?.addEventListener('click', () => this.closeLightbox());
+    document.getElementById('nvrLB')?.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).id === 'nvrLB') this.closeLightbox();
+    });
+
+    document.addEventListener('keydown', this._onKey);
+  }
+
+  private openLightbox(url: string, isVideo: boolean): void {
+    if (!url) return;
+    const content = document.getElementById('nvrLBContent')!;
+    if (isVideo) {
+      content.innerHTML = `<video src="${url}" controls autoplay loop style="max-height:85vh"></video>`;
+    } else {
+      content.innerHTML = `<img src="${url}" alt="snapshot" style="max-height:85vh">`;
+    }
+    document.getElementById('nvrLB')!.classList.add('open');
+  }
+
+  private closeLightbox(): void {
+    const content = document.getElementById('nvrLBContent');
+    if (content) content.innerHTML = ''; // Stop video
+    document.getElementById('nvrLB')!.classList.remove('open');
+  }
+
+  private _onKey = (e: KeyboardEvent): void => {
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('nvrLB')?.classList.contains('open')) { this.closeLightbox(); return; }
+    if (this.expandedId) this.collapseExpanded();
+  };
+
+  private setLayout(layout: Layout): void {
+    this.currentLayout = layout;
+    document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
+    document.querySelector(`[data-layout="${layout}"]`)?.classList.add('active');
+    const g = document.getElementById('nvrGrid');
+    if (g) g.className = `nvr-grid ${layout}`;
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // SignalR
+  // ════════════════════════════════════════════════════════════
+
   private connectSignalR(): void {
-    const token = localStorage.getItem('station_jwt');
+    const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
     if (!token) return;
 
     this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl('/ws/realtime', { accessTokenFactory: () => token })
+      .withUrl('/ws/realtime', { accessTokenFactory: () => token! })
       .withAutomaticReconnect()
       .build();
 
     this.hubConnection.on('DeviceStatus', (data: { deviceId: string; status: string }) => {
-      const dot = document.querySelector(`[data-cam-id="${data.deviceId}"] .status-dot`);
-      if (dot) dot.className = `status-dot ${data.status === 'online' ? 'dot-green' : 'dot-red'}`;
+      const cam = this.cameras.find(c => c.id === data.deviceId);
+      if (cam) (cam as any).status = data.status;
+      const dot = document.getElementById(`nvr-dot-${data.deviceId}`);
+      if (dot) dot.className = `nvr-dot ${data.status}`;
+      const online = this.cameras.filter(c => (c.status as string) === 'online').length;
+      const el = document.getElementById('nvrOnline');
+      if (el) { el.textContent = `${online}/${this.cameras.length}`; el.style.color = online > 0 ? '#10b981' : '#ef4444'; }
     });
 
-    this.hubConnection.start().catch(err => console.warn('[SignalR] Lỗi kết nối:', err));
-  }
+    // New camera event -> prepend to panel
+    this.hubConnection.on('CameraEvent', (evt: DetectionEvent) => {
+      this.prependDetection(evt);
+    });
 
-  private _realMount(): void {
-    const modal = document.getElementById('cameraLiveModal');
-    const modalBody = document.getElementById('modalVideoContainer');
-    const playbackVideo = document.getElementById('playbackVideo') as HTMLVideoElement;
-    document.getElementById('modalCameraLogsGroup'); // referenced via DOM
-    const btnReturnLive = document.getElementById('btnReturnToLive');
-    const modeBadge = document.getElementById('monitorModeBadge');
+    // Integrated Alert System (Pulsing + Toast)
+    this.hubConnection.on('AlertNew', (alert: any) => {
+      // 1. Show Toast
+      this.showAlarmToast(alert);
 
-    const showLive = () => {
-      if (!modalBody || !playbackVideo || !modeBadge || !btnReturnLive || !this.currentModalCamId) return;
-      playbackVideo.style.display = 'none';
-      playbackVideo.pause();
-      modalBody.style.display = 'block';
-      modalBody.innerHTML = `<iframe src="${GO2RTC_URL}/stream.html?src=${this.currentModalCamId}&mode=mse&controls=0" style="width:100%; height:100%; border:none; pointer-events: none;"></iframe>`;
-      modeBadge.style.background = '#10b981';
-      modeBadge.textContent = '🔴 LIVE';
-      btnReturnLive.style.display = 'none';
-    };
-
-    const showPlayback = (url: string) => {
-      if (!modalBody || !playbackVideo || !modeBadge || !btnReturnLive) return;
-      modalBody.style.display = 'none';
-      playbackVideo.style.display = 'block';
-      playbackVideo.src = url;
-      playbackVideo.play();
-      modeBadge.style.background = '#f59e0b';
-      modeBadge.textContent = '🎞 PLAYBACK';
-      btnReturnLive.style.display = 'inline-block';
-    };
-
-    const openMonitor = (camId: string, playbackUrl: string | null = null) => {
-      if (!modal) return;
-      this.currentModalCamId = camId;
-      if (playbackUrl) showPlayback(playbackUrl); else showLive();
-      modal.classList.add('active');
-    };
-
-    const closeModal = () => {
-      this.currentModalCamId = null;
-      if (modal) modal.classList.remove('active');
-      if (playbackVideo) { playbackVideo.pause(); playbackVideo.src = ""; }
-      if (modalBody) modalBody.innerHTML = '';
-    };
-
-    // Event Delegation cho nút Phóng to và Chụp ảnh
-    document.querySelector('.camera-grid-v2')?.addEventListener('click', (e) => {
-      const target = e.target as HTMLElement;
-      const expandBtn = target.closest('.btn-expand-live') as HTMLElement;
-      if (expandBtn) {
-        const camId = expandBtn.dataset.id;
-        if (camId) openMonitor(camId);
+      // 2. Pulse camera cell
+      if (alert.deviceId && alert.level === 'alarm') {
+        const cell = document.querySelector(`.nvr-cell[data-cam-id="${alert.deviceId}"]`);
+        if (cell) cell.classList.add('alarm-triggered');
       }
-      const captureBtn = target.closest('.btn-capture') as HTMLElement;
-      if (captureBtn) this.handleCapture(captureBtn);
+
+      // 3. Refresh sidebar detections to get the alert context
+      this.loadDetections();
     });
 
-    document.getElementById('modalSidebarToggle')?.addEventListener('click', () => {
-      const sidebar = document.getElementById('modalSidebar');
-      if (sidebar) sidebar.style.marginRight = sidebar.style.marginRight === '-320px' ? '0' : '-320px';
-    });
-
-    document.getElementById('cameraLiveClose')?.addEventListener('click', closeModal);
-    modal?.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
-
-    // Load ảnh cũ
-    this.loadHistoryCaptures();
-  }
-
-  private async loadHistoryCaptures() {
-    try {
-      const res = await fetch('http://127.0.0.1:46123/api/captures-list');
-      const data = await res.json();
-      const shelf = document.getElementById('primaryRecentCaptures');
-      if (shelf && data.captures) {
-        shelf.innerHTML = data.captures.map((f: string) => `
-          <div class="recent-capture-item" style="flex:0 0 120px;height:85px">
-            <img src="http://127.0.0.1:46123/api/captures/${f}" style="width:100%;height:100%;object-fit:cover;border-radius:8px;border:2px solid #0ea5e9" onclick="window.open(this.src,'_blank')">
-          </div>`).join('');
+    this.hubConnection.on('AlertUpdated', (data: any) => {
+      // If alert closed, remove pulsing
+      if (data.status === 'closed' && data.deviceId) {
+        const cells = document.querySelectorAll(`.nvr-cell[data-cam-id="${data.deviceId}"]`);
+        cells.forEach(c => c.classList.remove('alarm-triggered'));
       }
-    } catch { }
+    });
+
+    this.hubConnection.start().catch(() => {});
   }
 
-  private async handleCapture(_btn: HTMLElement) {
+  private showAlarmToast(alert: any): void {
+    const container = document.getElementById('nvrToastContainer');
+    if (!container) return;
+
+    const toast = document.createElement('div');
+    toast.className = 'nvr-alert-toast';
+    toast.innerHTML = `
+      <div style="font-size:1.5rem">🚨</div>
+      <div style="flex:1">
+        <div style="font-size:0.7rem;opacity:0.8">${alert.level.toUpperCase()}</div>
+        <div>${alert.message}</div>
+      </div>
+      <div style="font-size:0.8rem">✕</div>
+    `;
+
+    toast.onclick = () => {
+      toast.remove();
+      // If there's an alert ID, we could navigate, but in RTM we just acknowledge locally
+    };
+
+    container.appendChild(toast);
+    
+    // Play sound if possible (Browser policy might block initial)
     try {
-      const res = await fetch('http://127.0.0.1:46123/api/capture', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ streamId: 'hikvision_main' })
+      const audio = new Audio('/assets/sounds/alarm_beep.mp3');
+      audio.play();
+    } catch {}
+
+    setTimeout(() => toast.remove(), 8000);
+  }
+
+  /**
+   * Đồng bộ trạng thái viền nháy cho các camera có cảnh báo đang mở
+   */
+  private async syncAlarmStates(): Promise<void> {
+    try {
+      // Lấy danh sách alert từ service
+      const alerts = await stationApi.getAlerts(); 
+      const openAlerts = alerts.filter(a => a.status === 'open' && a.level === 'alarm');
+      openAlerts.forEach(a => {
+        if (a.deviceId) {
+          const cell = document.querySelector(`.nvr-cell[data-cam-id="${a.deviceId}"]`);
+          if (cell) cell.classList.add('alarm-triggered');
+        }
       });
-      const result = await res.json();
-      if (result.success) this.showToast(`📸 Đã chụp: ${result.filename}`);
-    } catch (err: any) {
-      this.showToast(`Lỗi: ${err.message}`, true);
+    } catch (err) {
+      console.warn('[SyncAlarmStates] Error:', err);
     }
   }
 
-  private showToast(msg: string, isError = false) {
-    const t = document.createElement('div');
-    t.className = `wm-toast ${isError ? 'error' : ''}`;
-    t.style.cssText = 'position:fixed;top:20px;right:20px;padding:12px 20px;background:#0f172a;color:#fff;border-radius:8px;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,0.3);transition:all 0.3s;opacity:0;transform:translateY(-20px)';
-    t.textContent = msg;
-    document.body.appendChild(t);
-    setTimeout(() => { t.style.opacity = '1'; t.style.transform = 'translateY(0)'; }, 10);
-    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 300); }, 3000);
-  }
+  // ════════════════════════════════════════════════════════════
+  // Clock
+  // ════════════════════════════════════════════════════════════
 
-  private startAISimulation() {
-    this.aiInterval = setInterval(() => {
+  private startClock(): void {
+    const tick = (): void => {
+      const now = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+      const clockEl = document.getElementById('nvrClock');
+      if (clockEl) clockEl.textContent = now;
       this.cameras.forEach(c => {
-        const overlay = document.getElementById(`ai-overlay-${c.id}`);
-        if (overlay) overlay.innerHTML = `<div class="ai-status-indicator"><div class="pulse-dot-cyan"></div><span class="ai-status-text">LIVE VIEWING</span></div>`;
+        const el = document.getElementById(`nvr-ts-${c.id}`);
+        if (el) el.textContent = now;
       });
-    }, 2000);
-  }
-
-  destroy(): void {
-    if (this.aiInterval) clearInterval(this.aiInterval);
-    if (this.hubConnection) this.hubConnection.stop();
+    };
+    tick();
+    this.clockInterval = setInterval(tick, 1000);
   }
 }
