@@ -37,11 +37,14 @@ public class RuleEvaluationWorker : BackgroundService
     private readonly IRealtimeNotifier _notifier;
     private readonly ILogger<RuleEvaluationWorker> _logger;
 
-    private const int CheckIntervalMs = 5000;
+    private const int CheckIntervalMs = 5000; // 5 giây / lần check
 
     // In-memory state: confirmCount và cooldownUntil per ruleId
     private readonly Dictionary<Guid, int>      _confirmCounts  = new();
     private readonly Dictionary<Guid, DateTime> _cooldownUntil  = new();
+
+    // Global confirm threshold từ Settings (camera_filter_time_s / 5s)
+    private int _globalConfirmReadings = 2; // mặc định ~10 giây
 
     public RuleEvaluationWorker(
         IServiceScopeFactory scopeFactory,
@@ -77,6 +80,12 @@ public class RuleEvaluationWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
+        // Đọc setting camera_filter_time_s để tính confirmReadings mặc định
+        var filterSetting = await db.SystemSettings
+            .FirstOrDefaultAsync(s => s.Key == "camera_filter_time_s", ct);
+        if (filterSetting?.Value != null && int.TryParse(filterSetting.Value.Trim('"'), out var secs) && secs > 0)
+            _globalConfirmReadings = Math.Max(1, (int)Math.Round(secs / (CheckIntervalMs / 1000.0)));
+
         var rules = await db.Rules.Where(r => r.Enabled).ToListAsync(ct);
         if (rules.Count == 0) return;
 
@@ -108,7 +117,10 @@ public class RuleEvaluationWorker : BackgroundService
         var condition = RuleEvaluator.ParseConditionExtended(rule.Condition);
         if (condition == null) return;
 
-        var (pointId, op, threshold, warningValue, clearValue, cooldownMin, confirmReadings) = condition.Value;
+        var (pointId, op, threshold, warningValue, clearValue, cooldownMin, confirmReadingsFromRule) = condition.Value;
+        // Nếu rule không tự set confirmReadings (=1 mặc định từ ParseConditionExtended),
+        // dùng giá trị global từ setting camera_filter_time_s
+        var confirmReadings = confirmReadingsFromRule > 1 ? confirmReadingsFromRule : _globalConfirmReadings;
 
         if (!latestReadings.TryGetValue(pointId, out var reading)) return;
         if (reading.Value == null) return;

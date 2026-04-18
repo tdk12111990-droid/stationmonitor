@@ -359,17 +359,17 @@ class HCNetSDK:
         # BOOL NET_DVR_Logout(LONG lUserID)
         self.hcnetsdk.NET_DVR_Logout.restype = ctypes.c_bool
         self.hcnetsdk.NET_DVR_Logout.argtypes = [ctypes.c_long]
-# LONG NET_DVR_StartRemoteConfig(LONG lUserID, DWORD dwCommand, LPVOID lpInBuf, DWORD dwInBufSize, fRemoteConfigCallback cbRemoteConfigCallback, LPVOID pUserData)
-self.hcnetsdk.NET_DVR_StartRemoteConfig.restype = ctypes.c_long
-self.hcnetsdk.NET_DVR_StartRemoteConfig.argtypes = [ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, RemoteConfigCallback, ctypes.c_void_p]
+        # LONG NET_DVR_StartRemoteConfig(LONG lUserID, DWORD dwCommand, LPVOID lpInBuf, DWORD dwInBufSize, fRemoteConfigCallback cbRemoteConfigCallback, LPVOID pUserData)
+        self.hcnetsdk.NET_DVR_StartRemoteConfig.restype = ctypes.c_long
+        self.hcnetsdk.NET_DVR_StartRemoteConfig.argtypes = [ctypes.c_long, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, RemoteConfigCallback, ctypes.c_void_p]
 
-# BOOL NET_DVR_SetDVRMessageCallBack_V50(int iIndex, fMSGCallBack fMessageCallBack, void* pUser)
-self.hcnetsdk.NET_DVR_SetDVRMessageCallBack_V50.restype = ctypes.c_bool
-self.hcnetsdk.NET_DVR_SetDVRMessageCallBack_V50.argtypes = [ctypes.c_int, MSGCALLBACK, ctypes.c_void_p]
+        # BOOL NET_DVR_SetDVRMessageCallBack_V50(int iIndex, fMSGCallBack fMessageCallBack, void* pUser)
+        self.hcnetsdk.NET_DVR_SetDVRMessageCallBack_V50.restype = ctypes.c_bool
+        self.hcnetsdk.NET_DVR_SetDVRMessageCallBack_V50.argtypes = [ctypes.c_int, MSGCALLBACK, ctypes.c_void_p]
 
-# LONG NET_DVR_SetupAlarmChan_V41(LONG lUserID, LPNET_DVR_SETUPALARM_PARAM lpSetupParam)
-self.hcnetsdk.NET_DVR_SetupAlarmChan_V41.restype = ctypes.c_long
-self.hcnetsdk.NET_DVR_SetupAlarmChan_V41.argtypes = [ctypes.c_long, ctypes.POINTER(NET_DVR_SETUPALARM_PARAM)]
+        # LONG NET_DVR_SetupAlarmChan_V41(LONG lUserID, LPNET_DVR_SETUPALARM_PARAM lpSetupParam)
+        self.hcnetsdk.NET_DVR_SetupAlarmChan_V41.restype = ctypes.c_long
+        self.hcnetsdk.NET_DVR_SetupAlarmChan_V41.argtypes = [ctypes.c_long, ctypes.POINTER(NET_DVR_SETUPALARM_PARAM)]
 
 # PlayCtrl Prototypes
 

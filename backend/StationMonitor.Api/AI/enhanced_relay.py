@@ -1,10 +1,16 @@
 import os, sys, cv2, json, threading, time, subprocess, requests
 import numpy as np
+import ctypes
 from collections import deque
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import base64
 from requests.auth import HTTPDigestAuth
+
+# SDK path
+SDK_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "test_sdk")
+if SDK_DIR not in sys.path:
+    sys.path.insert(0, SDK_DIR)
 
 # ── Cấu hình đường dẫn (Cross-platform) ──
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -81,15 +87,17 @@ LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_dat
 debug_log("=== AI ENGINE RELAY STARTING (DIGEST AUTH VERSION) ===")
 
 THERMAL_DEVICE_ID = None
+OPTICAL_DEVICE_ID = None
 
 def periodic_status_uploader():
-    """Upload thermal data every 2 seconds"""
-    global THERMAL_DEVICE_ID
+    """Upload thermal data every 2 seconds to both thermal and optical camera devices"""
+    global THERMAL_DEVICE_ID, OPTICAL_DEVICE_ID
     debug_log("[SYSTEM] Status Uploader Thread Started.")
     session = requests.Session()
+    _counter = [0]
     while True:
         try:
-            if not THERMAL_DEVICE_ID:
+            if not THERMAL_DEVICE_ID or not OPTICAL_DEVICE_ID:
                 resp = session.get(f"{API_URL}/devices", timeout=10)
                 if resp.status_code == 200:
                     devices = resp.json()
@@ -97,37 +105,43 @@ def periodic_status_uploader():
                         cfg = d.get('config', '{}')
                         if isinstance(cfg, str): cfg = json.loads(cfg)
                         if cfg.get('ip') == CAMERA_IP:
-                            THERMAL_DEVICE_ID = d.get('id')
-                            debug_log(f"[INGEST] Found Device ID: {THERMAL_DEVICE_ID} for IP {CAMERA_IP}")
-                            break
-                    if not THERMAL_DEVICE_ID:
-                        debug_log(f"[INGEST] Device with IP {CAMERA_IP} NOT FOUND in Backend. Ingest suspended.")
+                            go2rtc_id = cfg.get('go2rtc_id', '')
+                            dtype = d.get('type', '')
+                            if 'thermal' in go2rtc_id or 'thermal' in dtype:
+                                THERMAL_DEVICE_ID = d.get('id')
+                                debug_log(f"[INGEST] Found Thermal Device: {THERMAL_DEVICE_ID}")
+                            else:
+                                OPTICAL_DEVICE_ID = d.get('id')
+                                debug_log(f"[INGEST] Found Optical Device: {OPTICAL_DEVICE_ID}")
+                    if not THERMAL_DEVICE_ID and not OPTICAL_DEVICE_ID:
+                        debug_log(f"[INGEST] No device with IP {CAMERA_IP} found in Backend.")
 
-            if THERMAL_DEVICE_ID:
+            device_ids = [did for did in [THERMAL_DEVICE_ID, OPTICAL_DEVICE_ID] if did]
+            if device_ids:
                 payload = []
-                for rid, coords in POINT_COORDS.items():
-                    temp = LIVE_TEMPS.get(int(rid))
-                    payload.append({
-                        "deviceId": THERMAL_DEVICE_ID,
-                        "pointId": f"P{rid}",
-                        "value": temp if temp is not None else 0.0,
-                        "unit": "°C",
-                        "tx": coords.get("tx"),
-                        "ty": coords.get("ty"),
-                        "ox": coords.get("ox"),
-                        "oy": coords.get("oy")
-                    })
-                
+                for did in device_ids:
+                    for rid, coords in POINT_COORDS.items():
+                        temp = LIVE_TEMPS.get(int(rid))
+                        payload.append({
+                            "deviceId": did,
+                            "pointId": f"P{rid}",
+                            "value": temp if temp is not None else 0.0,
+                            "unit": "°C",
+                            "tx": coords.get("tx"),
+                            "ty": coords.get("ty"),
+                            "ox": coords.get("ox"),
+                            "oy": coords.get("oy")
+                        })
+
                 if payload:
                     try:
                         res = session.post(f"{API_URL}/measurements/ingest", json=payload, timeout=15)
                         if res.status_code == 200:
-                            if not hasattr(periodic_status_uploader, "counter"): periodic_status_uploader.counter = 0
-                            periodic_status_uploader.counter += 1
-                            if periodic_status_uploader.counter % 30 == 0:
-                                debug_log(f"[INGEST] Success: Sent {len(payload)} points for Device {THERMAL_DEVICE_ID}")
+                            _counter[0] += 1
+                            if _counter[0] % 30 == 0:
+                                debug_log(f"[INGEST] OK: {len(payload)} points → {len(device_ids)} cameras")
                         else:
-                            debug_log(f"[INGEST] Failed to Backend: {res.status_code} - {res.text}")
+                            debug_log(f"[INGEST] Failed: {res.status_code} - {res.text}")
                     except Exception as post_e:
                         debug_log(f"[INGEST] Network Error: {post_e}")
         except Exception as e:
@@ -202,58 +216,116 @@ def sync_rules_loop():
             debug_log(f"[SYSTEM] Rule Sync Error: {e}")
         time.sleep(5)
 
-class ThermalISAPI:
-    """Fetch thermal data from camera via ISAPI using HTTPDigestAuth"""
+class ThermalSDK:
+    """Lấy nhiệt độ 10 điểm đo realtime qua SDK (thay thế ISAPI)"""
     def __init__(self, camera_ip, user, password):
         self.camera_ip = camera_ip
         self.user = user
         self.password = password
-        self.session = requests.Session()
-        self.auth = HTTPDigestAuth(user, password)
         self.running = False
+        self.sdk = None
+        self.user_id = -1
+        self.handle = -1
+        self._callback_ref = None
 
     def start(self):
         self.running = True
-        threading.Thread(target=self._poll_loop, daemon=True).start()
-        debug_log("[THERMAL] ISAPI Thermal Monitor Started (Digest Mode)")
+        threading.Thread(target=self._run, daemon=True).start()
+        debug_log("[THERMAL] SDK Thermal Monitor Starting...")
 
-    def _poll_loop(self):
-        fail_count = 0
+    def _run(self):
+        try:
+            from core.hcnet_sdk import (
+                HCNetSDK, NET_DVR_THERMOMETRY_COND,
+                NET_DVR_THERMOMETRY_UPLOAD, RemoteConfigCallback
+            )
+
+            self.sdk = HCNetSDK(SDK_DIR)
+            if not self.sdk.init():
+                debug_log("[THERMAL] SDK init failed, fallback to ISAPI")
+                self._fallback_isapi()
+                return
+
+            self.user_id, _ = self.sdk.login(self.camera_ip, 8000, self.user, self.password)
+            if self.user_id < 0:
+                debug_log(f"[THERMAL] SDK login failed, fallback to ISAPI")
+                self._fallback_isapi()
+                return
+
+            debug_log(f"[THERMAL] SDK login OK (UserID={self.user_id})")
+
+            _cb_count = [0]
+            def _callback(dwType, pBuffer, dwBufLen, pUserData):
+                if dwType == 2:  # NET_SDK_CALLBACK_TYPE_DATA
+                    try:
+                        data = ctypes.cast(pBuffer, ctypes.POINTER(NET_DVR_THERMOMETRY_UPLOAD)).contents
+                        rid = data.byRuleID
+                        temp = data.fMaxTemperature
+                        if 1 <= rid <= 20 and -50 < temp < 2000:
+                            LIVE_TEMPS[rid] = temp
+                            _cb_count[0] += 1
+                            if _cb_count[0] % 10 == 1:
+                                debug_log(f"[THERMAL] SDK data: rule={rid} temp={temp:.1f}C LIVE_TEMPS={dict(list(LIVE_TEMPS.items())[:3])}")
+                    except Exception as e:
+                        debug_log(f"[THERMAL] Callback error: {e}")
+
+            self._callback_ref = RemoteConfigCallback(_callback)
+
+            cond = NET_DVR_THERMOMETRY_COND()
+            cond.dwSize = ctypes.sizeof(NET_DVR_THERMOMETRY_COND)
+            cond.dwChannel = 2
+            cond.wMode = 1
+
+            self.handle = self.sdk.hcnetsdk.NET_DVR_StartRemoteConfig(
+                self.user_id,
+                3629,  # NET_DVR_GET_REALTIME_THERMOMETRY
+                ctypes.byref(cond),
+                ctypes.sizeof(cond),
+                self._callback_ref,
+                None
+            )
+
+            if self.handle < 0:
+                debug_log(f"[THERMAL] SDK StartRemoteConfig failed, fallback to ISAPI")
+                self._fallback_isapi()
+                return
+
+            debug_log("[THERMAL] SDK Thermal Monitor running (realtime callback)")
+
+            while self.running:
+                time.sleep(1)
+
+        except Exception as e:
+            debug_log(f"[THERMAL] SDK error: {e}, fallback to ISAPI")
+            self._fallback_isapi()
+
+    def _fallback_isapi(self):
+        """Fallback dùng ISAPI nếu SDK lỗi"""
+        debug_log("[THERMAL] Using ISAPI fallback (limited data)")
+        session = requests.Session()
+        auth = HTTPDigestAuth(self.user, self.password)
         while self.running:
             try:
-                # Use realTime endpoint for more accurate per-point data
-                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/realTime"
-                response = self.session.get(url, auth=self.auth, timeout=5)
-
-                if response.status_code == 200:
-                    try:
-                        root = ET.fromstring(response.text)
-                        for point in root.findall('.//ThermometryPoint'):
-                            try:
-                                rule_id_elem = point.find('ruleID')
-                                temp_elem = point.find('temperature')
-                                if rule_id_elem is not None and temp_elem is not None:
-                                    rule_id = int(rule_id_elem.text)
-                                    temp = float(temp_elem.text)
-                                    LIVE_TEMPS[rule_id] = temp
-                                    fail_count = 0
-                            except: continue
-                    except Exception as e:
-                        debug_log(f"[THERMAL] XML Parse Error: {e}")
-                        fail_count += 1
-                elif response.status_code == 401:
-                    if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] AUTH FAILED on {self.camera_ip} (Check credentials)")
-                    fail_count += 1
-                else:
-                    fail_count += 1
-                    if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] ISAPI Request Failed: {response.status_code}")
+                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/jpegPicWithAppendData?format=json"
+                r = session.get(url, auth=auth, timeout=5)
+                if r.status_code == 200:
+                    import re, struct
+                    raw = r.content
+                    # Parse float32 temperature matrix từ binary data
+                    parts = raw.split(b'--boundary')
+                    for part in parts:
+                        if b'Content-Type: application/octet-stream' in part or len(part) > 100000:
+                            data_start = part.find(b'\r\n\r\n')
+                            if data_start >= 0:
+                                bin_data = part[data_start+4:]
+                                floats = struct.unpack(f'{len(bin_data)//4}f', bin_data[:len(bin_data)//4*4])
+                                arr = np.array(floats)
+                                valid = arr[(arr > -50) & (arr < 2000)]
+                                if len(valid) > 1000:
+                                    debug_log(f"[THERMAL] ISAPI matrix: min={valid.min():.1f} max={valid.max():.1f}")
+                                    break
             except Exception as e:
-                fail_count += 1
-                if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] ISAPI Connection Error: {e}")
-
+                pass
             time.sleep(2)
 
 class EventStreamListener:
@@ -378,7 +450,6 @@ class StreamRelay:
                     ret, frame = cap.read()
                     if not ret: break
                     blink = (blink + 1) % 10
-                    self._draw_points(frame, blink < 5)
                     if pipe and pipe.stdin:
                         try: pipe.stdin.write(frame.tobytes())
                         except: break
@@ -395,7 +466,7 @@ def cleanup_old_events():
         time.sleep(300)
 
 if __name__ == "__main__":
-    thermal = ThermalISAPI(CAMERA_IP, USER, PASSWORD)
+    thermal = ThermalSDK(CAMERA_IP, USER, PASSWORD)
     thermal.start()
     event_listener = EventStreamListener(CAMERA_IP, USER, PASSWORD)
     event_listener.start()

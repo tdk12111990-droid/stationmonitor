@@ -39,7 +39,12 @@
       "Bash(cmd:*)",
       "Bash(python test_isapi_relay.py)",
       "Bash(python -m py_compile enhanced_relay.py)",
-      "Bash(timeout 40 python test_camera_events_live.py)"
+      "Bash(timeout 40 python test_camera_events_live.py)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \"5056\")",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('token','NO TOKEN'\\)[:50] if 'token' in d else d\\)\")",
+      "Bash(python -c \"import sys,json; devs=json.load\\(sys.stdin\\); [print\\(f'ID:{d[\\\\\"id\\\\\"][:8]} name:{d[\\\\\"name\\\\\"]} type:{d[\\\\\"type\\\\\"]} config:{d.get\\(\\\\\"config\\\\\",\\\\\"\\\\\"\\)}'\\) for d in devs]\")"
     ]
   }
 }

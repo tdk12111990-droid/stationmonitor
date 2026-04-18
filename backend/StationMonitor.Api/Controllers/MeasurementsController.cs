@@ -66,9 +66,9 @@ public class MeasurementsController : ControllerBase
             {
                 DeviceId = reader.GetGuid(0),
                 PointId  = reader.GetString(1),
-                Value    = reader.GetDouble(2),
-                Unit     = reader.GetString(3),
-                Quality  = reader.GetInt32(4),
+                Value    = reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2),
+                Unit     = reader.IsDBNull(3) ? "°C" : reader.GetString(3),
+                Quality  = (int)reader.GetInt16(4),
                 Time     = reader.GetDateTime(5)
             });
         }
