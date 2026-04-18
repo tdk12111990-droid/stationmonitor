@@ -25,15 +25,15 @@ interface DetectionEvent {
 interface EvtMeta { snapshotUrl?: string; videoUrl?: string; }
 
 const EVT_CFG: Record<string, { label: string; icon: string; color: string }> = {
-  thermal_hotspot:   { label: 'Nhiệt bất thường', icon: '🌡️', color: '#ef4444' },
-  fire:              { label: 'Cháy',              icon: '🔥', color: '#ef4444' },
-  smoke:             { label: 'Khói',              icon: '💨', color: '#f97316' },
-  intrusion:         { label: 'Xâm nhập',          icon: '🚨', color: '#f59e0b' },
-  partial_discharge: { label: 'Phóng điện',        icon: '⚡', color: '#a855f7' },
-  tampering:         { label: 'Che camera',         icon: '🎭', color: '#f59e0b' },
-  video_loss:        { label: 'Mất tín hiệu',      icon: '📵', color: '#64748b' },
-  motion:            { label: 'Chuyển động',        icon: '👁️', color: '#3b82f6' },
-  storage_error:     { label: 'Lỗi lưu trữ',       icon: '💾', color: '#f59e0b' },
+  thermal_hotspot: { label: 'Nhiệt bất thường', icon: '🌡️', color: '#ef4444' },
+  fire: { label: 'Cháy', icon: '🔥', color: '#ef4444' },
+  smoke: { label: 'Khói', icon: '💨', color: '#f97316' },
+  intrusion: { label: 'Xâm nhập', icon: '🚨', color: '#f59e0b' },
+  partial_discharge: { label: 'Phóng điện', icon: '⚡', color: '#a855f7' },
+  tampering: { label: 'Che camera', icon: '🎭', color: '#f59e0b' },
+  video_loss: { label: 'Mất tín hiệu', icon: '📵', color: '#64748b' },
+  motion: { label: 'Chuyển động', icon: '👁️', color: '#3b82f6' },
+  storage_error: { label: 'Lỗi lưu trữ', icon: '💾', color: '#f59e0b' },
 };
 
 export class RealtimeMonitorPage {
@@ -105,7 +105,17 @@ export class RealtimeMonitorPage {
       .nvr-cell { position:relative; background:#070a10; overflow:hidden; cursor:pointer; user-select:none; transition:box-shadow .12s; }
       .nvr-cell:hover { box-shadow:inset 0 0 0 1px #1e3050; }
       .nvr-cell.expanded { position:absolute!important; inset:0!important; z-index:20; box-shadow:0 0 0 2px #3b82f6!important; }
-      .nvr-cell iframe { width:100%; height:100%; border:none; pointer-events:none; display:block; background:#000; }
+      .nvr-cell iframe {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        border: none;
+        pointer-events: none;
+        display: block;
+        background: #000;
+        z-index: 1;
+      }
 
       /* No signal */
       .nvr-nosig { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; pointer-events:none; }
@@ -220,6 +230,16 @@ export class RealtimeMonitorPage {
       #nvrLB img, #nvrLB video { width:100%; height:100%; border-radius:8px; box-shadow:0 0 60px rgba(0,0,0,.8); }
       #nvrLBClose { position:absolute; top:16px; right:20px; color:#fff; font-size:1.4rem; cursor:pointer; background:rgba(255,255,255,.1); border:1px solid rgba(255,255,255,.15); border-radius:50%; width:36px; height:36px; display:flex; align-items:center; justify-content:center; transition:background .15s; }
       #nvrLBClose:hover { background:rgba(255,255,255,.2); }
+      
+      /* ── Canvas Overlay ── */
+      .nvr-overlay {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 2;
+      }
     </style>
 
     <div class="rtm-page">
@@ -297,8 +317,8 @@ export class RealtimeMonitorPage {
                 <select class="nvr-ep-fsel" id="nvrEPType">
                   <option value="">Tất cả loại</option>
                   ${Object.entries(EVT_CFG).map(([k, v]) =>
-                    `<option value="${k}">${v.icon} ${v.label}</option>`
-                  ).join('')}
+      `<option value="${k}">${v.icon} ${v.label}</option>`
+    ).join('')}
                 </select>
                 <input type="date" class="nvr-ep-fdate" id="nvrEPDate" title="Lọc theo ngày">
                 <button class="nvr-ep-rbtn" id="nvrEPRefresh" title="Làm mới">↻</button>
@@ -402,8 +422,8 @@ export class RealtimeMonitorPage {
       </div>`;
     }
 
-    const cfg       = (cam as any).config ?? {};
-    const go2rtcId: string  = cfg.go2rtc_id ?? '';
+    const cfg = (cam as any).config ?? {};
+    const go2rtcId: string = cfg.go2rtc_id ?? '';
     if (!go2rtcId) {
       // go2rtc_id chưa được cấu hình — hiện no signal
       return `
@@ -416,10 +436,10 @@ export class RealtimeMonitorPage {
       </div>`;
     }
     // Grid dùng _sub (nếu có cấu hình), nếu không thì fallback về luồng thường.
-    const subId: string  = cfg.go2rtc_sub_id ?? go2rtcId;
+    const subId: string = cfg.go2rtc_sub_id ?? go2rtcId;
     const mainId: string = cfg.go2rtc_main_id ?? go2rtcId;
-    const activeId       = fullscreen ? mainId : subId;
-    const status: string    = (cam.status as string) ?? 'unknown';
+    const activeId = fullscreen ? mainId : subId;
+    const status: string = (cam.status as string) ?? 'unknown';
 
     // mse: kết nối nhanh, ổn định hơn webrtc qua iframe
     const streamUrl = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(activeId)}&mode=mse&controls=0`;
@@ -428,6 +448,7 @@ export class RealtimeMonitorPage {
     <div class="nvr-cell" data-cam-id="${cam.id}" data-go2rtc="${go2rtcId}"
          data-sub="${subId}" data-main="${mainId}" data-cam-name="${cam.name}">
       <iframe src="${streamUrl}" id="nvr-frame-${cam.id}" allow="autoplay; camera; microphone"></iframe>
+      <canvas id="nvr-canvas-${cam.id}" class="nvr-overlay"></canvas>
       <div class="nvr-hud-t">
         <div class="nvr-cam-info">
           <span class="nvr-dot ${status}" id="nvr-dot-${cam.id}"></span>
@@ -454,11 +475,11 @@ export class RealtimeMonitorPage {
     if (list) list.innerHTML = `<div class="nvr-ep-loading">Đang tải...</div>`;
     try {
       const params = new URLSearchParams({ limit: '80' });
-      if (this.panelCamFilter)  params.set('deviceId', this.panelCamFilter);
+      if (this.panelCamFilter) params.set('deviceId', this.panelCamFilter);
       if (this.panelTypeFilter) params.set('type', this.panelTypeFilter);
       if (this.panelDateFilter) {
         params.set('from', new Date(this.panelDateFilter).toISOString());
-        params.set('to',   new Date(this.panelDateFilter + 'T23:59:59').toISOString());
+        params.set('to', new Date(this.panelDateFilter + 'T23:59:59').toISOString());
       }
       this.detections = await stationApi.getDetections(params.toString());
     } catch {
@@ -469,7 +490,7 @@ export class RealtimeMonitorPage {
 
   private renderDetections(): void {
     const list = document.getElementById('nvrEPList');
-    const cnt  = document.getElementById('nvrEPCnt');
+    const cnt = document.getElementById('nvrEPCnt');
     if (!list) return;
 
     if (cnt) cnt.textContent = String(this.detections.length);
@@ -482,12 +503,12 @@ export class RealtimeMonitorPage {
   }
 
   private evtCardHtml(e: DetectionEvent, isNew: boolean): string {
-    const cfg  = EVT_CFG[e.detectionType] ?? { label: e.detectionType, icon: '📷', color: '#64748b' };
+    const cfg = EVT_CFG[e.detectionType] ?? { label: e.detectionType, icon: '📷', color: '#64748b' };
     const meta: EvtMeta = (() => {
       try { return e.metadata ? JSON.parse(e.metadata) : {}; } catch { return {}; }
     })();
-    const snap    = meta.snapshotUrl ? `${API_BASE_URL}${meta.snapshotUrl}` : '';
-    const time    = new Date(e.detectedAt).toLocaleString('vi-VN', {
+    const snap = meta.snapshotUrl ? `${API_BASE_URL}${meta.snapshotUrl}` : '';
+    const time = new Date(e.detectedAt).toLocaleString('vi-VN', {
       hour: '2-digit', minute: '2-digit', second: '2-digit',
       day: '2-digit', month: '2-digit',
     });
@@ -499,8 +520,8 @@ export class RealtimeMonitorPage {
     <div class="nvr-evt${isNew ? ' new' : ''}" data-snap="${snap}" data-video="${vidUrl}" title="${cfg.label} — ${camName}">
       <div class="nvr-evt-thumb">
         ${snap
-          ? `<img src="${snap}" alt="" loading="lazy" onerror="this.parentElement.textContent='${cfg.icon}'">`
-          : cfg.icon}
+        ? `<img src="${snap}" alt="" loading="lazy" onerror="this.parentElement.textContent='${cfg.icon}'">`
+        : cfg.icon}
         ${vidUrl ? `<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);border-radius:2px;padding:1px 3px;font-size:8px;">📹</div>` : ''}
       </div>
       <div class="nvr-evt-body">
@@ -513,11 +534,11 @@ export class RealtimeMonitorPage {
   }
 
   private prependDetection(evt: DetectionEvent): void {
-    if (this.panelCamFilter  && evt.cameraId       !== this.panelCamFilter)  return;
-    if (this.panelTypeFilter && evt.detectionType  !== this.panelTypeFilter) return;
+    if (this.panelCamFilter && evt.cameraId !== this.panelCamFilter) return;
+    if (this.panelTypeFilter && evt.detectionType !== this.panelTypeFilter) return;
 
     this.detections.unshift(evt);
-    const cnt  = document.getElementById('nvrEPCnt');
+    const cnt = document.getElementById('nvrEPCnt');
     const list = document.getElementById('nvrEPList');
     if (!list) return;
 
@@ -527,13 +548,13 @@ export class RealtimeMonitorPage {
     const div = document.createElement('div');
     div.innerHTML = this.evtCardHtml(evt, true);
     const card = div.firstElementChild as HTMLElement;
-    
+
     // Gán dataset cho thẻ vừa tạo để lightbox có thể đọc
     try {
       const m: any = JSON.parse(evt.metadata ?? '{}');
       if (m.snapshotUrl) card.dataset.snap = `${API_BASE_URL}${m.snapshotUrl}`;
-      if (m.videoUrl)    card.dataset.video = `${API_BASE_URL}${m.videoUrl}`;
-    } catch {}
+      if (m.videoUrl) card.dataset.video = `${API_BASE_URL}${m.videoUrl}`;
+    } catch { }
 
     list.insertBefore(card, list.firstChild);
   }
@@ -762,6 +783,11 @@ export class RealtimeMonitorPage {
       if (el) { el.textContent = `${online}/${this.cameras.length}`; el.style.color = online > 0 ? '#10b981' : '#ef4444'; }
     });
 
+    // Live sensor values + dots
+    this.hubConnection.on('SensorUpdate', (readings: any[]) => {
+      this.drawPoints(readings);
+    });
+
     // New camera event -> prepend to panel
     this.hubConnection.on('CameraEvent', (evt: DetectionEvent) => {
       this.prependDetection(evt);
@@ -790,7 +816,7 @@ export class RealtimeMonitorPage {
       }
     });
 
-    this.hubConnection.start().catch(() => {});
+    this.hubConnection.start().catch(() => { });
   }
 
   private showAlarmToast(alert: any): void {
@@ -814,14 +840,69 @@ export class RealtimeMonitorPage {
     };
 
     container.appendChild(toast);
-    
+
     // Play sound if possible (Browser policy might block initial)
     try {
       const audio = new Audio('/assets/sounds/alarm_beep.mp3');
       audio.play();
-    } catch {}
+    } catch { }
 
     setTimeout(() => toast.remove(), 8000);
+  }
+
+  private drawPoints(readings: any[]): void {
+    // Group readings by camera to avoid constant DOM queries
+    const camGroups: Record<string, any[]> = {};
+    readings.forEach(r => {
+      if (!camGroups[r.deviceId]) camGroups[r.deviceId] = [];
+      camGroups[r.deviceId].push(r);
+    });
+
+    for (const [camId, points] of Object.entries(camGroups)) {
+      const canvas = document.getElementById(`nvr-canvas-${camId}`) as HTMLCanvasElement;
+      if (!canvas) continue;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) continue;
+
+      // Sync canvas internal resolution with display size
+      if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
+        canvas.width = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+      }
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      const cell = canvas.closest('.nvr-cell') as HTMLElement;
+      // Kiểm tra tên camera hoặc go2rtcId để biết là cam nhiệt hay quang
+      const go2rtcId = cell?.dataset.go2rtc?.toLowerCase() ?? '';
+      const camName = cell?.dataset.camName?.toLowerCase() ?? '';
+      const isThermal = camName.includes('nhiet') || camName.includes('thermal') || go2rtcId.includes('thermal');
+
+      points.forEach(p => {
+        // Chọn tọa độ tùy theo camera (quang hay nhiệt)
+        const x = isThermal ? p.tx : p.ox;
+        const y = isThermal ? p.ty : p.oy;
+
+        if (x == null || y == null) return;
+
+        const screenX = x * canvas.width;
+        const screenY = y * canvas.height;
+
+        // Vẽ chấm nhiệt
+        const isHigh = p.value > 35; // Ngưỡng ví dụ, có thể lấy từ p.metadata
+        ctx.beginPath();
+        ctx.arc(screenX, screenY, 5, 0, Math.PI * 2);
+        ctx.fillStyle = isHigh ? '#ef4444' : '#10b981';
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = ctx.fillStyle as string;
+        ctx.fill();
+
+        // Vẽ nhãn giá trị
+        ctx.fillStyle = '#fff';
+        ctx.shadowBlur = 0;
+        ctx.font = 'bold 10px Inter, sans-serif';
+        ctx.fillText(`${p.value.toFixed(1)}°C`, screenX + 8, screenY + 4);
+      });
+    }
   }
 
   /**
@@ -830,7 +911,7 @@ export class RealtimeMonitorPage {
   private async syncAlarmStates(): Promise<void> {
     try {
       // Lấy danh sách alert từ service
-      const alerts = await stationApi.getAlerts(); 
+      const alerts = await stationApi.getAlerts();
       const openAlerts = alerts.filter(a => a.status === 'open' && a.level === 'alarm');
       openAlerts.forEach(a => {
         if (a.deviceId) {

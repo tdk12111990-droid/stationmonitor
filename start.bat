@@ -38,6 +38,12 @@ if %errorlevel%==0 (
     timeout /t 2 /nobreak >nul
 )
 
+echo [3.5/4] Khoi dong AI Stream Relay...
+cd /d "%~dp0"
+echo  Khoi dong AI Engine (Stream Relay)...
+start "AI Stream Relay" cmd /k "cd /d "%~dp0backend\StationMonitor.Api\AI" && python enhanced_relay.py"
+timeout /t 3 /nobreak >nul
+
 echo [4/4] Khoi dong Frontend...
 start "Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 

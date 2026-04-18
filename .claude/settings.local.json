@@ -36,7 +36,10 @@
       "Bash(rm \"D:/StationMonitor/frontend/src/pages/DetectionsPage.ts\")",
       "Bash(dotnet ef:*)",
       "Bash(/c/Program Files/PostgreSQL/16/bin/psql.exe:*)",
-      "Bash(cmd:*)"
+      "Bash(cmd:*)",
+      "Bash(python test_isapi_relay.py)",
+      "Bash(python -m py_compile enhanced_relay.py)",
+      "Bash(timeout 40 python test_camera_events_live.py)"
     ]
   }
 }

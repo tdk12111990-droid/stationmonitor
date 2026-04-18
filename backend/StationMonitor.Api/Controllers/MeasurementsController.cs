@@ -247,6 +247,10 @@ public class MeasurementsController : ControllerBase
             pointId  = r.PointId,
             value    = r.Value,
             unit     = r.Unit ?? "°C",
+            tx       = r.Tx,
+            ty       = r.Ty,
+            ox       = r.Ox,
+            oy       = r.Oy,
             time     = DateTime.UtcNow
         }));
 
@@ -278,5 +282,9 @@ public class MeasurementsController : ControllerBase
         public string PointId { get; set; } = string.Empty;
         public double Value { get; set; }
         public string? Unit { get; set; }
+        public double? Tx { get; set; }
+        public double? Ty { get; set; }
+        public double? Ox { get; set; }
+        public double? Oy { get; set; }
     }
 }

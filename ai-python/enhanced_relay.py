@@ -1,10 +1,21 @@
 import os, sys, cv2, json, threading, time, subprocess, requests
-import numpy as np
 from collections import deque
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import base64
 from requests.auth import HTTPDigestAuth
+import ctypes
+
+# ── Cấu hình SDK (Hikvision chính hãng) ──
+SDK_PATH = r"d:\test_sdk"
+sys.path.insert(0, SDK_PATH)
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp" # Build-in OpenCV/FFmpeg TCP fix
+try:
+    import core.hcnet_sdk as core_sdk
+    from core.hcnet_sdk import HCNetSDK
+    SDK_AVAILABLE = True
+except ImportError:
+    SDK_AVAILABLE = False
 
 # ── Cấu hình đường dẫn (Cross-platform) ──
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -16,8 +27,9 @@ PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024") # admin:Demo@2024 cho cam .
 API_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
 
 # ── Cấu hình FFmpeg (Cross-platform: Windows & Jetson) ──
+ROOT_DIR = os.path.dirname(CURRENT_DIR)
 if sys.platform == 'win32':
-    FFMPEG_BIN = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(CURRENT_DIR))), "frontend", "bin", "ffmpeg.exe")
+    FFMPEG_BIN = os.path.join(ROOT_DIR, "frontend", "bin", "ffmpeg.exe")
     if not os.path.exists(FFMPEG_BIN):
         FFMPEG_BIN = "ffmpeg"
 else:
@@ -33,14 +45,7 @@ WWWROOT_DIR = os.getenv("WWWROOT_PATH", os.path.join(os.path.dirname(os.path.dir
 ALERTS_DIR = os.path.join(WWWROOT_DIR, "detections")
 VIDEOS_DIR = os.path.join(WWWROOT_DIR, "videos")
 
-# ── Cấu hình File tọa độ (Dùng cho vẽ Dots trên UI) ──
-POINTS_FILE = os.path.join(CURRENT_DIR, "points_local.json")
-# Fallback nếu không có ở CURRENT_DIR, tìm ở thư mục viewer cũ (nếu có)
-if not os.path.exists(POINTS_FILE):
-    ALT_POINTS_FILE = r"D:\test_sdk\apps\desktop_viewer\points_local.json"
-    if os.path.exists(ALT_POINTS_FILE): POINTS_FILE = ALT_POINTS_FILE
-
-# ── Logging (định nghĩa trước khi dùng) ──
+# ── Logging ──
 DEBUG_LOG_FILE = os.path.join(CURRENT_DIR, "ai_diagnostics.log")
 
 def debug_log(msg):
@@ -52,6 +57,19 @@ def debug_log(msg):
         with open(DEBUG_LOG_FILE, "a", encoding="utf-8") as f:
             f.write(formatted_msg)
     except: pass
+
+# ── Global state ──
+SNAPSHOT_EVENT = threading.Event()
+SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
+
+LIVE_TEMPS = {}     # { ruleID: temperature }
+ALARM_RULES = {}    # { ruleID: { "pre_alarm": float, "alarm": float, "name": str } }
+COOLDOWN_MAP = {}   # { ruleID: next_allowed_time }
+STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
+LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_data": dict } }
+
+# ── Cấu hình File tọa độ ──
+POINTS_FILE = os.path.join(CURRENT_DIR, "points_local.json")
 
 def load_points_config():
     if os.path.exists(POINTS_FILE):
@@ -67,16 +85,6 @@ def load_points_config():
     return {}
 
 POINT_COORDS = load_points_config()
-
-# ── Global state ──
-SNAPSHOT_EVENT = threading.Event()
-SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
-
-LIVE_TEMPS = {}     # { ruleID: temperature }
-ALARM_RULES = {}    # { ruleID: { "pre_alarm": float, "alarm": float, "name": str } }
-COOLDOWN_MAP = {}   # { ruleID: next_allowed_time }
-STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
-LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_data": dict } }
 
 debug_log("=== AI ENGINE RELAY STARTING (DIGEST AUTH VERSION) ===")
 
@@ -137,7 +145,7 @@ def periodic_status_uploader():
 threading.Thread(target=periodic_status_uploader, daemon=True).start()
 
 def _extract_camera_rule_id(point_str: str):
-    """Map point string → camera rule ID"""
+    """Map point string -> camera rule ID"""
     if not point_str:
         return None
     s = point_str.strip()
@@ -202,59 +210,103 @@ def sync_rules_loop():
             debug_log(f"[SYSTEM] Rule Sync Error: {e}")
         time.sleep(5)
 
-class ThermalISAPI:
-    """Fetch thermal data from camera via ISAPI using HTTPDigestAuth"""
+# --- SDK Thermal Data Fetcher (Fix for 0.0 temp) ---
+class NET_DVR_THERMOMETRY_PRESETINFO_PARAM(ctypes.Structure):
+    _fields_ = [
+        ("byRuleID", ctypes.c_ubyte),
+        ("byRes1", ctypes.c_ubyte * 3),
+        ("fHighTemperature", ctypes.c_float),
+        ("fLowTemperature", ctypes.c_float),
+        ("fAverageTemperature", ctypes.c_float),
+        ("byRes2", ctypes.c_ubyte * 40)
+    ]
+
+class NET_DVR_THERMOMETRY_PRESETINFO(ctypes.Structure):
+    _fields_ = [
+        ("dwSize", ctypes.c_uint32),
+        ("wPresetNo", ctypes.c_ushort),
+        ("byRes1", ctypes.c_ubyte * 2),
+        ("byRuleNum", ctypes.c_ubyte),
+        ("byRes2", ctypes.c_ubyte * 3),
+        ("struPresetInfo", NET_DVR_THERMOMETRY_PRESETINFO_PARAM * 40),
+        ("byRes", ctypes.c_ubyte * 16)
+    ]
+
+class ThermalSDK:
+    """Listen to camera thermometry data via Hikvision SDK"""
     def __init__(self, camera_ip, user, password):
         self.camera_ip = camera_ip
         self.user = user
         self.password = password
-        self.session = requests.Session()
-        self.auth = HTTPDigestAuth(user, password)
         self.running = False
+        self.sdk = None
+        self.user_id = -1
 
     def start(self):
+        if not SDK_AVAILABLE:
+            debug_log("[THERMAL] SDK folder NOT FOUND at d:\\test_sdk")
+            return
         self.running = True
         threading.Thread(target=self._poll_loop, daemon=True).start()
-        debug_log("[THERMAL] ISAPI Thermal Monitor Started (Digest Mode)")
+        debug_log("[THERMAL] SDK Monitor Started (Port 8000)")
 
     def _poll_loop(self):
-        fail_count = 0
+        self.sdk = HCNetSDK(SDK_PATH)
+        if not self.sdk.init():
+            debug_log("[THERMAL] SDK Init Failed")
+            return
+
         while self.running:
             try:
-                # Use realTime endpoint for more accurate per-point data
-                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/realTime"
-                response = self.session.get(url, auth=self.auth, timeout=5)
+                if self.user_id < 0:
+                    self.user_id, _ = self.sdk.login(self.camera_ip, 8000, self.user, self.password)
+                    if self.user_id < 0:
+                        debug_log(f"[THERMAL] SDK Login Failed ({self.camera_ip})")
+                        time.sleep(10)
+                        continue
 
-                if response.status_code == 200:
-                    try:
-                        root = ET.fromstring(response.text)
-                        for point in root.findall('.//ThermometryPoint'):
-                            try:
-                                rule_id_elem = point.find('ruleID')
-                                temp_elem = point.find('temperature')
-                                if rule_id_elem is not None and temp_elem is not None:
-                                    rule_id = int(rule_id_elem.text)
-                                    temp = float(temp_elem.text)
-                                    LIVE_TEMPS[rule_id] = temp
-                                    fail_count = 0
-                            except: continue
-                    except Exception as e:
-                        debug_log(f"[THERMAL] XML Parse Error: {e}")
-                        fail_count += 1
-                elif response.status_code == 401:
-                    if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] AUTH FAILED on {self.camera_ip} (Check credentials)")
-                    fail_count += 1
+                cond = core_sdk.NET_DVR_THERMOMETRY_COND()
+                cond.dwSize = ctypes.sizeof(core_sdk.NET_DVR_THERMOMETRY_COND)
+                cond.dwChannel = 2 
+                cond.wPresetNo = 1
+                
+                info = NET_DVR_THERMOMETRY_PRESETINFO()
+                info.dwSize = ctypes.sizeof(NET_DVR_THERMOMETRY_PRESETINFO)
+                
+                std_get = core_sdk.NET_DVR_STD_CONFIG()
+                std_get.lpCondBuffer = ctypes.cast(ctypes.pointer(cond), ctypes.c_void_p)
+                std_get.dwCondSize = cond.dwSize
+                std_get.lpOutBuffer = ctypes.cast(ctypes.pointer(info), ctypes.c_void_p)
+                std_get.dwOutSize = info.dwSize
+                
+                # Khởi tạo rõ ràng các con trỏ khác về NULL để tránh Access Violation
+                std_get.lpInBuffer = None
+                std_get.dwInSize = 0
+                std_get.lpStatusBuffer = None
+                std_get.dwStatusSize = 0
+                std_get.lpXmlBuffer = None
+                std_get.dwXmlSize = 0
+                
+                if self.sdk.hcnetsdk.NET_DVR_GetSTDConfig(self.user_id, 3624, ctypes.byref(std_get)):
+                    for i in range(info.byRuleNum):
+                        param = info.struPresetInfo[i]
+                        rule_id = int(param.byRuleID)
+                        temp = float(param.fHighTemperature)
+                        if temp > -40 and temp < 200:
+                            LIVE_TEMPS[rule_id] = temp
                 else:
-                    fail_count += 1
-                    if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] ISAPI Request Failed: {response.status_code}")
-            except Exception as e:
-                fail_count += 1
-                if fail_count % 30 == 0:
-                        debug_log(f"[THERMAL] ISAPI Connection Error: {e}")
+                    err = self.sdk.hcnetsdk.NET_DVR_GetLastError()
+                    if err in [1, 7]: self.user_id = -1
 
+            except Exception as e:
+                debug_log(f"[THERMAL] SDK Error: {e}")
             time.sleep(2)
+
+        if self.user_id >= 0: self.sdk.logout(self.user_id)
+        self.sdk.cleanup()
+
+class ThermalISAPI:
+    """Legacy ISAPI Fetcher (Fallback)"""
 
 class EventStreamListener:
     """Listen to camera event stream via ISAPI Digest Auth"""
@@ -328,7 +380,7 @@ class StreamRelay:
     def __init__(self, name, rtsp_url, output_id, is_thermal=False):
         self.name = name
         self.rtsp_url = rtsp_url
-        self.output_url = f"rtsp://127.0.0.1:8554/{output_id}"
+        self.output_url = f"rtsp://localhost:8554/{output_id}"
         self.is_thermal = is_thermal
         self.running = True
         self.frame_buffer = deque(maxlen=100)
@@ -338,9 +390,17 @@ class StreamRelay:
 
     def _get_ffmpeg_process(self, w, h):
         cmd = [ FFMPEG_BIN, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
-            '-s', f"{w}x{h}", '-r', '20', '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-            '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '28', '-f', 'rtsp', self.output_url ]
-        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            '-s', f"{w}x{h}", '-r', '20', '-i', '-', 
+            '-rtsp_transport', 'tcp', '-rtsp_flags', 'prefer_tcp',
+            '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+            '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '28',
+            '-g', '40', '-keyint_min', '20', # Fix Broken pipe bằng cách chia nhỏ I-frame
+            '-b:v', '2M', '-maxrate', '2M', '-bufsize', '4M', # Băng thông ổn định
+            '-f', 'rtsp', self.output_url ]
+        
+        # Log ffmpeg output để debug sập video
+        log_file = open(FFMPEG_LOG_PATH, "a")
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=log_file, stderr=log_file)
 
     def _draw_points(self, frame, blink):
         global ALARM_RULES, LIVE_TEMPS, POINT_COORDS
@@ -361,30 +421,59 @@ class StreamRelay:
             size = 4 if self.is_thermal else 12
             cv2.line(frame, (x-size, y), (x+size, y), color, 1)
             cv2.line(frame, (x, y-size), (x, y+size), color, 1)
-            if temp > 0:
-                cv2.putText(frame, f"P{pid}: {temp:.1f}C", (x+5, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.4, color, 1)
+            # Hiển thị nhiệt độ kèm background để dễ đọc
+            label = f"P{pid}: {temp:.1f}C"
+            (tw, th), baseline = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+            # Vẽ nền đen mờ
+            cv2.rectangle(frame, (x + 5, y - 10 - th - 5), (x + 5 + tw + 2, y - 10 + 2), (0, 0, 0), -1)
+            # Chữ trắng, hoặc đỏ nếu quá nóng
+            txt_color = (0, 0, 255) if temp >= 50 else (255, 255, 255)
+            cv2.putText(frame, label, (x + 5, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.45, txt_color, 1)
 
     def _run(self):
+        """Main loop with auto-restart watchdog for FFmpeg"""
         while self.running:
+            debug_log(f"[{self.name}] Connecting to Camera: {self.rtsp_url}")
             cap = cv2.VideoCapture(self.rtsp_url)
             if not cap.isOpened():
+                debug_log(f"[{self.name}] Camera connection failed. Retrying in 5s...")
                 time.sleep(5); continue
+            
             w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             if w <= 0: cap.release(); time.sleep(1); continue
+            
+            debug_log(f"[{self.name}] Starting FFmpeg Relay: {self.output_url} ({w}x{h})")
             pipe = self._get_ffmpeg_process(w, h)
             blink = 0
+            
             try:
                 while self.running:
                     ret, frame = cap.read()
-                    if not ret: break
+                    if not ret: 
+                        debug_log(f"[{self.name}] Stream read failed. Restarting cap...")
+                        break
+                    
                     blink = (blink + 1) % 10
                     self._draw_points(frame, blink < 5)
+                    
                     if pipe and pipe.stdin:
-                        try: pipe.stdin.write(frame.tobytes())
-                        except: break
+                        try:
+                            pipe.stdin.write(frame.tobytes())
+                        except (BrokenPipeError, OSError):
+                            debug_log(f"[{self.name}] FFmpeg Pipe Broken. Restarting...")
+                            break
+                    
+                    # Kiểm tra xem FFmpeg có còn sống không
+                    if pipe.poll() is not None:
+                        debug_log(f"[{self.name}] FFmpeg terminated unexpectedly. Restarting...")
+                        break
+            except Exception as e:
+                debug_log(f"[{self.name}] Runtime Error: {e}")
             finally:
                 cap.release()
-                if pipe: pipe.terminate()
+                if pipe:
+                    try: pipe.terminate()
+                    except: pass
                 time.sleep(2)
 
 def cleanup_old_events():
@@ -395,7 +484,8 @@ def cleanup_old_events():
         time.sleep(300)
 
 if __name__ == "__main__":
-    thermal = ThermalISAPI(CAMERA_IP, USER, PASSWORD)
+    # Sử dụng SDK thay cho ISAPI để khắc phục hoàn toàn lỗi 0.0
+    thermal = ThermalSDK(CAMERA_IP, USER, PASSWORD)
     thermal.start()
     event_listener = EventStreamListener(CAMERA_IP, USER, PASSWORD)
     event_listener.start()
@@ -405,11 +495,6 @@ if __name__ == "__main__":
     relay_opt = StreamRelay("OPTICAL", OPTICAL_URL, "camera_152_normal", is_thermal=False)
     relay_thm = StreamRelay("THERMAL", THERMAL_URL, "camera_152_thermal", is_thermal=True)
     relay_opt.start(); relay_thm.start()
-
-    # Camera 153 (Phóng điện)
-    camera_153_url = f"rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101"
-    relay_153 = StreamRelay("CAMERA_153_PD", camera_153_url, "camera_153_pd", is_thermal=False)
-    relay_153.start()
     
     try:
         while True: time.sleep(1)
