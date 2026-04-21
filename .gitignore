@@ -81,6 +81,9 @@ wwwroot/media/
 wwwroot/data/media/
 wwwroot/reports/
 alerts/
+sdk-relay/notifications/alerts/*.json
+sdk-relay/notifications/alerts/*.jpg
+sdk-relay/notifications/notifications.log
 *.jpg
 *.jpeg
 *.png
