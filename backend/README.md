@@ -1,72 +1,79 @@
-# StationMonitor Backend
+# StationMonitor — Backend
 
-ASP.NET Core 8 backend cho hệ thống giám sát trạm biến áp.
+ASP.NET Core 8 · TimescaleDB · SignalR · Background Workers
 
-## Yêu cầu
+> Quick start xem tại root `README.md`. File này dành cho backend developer.
 
-- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+---
 
-## Cài đặt
+## Cấu trúc solution
 
-### 1. Chạy database (TimescaleDB)
+```
+StationMonitor.Api/        REST API (Controllers, Hubs, Middleware, Program.cs)
+StationMonitor.Data/       EF Core (20+ entities, Migrations, AppDbContext)
+StationMonitor.Services/   Business logic (Auth, Camera, Email, Supabase)
+StationMonitor.Workers/    Background workers
+  └── Polling/             PlcPollingWorker, RuleEvaluationWorker, EarlyWarningWorker
+  └── Quality/             HealthScoreWorker
+StationMonitor.Tests/      Unit tests (xUnit)
+StationMonitor.Analytics/  Analytics queries
+StationMonitor.Simulators/ Protocol simulators (Modbus, IEC-104, MQTT)
+```
+
+---
+
+## Chạy backend
+
+```bash
+cd backend/StationMonitor.Api
+dotnet run
+# API: http://localhost:5056
+```
+
+## Build & Test
+
+```bash
+cd backend
+dotnet build StationMonitor.sln
+dotnet test
+```
+
+---
+
+## Database
+
+TimescaleDB trong Docker:
 
 ```bash
 docker run -d --name stationmonitor-db \
   -e POSTGRES_PASSWORD=postgres123 \
   -e POSTGRES_DB=stationmonitor \
   -p 5432:5432 \
-  -v D:/docker-data/stationmonitor-db:/var/lib/postgresql/data \
   timescale/timescaledb:latest-pg16
 ```
 
-### 2. Clone và restore packages
-
+Migration:
 ```bash
-git clone https://github.com/tdk12111990-droid/stationmonitor-backend.git
-cd stationmonitor-backend
-dotnet restore
+cd backend
+dotnet ef database update --project StationMonitor.Data --startup-project StationMonitor.Api
 ```
 
-### 3. Chạy backend
+---
 
-```bash
-dotnet run --project StationMonitor.Api
+## Config quan trọng (`appsettings.json`)
+
+```json
+"ConnectionStrings": { "Default": "Host=localhost;Port=5432;Database=stationmonitor;..." }
+"Jwt":     { "Key": "...", "ExpiryMinutes": 480 }
+"Go2Rtc":  { "ApiUrl": "http://localhost:1984" }
+"Media":   { "FFmpegPath": "d:\\StationMonitor\\media-server\\ffmpeg.exe" }
+"Smtp":    { "Host": "smtp.gmail.com", "Port": "587" }
 ```
 
-API chạy tại: `http://localhost:5056`
+---
 
-## Tài khoản mặc định
+## Tài liệu
 
-Tự động tạo khi khởi động lần đầu:
-
-| Username | Password   | Role  |
-|----------|------------|-------|
-| admin    | Admin@123  | admin |
-
-## API Endpoints (Phase 1)
-
-```
-POST /api/v1/auth/login    — Đăng nhập → JWT token
-POST /api/v1/auth/refresh  — Refresh token
-GET  /api/v1/auth/me       — Thông tin user hiện tại (cần JWT)
-```
-
-## Cấu trúc project
-
-```
-StationMonitor.Api/        — REST API + Controllers
-StationMonitor.Data/       — EF Core, 20 entities, migrations
-StationMonitor.Services/   — Business logic (Auth, ...)
-StationMonitor.Workers/    — Background workers (polling, sync, ...)
-StationMonitor.Analytics/  — Early warning, health score
-```
-
-## Database
-
-TimescaleDB (PostgreSQL 16) với 20 bảng:
-- `sensor_readings` — hypertable time-series
-- `alerts`, `alert_history` — vòng đời cảnh báo
-- `detection_events`, `media_files` — AI camera
-- `audit_log`, `login_log` — traceability
-- ... (xem `StationMonitor.Data/Entities/`)
+- `docs/KNOWN-ISSUES.md` — Bug đã gặp và cách fix (**đọc trước khi debug**)
+- `docs/CHANGELOG.md` — Nhật ký kỹ thuật theo ngày
+- `CLAUDE.md` — Rules cho Claude Code khi sửa backend

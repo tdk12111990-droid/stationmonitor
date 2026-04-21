@@ -65,8 +65,9 @@ public class ThermalEvidenceService
         var pass = GetCfg(cfg, "password") ?? "admin";
         var rtspPath = GetCfg(cfg, "rtsp_path") ?? "/Streaming/Channels/201";
 
-        var detectionsDir = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "detections");
-        var videosDir = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "videos");
+        var mediaRoot = Path.Combine(_env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot"), "media");
+        var detectionsDir = Path.Combine(mediaRoot, "detections");
+        var videosDir = Path.Combine(mediaRoot, "videos");
         Directory.CreateDirectory(detectionsDir);
         Directory.CreateDirectory(videosDir);
 
@@ -80,12 +81,12 @@ public class ThermalEvidenceService
             var imageName = $"{Guid.NewGuid()}.jpg";
             var imagePath = Path.Combine(detectionsDir, imageName);
             await File.WriteAllBytesAsync(imagePath, snapshotBytes, ct);
-            imageUrl = $"/detections/{imageName}";
+            imageUrl = $"/media/detections/{imageName}";
 
             var thumbName = $"{Guid.NewGuid()}_thumb.jpg";
             var thumbPath = Path.Combine(detectionsDir, thumbName);
             await File.WriteAllBytesAsync(thumbPath, snapshotBytes, ct);
-            thumbUrl = $"/detections/{thumbName}";
+            thumbUrl = $"/media/detections/{thumbName}";
         }
 
         videoUrl = await TryRecordClipAsync(streamId, ip, user, pass, rtspPath, videosDir, ct);
@@ -177,7 +178,7 @@ public class ThermalEvidenceService
             await process.WaitForExitAsync(timeoutCts.Token);
 
             if (process.ExitCode == 0 && File.Exists(outputPath) && new FileInfo(outputPath).Length > 0)
-                return $"/videos/{fileName}";
+                return $"/media/videos/{fileName}";
 
             var stderr = await process.StandardError.ReadToEndAsync(ct);
             _logger.LogWarning("[Evidence] ffmpeg that bai (exit={ExitCode}): {Error}", process.ExitCode, stderr);

@@ -135,8 +135,26 @@ export class AppShell {
     this.connectSignalR();
   }
 
+  // ── Tự động nhận diện loại cảnh báo từ nội dung message/source ──
+  private alertTitle(a: any): string {
+    const msg = (a.message || '').toLowerCase();
+    const src = (a.source || '').toLowerCase();
+    if (src.includes('storage') || msg.includes('ổ đĩa') || msg.includes('disk') || msg.includes('dung lượng'))
+      return 'CẢNH BÁO Ổ ĐĨA';
+    if (msg.includes('phóng điện') || msg.includes('phong_dien') || src.includes('pd'))
+      return 'CẢNH BÁO PHÓNG ĐIỆN';
+    if (msg.includes('nhiệt') || msg.includes('nhiet') || msg.includes('°c') || msg.includes('camera nhiệt'))
+      return 'CẢNH BÁO NHIỆT ĐỘ';
+    if (msg.includes('camera') || src.includes('camera'))
+      return 'CẢNH BÁO CAMERA';
+    if (msg.includes('kết nối') || msg.includes('offline') || src.includes('health'))
+      return 'CẢNH BÁO KẾT NỐI';
+    if (a.level === 'alarm') return 'BÁO ĐỘNG KHẨN CẤP';
+    return 'CẢNH BÁO HỆ THỐNG';
+  }
+
   // ── iOS Premium Toast Notification (Global) ──────────────────
-  private showToast(msg: string, type: 'success' | 'error' | 'warning' | 'alarm', thumb?: string): void {
+  private showToast(msg: string, type: 'success' | 'error' | 'warning' | 'alarm', thumb?: string, title?: string): void {
     const t = document.createElement('div');
     const color = type === 'alarm' ? '#ef4444' : type === 'warning' ? '#f59e0b' : '#10b981';
     
@@ -150,8 +168,8 @@ export class AppShell {
       cursor:pointer; font-family:-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
     `;
     
-    const apiBase = 'http://localhost:5056';
-    const imageUrl = thumb ? (thumb.startsWith('http') ? thumb : `${apiBase}${thumb}`) : '';
+    // Sử dụng đường dẫn tương đối để Proxy (Vite) xử lý
+    const imageUrl = thumb ? (thumb.startsWith('http') ? thumb : thumb) : '';
 
     t.innerHTML = `
       <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; opacity:0.5; font-size:0.6rem; font-weight:700; text-transform:uppercase; letter-spacing:1px;">
@@ -163,7 +181,7 @@ export class AppShell {
       </div>
       <div style="display:flex; gap:14px; align-items:center;">
          <div style="flex:1;">
-            <div style="font-weight:800; color:${color}; font-size:0.9rem; margin-bottom:3px; letter-spacing:-0.2px;">${type === 'alarm' ? 'BÁO ĐỘNG KHẨN CẤP' : type === 'warning' ? 'CẢNH BÁO NHIỆT ĐỘ' : 'THÔNG BÁO'}</div>
+            <div style="font-weight:800; color:${color}; font-size:0.9rem; margin-bottom:3px; letter-spacing:-0.2px;">${title ?? (type === 'alarm' ? 'BÁO ĐỘNG KHẨN CẤP' : 'THÔNG BÁO')}</div>
             <div style="font-size:0.82rem; line-height:1.45; opacity:0.95; font-weight:500;">${msg}</div>
          </div>
          ${imageUrl ? `<img src="${imageUrl}" style="width:60px; height:60px; border-radius:14px; object-fit:cover; border:1px solid rgba(255,255,255,0.15); background:#000;">` : ''}
@@ -216,9 +234,8 @@ export class AppShell {
       .build();
 
     this.hubConnection.on('AlertNew', (a: any) => {
-      console.log('[Global] New Alert:', a);
       const level = (a.level || 'warning').toLowerCase() as any;
-      this.showToast(a.message, level, a.thumbnailUrl);
+      this.showToast(a.message, level, a.thumbnailUrl, this.alertTitle(a));
     });
 
     this.hubConnection.start().catch(err => {

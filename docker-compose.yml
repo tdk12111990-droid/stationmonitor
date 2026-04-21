@@ -44,9 +44,15 @@ services:
     image: alexxit/go2rtc:latest
     container_name: stationmonitor-streaming
     restart: always
-    network_mode: host # Dùng host để nhận luồng multicast/RTSP mượt hơn trên Jetson
+    ports:
+      - "1984:1984"   # HTTP API / WebRTC UI
+      - "8554:8554"   # RTSP re-stream
+      - "8555:8555/tcp"
+      - "8555:8555/udp"
     volumes:
-      - ./frontend/go2rtc.yaml:/config/go2rtc.yaml
+      - ./media-server/go2rtc.yaml:/config/go2rtc.yaml
+    networks:
+      - sm-network
 
   # 4. Backend chính: StationMonitor ASP.NET Core API
   stationmonitor-backend:
@@ -60,6 +66,8 @@ services:
         condition: service_healthy
       stationmonitor-mqtt:
         condition: service_started
+      stationmonitor-streaming:
+        condition: service_started
     ports:
       - "5056:8080" # Map 5056 (host) sang 8080 (container)
     environment:
@@ -67,16 +75,20 @@ services:
       - "ConnectionStrings__Default=Host=stationmonitor-db;Port=5432;Database=stationmonitor;Username=postgres;Password=postgres123"
       - "Mqtt__Broker=stationmonitor-mqtt"
       - "Jwt__Key=StationMonitor_SuperSecret_Key_2026_ChangeInProduction!"
+      - "Go2Rtc__ApiUrl=http://stationmonitor-streaming:1984"
+      - "Go2Rtc__RtspUrl=rtsp://stationmonitor-streaming:8554"
+      - "Media__FFmpegPath=ffmpeg"
+      - "Security__TrustedNetworks=172.,100."
     volumes:
-      - ./data/media:/app/wwwroot/data/media # Lưu ảnh/video AI phát hiện được
+      - ./data/media:/app/wwwroot/media # Thư mục chung cho ảnh/video
     networks:
       - sm-network
 
   # 5. AI Engine: Xử lý nhiệt độ & hình ảnh (GPU support)
   stationmonitor-ai:
     build:
-      context: ./backend/StationMonitor.Api/AI
-      dockerfile: Dockerfile.ai
+      context: ./sdk-relay
+      dockerfile: Dockerfile
     container_name: stationmonitor-ai
     restart: always
     privileged: true # Cần để truy cập driver NVIDIA
@@ -89,13 +101,13 @@ services:
               capabilities: [gpu]
     environment:
       - API_URL=http://stationmonitor-backend:8080/api/v1
+      - GO2RTC_RTSP_URL=rtsp://stationmonitor-streaming:8554
       - CAMERA_IP=192.168.10.152
       - CAMERA_USER=admin
       - CAMERA_PASSWORD=Demo@2024
-      - WWWROOT_PATH=/app/wwwroot
+      - WWWROOT_PATH=/app/wwwroot/media
     volumes:
-      - ./data/media:/app/wwwroot/detections # Chia sẻ thư mục ảnh với backend
-      - ./data/media/videos:/app/wwwroot/videos # Chia sẻ thư mục video
+      - ./data/media:/app/wwwroot/media # Chia sẻ thư mục media với backend
     depends_on:
       - stationmonitor-backend
     networks:

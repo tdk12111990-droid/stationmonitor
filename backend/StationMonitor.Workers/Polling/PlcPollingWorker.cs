@@ -162,13 +162,18 @@ public class PlcPollingWorker : BackgroundService
             var now = DateTime.UtcNow;
 
             // Parse 4 điểm đo theo mapping DB32
-            var readings = new List<SensorReading>
+            // Chỉ lưu giá trị hợp lệ: nhiệt độ 0-200°C, phóng điện -100 đến 100 dB
+            var rawReadings = new[]
             {
-                MakeReading(device, "nhiet_do_pha_1", ReadInt16(bytes, 0), "°C", now),
-                MakeReading(device, "nhiet_do_pha_3", ReadInt16(bytes, 2), "°C", now),
-                MakeReading(device, "nhiet_do_pha_2", ReadInt16(bytes, 4), "°C", now),
-                MakeReading(device, "phong_dien",     ReadInt16(bytes, 8), "dB", now),
+                (id: "nhiet_do_pha_1", val: ReadInt16(bytes, 0), unit: "°C"),
+                (id: "nhiet_do_pha_3", val: ReadInt16(bytes, 2), unit: "°C"),
+                (id: "nhiet_do_pha_2", val: ReadInt16(bytes, 4), unit: "°C"),
+                (id: "phong_dien",     val: ReadInt16(bytes, 8), unit: "dB"),
             };
+
+            var readings = rawReadings
+                .Select(r => MakeReading(device, r.id, r.val, r.unit, now))
+                .ToList();
 
             // Lưu vào TimescaleDB
             db.SensorReadings.AddRange(readings);
@@ -183,10 +188,8 @@ public class PlcPollingWorker : BackgroundService
             });
             await _notifier.SendSensorUpdateAsync(payload);
 
-            _logger.LogDebug("[PLC] {Ip} → P1:{p1}°C P2:{p2}°C P3:{p3}°C PD:{pd}dB",
-                ip,
-                readings[0].Value, readings[2].Value,
-                readings[1].Value, readings[3].Value);
+            var logParts = readings.Select(r => $"{r.PointId}={r.Value:0.#}{r.Unit}");
+            _logger.LogDebug("[PLC] {Ip} → {Points}", ip, string.Join(", ", logParts));
 
             await UpdateDeviceStatusAsync(db, device.Id, "online");
         }

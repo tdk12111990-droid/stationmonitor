@@ -37,6 +37,15 @@ public class EarlyWarningWorker : BackgroundService
     private const double PdFreqRatioAlarm = 5.0;   // tăng 5x → alarm
     private const double PdEventThreshold = 2.0;   // dB: ngưỡng coi là "sự kiện PD"
 
+    // ── Range giá trị hợp lệ (lọc giá trị lỗi từ sensor mất kết nối) ──
+    private const double TempMin = 0.0;
+    private const double TempMax = 200.0;
+    private const double PdMin   = -100.0;
+    private const double PdMax   = 100.0;
+
+    private static bool IsValidTemp(double v) => v >= TempMin && v <= TempMax;
+    private static bool IsValidPd(double v)   => v >= PdMin   && v <= PdMax;
+
     public EarlyWarningWorker(
         IServiceScopeFactory scopeFactory,
         IRealtimeNotifier notifier,
@@ -88,7 +97,9 @@ public class EarlyWarningWorker : BackgroundService
 
         foreach (var g in groups)
         {
-            var items = g.Where(x => x.Value.HasValue).ToList();
+            var isTemp = g.Key.PointId.StartsWith("nhiet");
+            var items = g.Where(x => x.Value.HasValue &&
+                (isTemp ? IsValidTemp(x.Value!.Value) : IsValidPd(x.Value!.Value))).ToList();
             if (items.Count < 20) continue;
 
             var t0  = items[0].Time;
@@ -96,7 +107,6 @@ public class EarlyWarningWorker : BackgroundService
             var ys  = items.Select(x => x.Value!.Value).ToArray();
             var slopePerDay = LinearSlope(xs, ys) * 24;
 
-            var isTemp    = g.Key.PointId.StartsWith("nhiet");
             var threshold = isTemp ? TempSlopeThresholdPerDay : PdSlopeThresholdPerDay;
             if (slopePerDay <= threshold) continue;
 
@@ -139,7 +149,9 @@ public class EarlyWarningWorker : BackgroundService
 
         foreach (var g in byDevice)
         {
-            var vals = g.Where(r => r.Value.HasValue).Select(r => r.Value!.Value).ToList();
+            // Chỉ lấy giá trị nhiệt độ hợp lệ (loại bỏ giá trị lỗi sensor như -50°C)
+            var vals = g.Where(r => r.Value.HasValue && IsValidTemp(r.Value!.Value))
+                        .Select(r => r.Value!.Value).ToList();
             if (vals.Count < 2) continue; // cần ít nhất 2 pha để so sánh
 
             var deltaT = vals.Max() - vals.Min();
@@ -238,7 +250,8 @@ public class EarlyWarningWorker : BackgroundService
         foreach (var g in byDevice)
         {
             var pdReading    = g.FirstOrDefault(r => r.PointId == "phong_dien");
-            var tempReadings = g.Where(r => tempPoints.Contains(r.PointId) && r.Value.HasValue).ToList();
+            var tempReadings = g.Where(r => tempPoints.Contains(r.PointId) && r.Value.HasValue
+                                           && IsValidTemp(r.Value!.Value)).ToList();
 
             if (pdReading?.Value.HasValue != true || tempReadings.Count == 0) continue;
 

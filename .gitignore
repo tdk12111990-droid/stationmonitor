@@ -74,10 +74,29 @@ data/mosquitto/log/
 *.db
 *.sqlite
 
-# ── Media ──
+# ── Media (generated at runtime) ──
 wwwroot/detections/
 wwwroot/videos/
+wwwroot/media/
 wwwroot/data/media/
+wwwroot/reports/
+alerts/
+*.jpg
+*.jpeg
+*.png
+!frontend/public/*.png
+*.mp4
+*.avi
+
+# ── SDK binaries (download separately) ──
+sdk-relay/test_sdk/lib/linux/
+sdk-relay/test_sdk/lib/*.dll
+sdk-relay/test_sdk/lib/*.lib
+sdk-relay/test_sdk/lib/*.exe
+sdk-relay/test_sdk/lib/*.zip
+
+# ── Claude memory (local only) ──
+.claude/
 
 # ── System / OS ──
 .DS_Store

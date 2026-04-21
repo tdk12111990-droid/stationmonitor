@@ -42,5 +42,16 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    proxy: {
+      '/media': {
+        target: 'http://localhost:5056',
+        changeOrigin: true,
+        secure: false,
+      },
+      '/ws': {
+        target: 'http://localhost:5056',
+        ws: true,
+      }
+    }
   }
 });

@@ -33,12 +33,22 @@ public class DevicesController : ControllerBase
     private readonly AppDbContext _db;
     private readonly DeviceService _deviceService;
     private readonly PermissionService _permissions;
+    private readonly IConfiguration _config;
 
-    public DevicesController(AppDbContext db, DeviceService deviceService, PermissionService permissions)
+    public DevicesController(AppDbContext db, DeviceService deviceService, PermissionService permissions, IConfiguration config)
     {
         _db = db;
         _deviceService = deviceService;
         _permissions = permissions;
+        _config = config;
+    }
+
+    private bool IsTrustedInternal(string? ip)
+    {
+        if (ip == null) return false;
+        if (ip == "127.0.0.1" || ip == "::1" || ip.Contains("127.0.0.1")) return true;
+        var extra = _config["Security:TrustedNetworks"] ?? "172.,100.";
+        return extra.Split(',').Any(p => ip.StartsWith(p.Trim()));
     }
 
     /// <summary>
@@ -48,11 +58,8 @@ public class DevicesController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> GetAll()
     {
-        // Chỉ cho phép localhost
         var remoteIp = Request.HttpContext.Connection.RemoteIpAddress?.ToString();
-        var isLocal = remoteIp == "127.0.0.1" || remoteIp == "::1" || remoteIp == "localhost" || (remoteIp != null && remoteIp.Contains("127.0.0.1"));
-        
-        if (!isLocal && !User.Identity!.IsAuthenticated)
+        if (!IsTrustedInternal(remoteIp) && !User.Identity!.IsAuthenticated)
             return Unauthorized();
 
         var devices = await _db.Devices

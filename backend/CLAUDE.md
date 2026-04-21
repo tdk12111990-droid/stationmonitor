@@ -55,7 +55,6 @@ var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 - Refresh token: lưu trong SystemSettings với key `refresh_token_{userId}`
 
 ## Docs
-- `docs/bugs_and_fixes.md` — đọc trước khi debug
-- `docs/progress.md` — trạng thái từng phase
-- `docs/devlog.md` — nhật ký theo ngày
-- `docs/plan_backend.md` — kế hoạch chi tiết
+- `docs/KNOWN-ISSUES.md` — **đọc trước khi debug** (bug history & fixes)
+- `docs/CHANGELOG.md` — nhật ký kỹ thuật theo ngày
+- Kế hoạch phase → xem `../ROADMAP.md`

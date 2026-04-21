@@ -52,14 +52,14 @@ export class AlertsHistoryPage {
       /* ── Grid list ── */
       .ah-grid-header, .ah-grid-row {
         display: grid;
-        grid-template-columns: 80px 155px 100px minmax(0, 1fr) 70px 120px 100px;
+        grid-template-columns: 80px 155px 100px minmax(0, 1fr) 120px 100px;
         align-items: center;
         width: 100%;
         box-sizing: border-box;
       }
       .ah-detail-panel.open ~ * .ah-grid-header,
       .ah-detail-panel.open ~ * .ah-grid-row {
-        grid-template-columns: 60px 140px 90px minmax(0, 1fr) 60px 110px 90px;
+        grid-template-columns: 60px 140px 90px minmax(0, 1fr) 110px 90px;
       }
       .ah-grid-header {
         border-bottom: 1px solid var(--admin-border);
@@ -73,7 +73,6 @@ export class AlertsHistoryPage {
         white-space: nowrap; overflow: hidden;
         display: flex; align-items: center; gap: 5px;
       }
-      .ah-grid-header > div:nth-child(4),
       .ah-grid-header > div:nth-child(5),
       .ah-grid-header > div:nth-child(6) {
         justify-content: center;
@@ -89,7 +88,6 @@ export class AlertsHistoryPage {
         font-size: .83rem; color: var(--admin-text);
         overflow: hidden;
       }
-      .ah-grid-row > div:nth-child(4),
       .ah-grid-row > div:nth-child(5),
       .ah-grid-row > div:nth-child(6) {
         display: flex;
@@ -234,7 +232,6 @@ export class AlertsHistoryPage {
                   MỨC ĐỘ <span class="ah-sort-badge ah-sort-inactive">⇅</span>
                 </div>
                 <div>NỘI DUNG</div>
-                <div>GIÁ TRỊ</div>
                 <div>TRẠNG THÁI</div>
                 <div>HÀNH ĐỘNG</div>
               </div>
@@ -312,14 +309,35 @@ export class AlertsHistoryPage {
       .build();
 
     // Khi có cảnh báo mới -> Insert vào đầu danh sách
-    connection.on('AlertNew', (alert: AlertItem) => {
-      // Chỉ insert nếu nó khớp với bộ lọc hiện tại (về mặt thời gian/status)
-      if (this.filterStatus && this.filterStatus !== alert.status) return;
+    connection.on('AlertNew', (alert: any) => {
+      // Chuẩn hóa Alert ID (chấp nhận cả id và Id)
+      const aid = alert.id || alert.Id;
+      if (!aid) {
+        console.warn('[Realtime] Received alert without ID:', alert);
+        return;
+      }
       
-      // Kiểm tra xem đã tồn tại chưa
-      const exists = this.alerts.find(a => a.id === alert.id);
+      // Map lại object để frontend dùng thống nhất camelCase
+      const normalized: AlertItem = {
+        id: aid,
+        source: alert.source || alert.Source || 'camera',
+        level: alert.level || alert.Level || 'alarm',
+        status: alert.status || alert.Status || 'open',
+        message: alert.message || alert.Message || '',
+        value: alert.value || alert.Value,
+        deviceId: alert.deviceId || alert.DeviceId,
+        ruleId: alert.ruleId || alert.RuleId,
+        triggeredAt: alert.triggeredAt || alert.TriggeredAt || new Date().toISOString(),
+        thumbnailUrl: alert.thumbnailUrl || alert.ThumbnailUrl,
+        imageUrl: alert.imageUrl || alert.ImageUrl,
+        videoUrl: alert.videoUrl || alert.VideoUrl
+      };
+
+      if (this.filterStatus && this.filterStatus !== normalized.status) return;
+      
+      const exists = this.alerts.find(a => a.id === normalized.id);
       if (!exists) {
-        this.alerts.unshift(alert);
+        this.alerts.unshift(normalized);
         this.renderTable();
       }
     });
@@ -429,7 +447,6 @@ export class AlertsHistoryPage {
         : a.status === 'acked'
           ? '<span class="tag tag-warning">Đang xử lý</span>'
           : '<span class="tag tag-success">Đã đóng</span>';
-      const value = a.value != null ? `<b>${a.value.toFixed(1)}</b>` : '—';
       const actionBtns = a.status === 'open'
         ? `<button class="btn-industrial btn-sm btn-ack" data-id="${a.id}">✓ ACK</button>`
         : a.status === 'acked'
@@ -447,7 +464,6 @@ export class AlertsHistoryPage {
         <div style="font-size:.78rem;white-space:nowrap;">${time}</div>
         <div>${levelBadge}</div>
         <div class="ah-col-msg">${a.message}</div>
-        <div>${value}</div>
         <div>${statusBadge}</div>
         <div>${actionBtns}</div>
       </div>`;
@@ -577,7 +593,7 @@ export class AlertsHistoryPage {
     const mediaSection = (a.imageUrl || a.videoUrl) ? `
     <div class="ah-detail-section" style="padding:0;border-bottom:1px solid rgba(255,255,255,.05);background:#000;">
       ${a.videoUrl 
-        ? `<video src="${a.videoUrl}" style="width:100%;max-height:260px;object-fit:contain;display:block;" controls autoplay loop muted></video>` 
+        ? `<video style="width:100%;max-height:260px;object-fit:contain;display:block;" controls autoplay loop muted><source src="${a.videoUrl}" type="video/mp4"></video>`
         : `<img src="${a.imageUrl}" style="width:100%;max-height:260px;object-fit:contain;display:block;">`
       }
     </div>` : '';

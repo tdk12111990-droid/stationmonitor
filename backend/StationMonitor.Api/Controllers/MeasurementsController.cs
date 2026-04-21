@@ -22,54 +22,78 @@ public class MeasurementsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IHubContext<RealtimeHub> _hubContext;
+    private readonly IConfiguration _config;
 
-    public MeasurementsController(AppDbContext db, IHubContext<RealtimeHub> hubContext)
+    public MeasurementsController(AppDbContext db, IHubContext<RealtimeHub> hubContext, IConfiguration config)
     {
         _db = db;
         _hubContext = hubContext;
+        _config = config;
+    }
+
+    // Cho phép: localhost + Docker bridge (172.x) + Tailscale (100.x) + LAN config
+    private bool IsTrustedInternal(string ip)
+    {
+        if (ip == "127.0.0.1" || ip == "::1" || ip.Contains("127.0.0.1")) return true;
+        var extra = _config["Security:TrustedNetworks"] ?? "172.,100.";
+        return extra.Split(',').Any(p => ip.StartsWith(p.Trim()));
     }
 
     /// <summary>
-    /// Lấy giá trị mới nhất của tất cả điểm đo trong trạm
+    /// Lấy giá trị mới nhất của tất cả điểm đo trong trạm (10 phút gần nhất)
     /// Dùng DISTINCT ON của PostgreSQL/TimescaleDB để tránh lỗi EF Core GroupBy
+    /// Optimize: chỉ scan 10 phút dữ liệu gần nhất để tránh timeout khi bảng lớn
     /// </summary>
     [HttpGet("points")]
     public async Task<IActionResult> GetLatestPoints([FromQuery] Guid? stationId)
     {
-        // DISTINCT ON (device_id, point_id) ORDER BY time DESC
-        // → lấy row mới nhất của mỗi cặp (device, point)
+        // Lấy data 10 phút gần nhất, rồi DISTINCT ON lấy mới nhất của mỗi (device, point)
         var sql = stationId.HasValue
             ? $"""
                SELECT DISTINCT ON ("DeviceId", "PointId")
-                 "DeviceId", "PointId", "Value", "Unit", "Quality", "Time"
-               FROM "SensorReadings"
-               WHERE "StationId" = '{stationId}'
-               ORDER BY "DeviceId", "PointId", "Time" DESC
+                 sr."DeviceId", sr."PointId", sr."Value", sr."Unit", sr."Quality", sr."Time",
+                 sp."X" as sld_x, sp."Y" as sld_y
+               FROM "SensorReadings" sr
+               LEFT JOIN "SldPoints" sp ON sr."PointId" = sp."PointId"
+               WHERE sr."StationId" = '{stationId}'
+                 AND sr."Time" > NOW() - INTERVAL '10 minutes'
+               ORDER BY sr."DeviceId", sr."PointId", sr."Time" DESC
                """
             : """
               SELECT DISTINCT ON ("DeviceId", "PointId")
-                "DeviceId", "PointId", "Value", "Unit", "Quality", "Time"
-              FROM "SensorReadings"
-              ORDER BY "DeviceId", "PointId", "Time" DESC
+                sr."DeviceId", sr."PointId", sr."Value", sr."Unit", sr."Quality", sr."Time",
+                sp."X" as sld_x, sp."Y" as sld_y
+              FROM "SensorReadings" sr
+              LEFT JOIN "SldPoints" sp ON sr."PointId" = sp."PointId"
+              WHERE sr."Time" > NOW() - INTERVAL '10 minutes'
+              ORDER BY sr."DeviceId", sr."PointId", sr."Time" DESC
               """;
 
-        var conn = _db.Database.GetDbConnection();
+        // Dùng connection riêng (không share với EF Core) để tránh timeout khi relay đang ingest
+        var connStr = _db.Database.GetConnectionString();
+        await using var conn = new Npgsql.NpgsqlConnection(connStr);
         await conn.OpenAsync();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
+        await using var cmd = new Npgsql.NpgsqlCommand(sql, conn);
+        cmd.CommandTimeout = 10;
         await using var reader = await cmd.ExecuteReaderAsync();
 
         var result = new List<object>();
         while (await reader.ReadAsync())
         {
+            var sldX = reader.IsDBNull(6) ? (double?)null : reader.GetDouble(6);
+            var sldY = reader.IsDBNull(7) ? (double?)null : reader.GetDouble(7);
+
+            // camelCase để match TypeScript SensorPoint interface
             result.Add(new
             {
-                DeviceId = reader.GetGuid(0),
-                PointId  = reader.GetString(1),
-                Value    = reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2),
-                Unit     = reader.IsDBNull(3) ? "°C" : reader.GetString(3),
-                Quality  = (int)reader.GetInt16(4),
-                Time     = reader.GetDateTime(5)
+                deviceId = reader.GetGuid(0),
+                pointId  = reader.GetString(1),
+                value    = reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2),
+                unit     = reader.IsDBNull(3) ? "°C" : reader.GetString(3),
+                quality  = reader.IsDBNull(4) ? 0 : (int)reader.GetInt16(4),
+                time     = reader.GetDateTime(5),
+                x        = sldX,
+                y        = sldY
             });
         }
 
@@ -225,9 +249,8 @@ public class MeasurementsController : ControllerBase
 
         // Chế độ bảo mật: hỗ trợ IPv4, IPv6 local và IPv4-mapped IPv6
         var remoteIp = Request.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "";
-        var isLocal = remoteIp == "127.0.0.1" || remoteIp == "::1" || remoteIp.EndsWith("127.0.0.1") || remoteIp == "localhost";
 
-        if (!isLocal)
+        if (!IsTrustedInternal(remoteIp))
         {
             var err = $"[Ingest] Blocked unauthorized access from {remoteIp}";
             try { System.IO.File.AppendAllText(logFile, err + "\n"); } catch {}

@@ -44,7 +44,13 @@
       "Bash(findstr \"5056\")",
       "Bash(python -c ' *)",
       "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('token','NO TOKEN'\\)[:50] if 'token' in d else d\\)\")",
-      "Bash(python -c \"import sys,json; devs=json.load\\(sys.stdin\\); [print\\(f'ID:{d[\\\\\"id\\\\\"][:8]} name:{d[\\\\\"name\\\\\"]} type:{d[\\\\\"type\\\\\"]} config:{d.get\\(\\\\\"config\\\\\",\\\\\"\\\\\"\\)}'\\) for d in devs]\")"
+      "Bash(python -c \"import sys,json; devs=json.load\\(sys.stdin\\); [print\\(f'ID:{d[\\\\\"id\\\\\"][:8]} name:{d[\\\\\"name\\\\\"]} type:{d[\\\\\"type\\\\\"]} config:{d.get\\(\\\\\"config\\\\\",\\\\\"\\\\\"\\)}'\\) for d in devs]\")",
+      "Bash(mkdir -p /d/StationMonitor/docs/archive)",
+      "Bash(mv /d/StationMonitor/AI_PLAN.md /d/StationMonitor/ALARM_WORKFLOW_PLAN.md /d/StationMonitor/ANALYTICS_PLAN.md /d/StationMonitor/ARCHITECTURE_SDK_JETSON.md /d/StationMonitor/CAMERA_EVENT_PROOF.md /d/StationMonitor/CAMERA_PHASE_PLAN.md /d/StationMonitor/CHUNG_MINH_CAMERA_CO_EVENT.md /d/StationMonitor/DEPLOYMENT_CONFIGURATION.md /d/StationMonitor/DEPLOYMENT_QUICK_START.md /d/StationMonitor/DEPLOYMENT_STATUS.md /d/StationMonitor/EVENT_STREAM_IMPLEMENTATION.md /d/StationMonitor/JETSON_DEPLOYMENT_GUIDE.md /d/StationMonitor/JETSON_SETUP_GUIDE.md /d/StationMonitor/MASTER_PLAN.md /d/StationMonitor/MOBILE_PLAN.md /d/StationMonitor/PROJECT_STATUS.md /d/StationMonitor/PROTOCOL_PLAN.md /d/StationMonitor/PUSH_TO_JETSON.md /d/StationMonitor/SET_UP_JETSON_6.md /d/StationMonitor/SIMULATOR_GUIDE.md /d/StationMonitor/TODO_PHASES.md /d/StationMonitor/docs/archive/)",
+      "Bash(docker exec stationmonitor-db *)",
+      "Bash(tee /tmp/points_response.json)",
+      "Bash(python -c \" import sys,json data = json.load\\(sys.stdin\\) if isinstance\\(data, list\\): for p in data: print\\(f\\\\\"pointId={p.get\\('pointId'\\)}, label={p.get\\('label'\\)}, deviceId={p.get\\('deviceId'\\)}\\\\\"\\) else: print\\(data\\) \"')",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('token','NO_TOKEN'\\)[:50] if 'token' in d else d\\)\")"
     ]
   }
 }

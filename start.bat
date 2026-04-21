@@ -14,7 +14,7 @@ if %errorlevel%==0 (
     echo  go2rtc dang chay - bo qua
 ) else (
     echo  Khoi dong go2rtc...
-    start "go2rtc" cmd /k "cd /d "%~dp0frontend" && bin\go2rtc.exe -config go2rtc.yaml"
+    start "go2rtc" cmd /k "cd /d "%~dp0media-server" && go2rtc.exe -config go2rtc.yaml"
     timeout /t 2 /nobreak >nul
 )
 
@@ -41,7 +41,7 @@ if %errorlevel%==0 (
 echo [3.5/4] Khoi dong AI Stream Relay...
 cd /d "%~dp0"
 echo  Khoi dong AI Engine (Stream Relay)...
-start "AI Stream Relay" cmd /k "cd /d "%~dp0backend\StationMonitor.Api\AI" && python enhanced_relay.py"
+start "AI Stream Relay" cmd /k "cd /d "%~dp0sdk-relay" && python enhanced_relay.py"
 timeout /t 3 /nobreak >nul
 
 echo [4/4] Khoi dong Frontend...

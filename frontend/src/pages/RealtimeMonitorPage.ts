@@ -49,7 +49,6 @@ export class RealtimeMonitorPage {
   // Cache tọa độ điểm đo từ SignalR (pointId → coords)
   private _coordCache: Record<string, { tx: number; ty: number; ox: number; oy: number }> = {};
   // Ngưỡng cảnh báo từ rules (pointId → {preAlarm, alarm})
-  private _thresholds: Record<string, { preAlarm?: number; alarm?: number; op: string }> = {};
 
   render(): string {
     return `
@@ -363,8 +362,6 @@ export class RealtimeMonitorPage {
     this.renderGrid();
     this.bindEvents();
     this.loadDetections();
-    this.loadThresholds();
-    this.startThresholdRefresh();
     this.connectSignalR();
     this.syncAlarmStates();
     this.startClock();
@@ -374,7 +371,6 @@ export class RealtimeMonitorPage {
   destroy(): void {
     if (this.clockInterval) clearInterval(this.clockInterval);
     if (this._pollInterval) clearInterval(this._pollInterval);
-    if (this._thresholdInterval) clearInterval(this._thresholdInterval);
     if (this.hubConnection) this.hubConnection.stop();
     document.removeEventListener('keydown', this._onKey);
     const pc = document.getElementById('pageContent');
@@ -450,8 +446,7 @@ export class RealtimeMonitorPage {
     const activeId = fullscreen ? mainId : subId;
     const status: string = (cam.status as string) ?? 'unknown';
 
-    // mse: kết nối nhanh, ổn định hơn webrtc qua iframe
-    const streamUrl = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(activeId)}&mode=mse&controls=0`;
+    const streamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
 
     return `
     <div class="nvr-cell" data-cam-id="${cam.id}" data-go2rtc="${go2rtcId}"
@@ -873,136 +868,11 @@ export class RealtimeMonitorPage {
       camGroups[did].push(r);
     });
 
-    for (const [camId, points] of Object.entries(camGroups)) {
-      const canvas = document.getElementById(`nvr-canvas-${camId}`) as HTMLCanvasElement;
-      if (!canvas) continue;
-
-      const cell = canvas.closest('.nvr-cell') as HTMLElement;
-      const go2rtcId = cell?.dataset.go2rtc?.toLowerCase() ?? '';
-
-      // Chỉ vẽ cho camera 152 (thermal và normal), bỏ qua 153
-      if (!go2rtcId.includes('152')) continue;
-
-      const ctx = canvas.getContext('2d');
-      if (!ctx) continue;
-
-      if (canvas.width !== canvas.clientWidth || canvas.height !== canvas.clientHeight) {
-        canvas.width  = canvas.clientWidth  || canvas.offsetWidth;
-        canvas.height = canvas.clientHeight || canvas.offsetHeight;
-      }
-      if (canvas.width < 10 || canvas.height < 10) continue;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const isThermal = go2rtcId.includes('thermal');
-
-      // Tính letterbox: thermal 384×288 (4:3) hiển thị trong cell 16:9
-      // Browser dùng contain → viền đen 2 bên/trên dưới
-      const videoAR = isThermal ? (384 / 288) : (1920 / 1080);
-      const cellAR  = canvas.width / canvas.height;
-      let vidW: number, vidH: number, offX: number, offY: number;
-      if (cellAR > videoAR) {
-        vidH = canvas.height; vidW = vidH * videoAR;
-        offX = (canvas.width - vidW) / 2; offY = 0;
-      } else {
-        vidW = canvas.width; vidH = vidW / videoAR;
-        offX = 0; offY = (canvas.height - vidH) / 2;
-      }
-
-      points.forEach(p => {
-        const x = isThermal ? p.tx : p.ox;
-        const y = isThermal ? p.ty : p.oy;
-        if (x == null || y == null) return;
-
-        const sx = offX + x * vidW;
-        const sy = offY + y * vidH;
-        const temp   = p.value as number;
-        const pid = String(p.pointId ?? '').trim();
-        const thr = this._thresholds[pid];
-        let color = '#00c853'; // xanh lá = bình thường
-        if (thr && temp > 0) {
-          const val = temp;
-          const op  = thr.op ?? '>';
-          const check = (v: number, t: number) =>
-            op === '>' ? v > t : op === '>=' ? v >= t : op === '<' ? v < t : op === '<=' ? v <= t : false;
-          if (thr.alarm != null && check(val, thr.alarm))        color = '#ef4444'; // đỏ = alarm
-          else if (thr.preAlarm != null && check(val, thr.preAlarm)) color = '#f59e0b'; // vàng = warning
-        }
-        const arm = 4;
-
-        // Crosshair
-        ctx.save();
-        ctx.globalAlpha = 0.85;
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 1;
-        ctx.shadowBlur = 3;
-        ctx.shadowColor = color;
-        ctx.beginPath();
-        ctx.moveTo(sx - arm, sy); ctx.lineTo(sx + arm, sy);
-        ctx.moveTo(sx, sy - arm); ctx.lineTo(sx, sy + arm);
-        ctx.stroke();
-        ctx.restore();
-
-        // Nhãn 2 dòng: "P1" / "40.2°"
-        const pidNum = pid.replace(/^P/i, '');
-        const line1 = `P${pidNum}`;
-        const line2 = temp > 0 ? `${temp.toFixed(1)}°` : '';
-        const fs = isThermal ? 8 : 9;
-        const lh = fs + 2; // line height
-        const pad = 3;
-        const lx = sx + arm + 3;
-        const ly = sy - lh / 2 + fs;
-        ctx.save();
-        ctx.font = `600 ${fs}px Inter, Arial, sans-serif`;
-        const tw = Math.max(ctx.measureText(line1).width, ctx.measureText(line2).width);
-        const bh = line2 ? lh * 2 + 2 : lh + 2;
-        // Pill background
-        ctx.fillStyle = 'rgba(0,0,0,0.6)';
-        ctx.beginPath();
-        ctx.roundRect(lx - pad, ly - fs - 1, tw + pad * 2, bh, 2);
-        ctx.fill();
-        // Line 1: P1
-        ctx.fillStyle = color;
-        ctx.globalAlpha = 1;
-        ctx.fillText(line1, lx, ly);
-        // Line 2: nhiệt độ (màu trắng nhạt hơn)
-        if (line2) {
-          ctx.fillStyle = '#fff';
-          ctx.globalAlpha = 0.85;
-          ctx.fillText(line2, lx, ly + lh);
-        }
-        ctx.restore();
-      });
-    }
-  }
-
-  private startThresholdRefresh(): void {
-    this._thresholdInterval = setInterval(() => this.loadThresholds(), 30_000);
-  }
-
-  private async loadThresholds(): Promise<void> {
-    try {
-      const rules = await stationApi.getRules();
-      const map: Record<string, { preAlarm?: number; alarm?: number; op: string }> = {};
-      for (const r of rules) {
-        if (!r.enabled) continue;
-        try {
-          const cond = typeof r.condition === 'string' ? JSON.parse(r.condition) : r.condition;
-          const point: string = cond.point ?? '';
-          if (!point) continue;
-          const op: string = cond.op ?? '>';
-          const alarm   = cond.alarm   != null ? Number(cond.alarm)   : cond.value != null ? Number(cond.value) : undefined;
-          const preAlarm = cond.pre_alarm != null ? Number(cond.pre_alarm) : undefined;
-          if (!map[point]) map[point] = { op };
-          if (alarm   != null && (map[point].alarm   == null || alarm   < map[point].alarm!))   map[point].alarm   = alarm;
-          if (preAlarm != null && (map[point].preAlarm == null || preAlarm < map[point].preAlarm!)) map[point].preAlarm = preAlarm;
-        } catch { /* skip malformed rule */ }
-      }
-      this._thresholds = map;
-    } catch { /* ignore */ }
+    // Canvas overlay đã được thay bằng OpenCV burn-in trong relay
+    void camGroups;
   }
 
   private _pollInterval?: ReturnType<typeof setInterval>;
-  private _thresholdInterval?: ReturnType<typeof setInterval>;
 
   private startPointPolling(): void {
     const poll = async () => {
@@ -1018,12 +888,16 @@ export class RealtimeMonitorPage {
             const enriched = data.map((r: any) => {
               const pid = r.PointId ?? r.pointId ?? '';
               const cached = this._coordCache[pid] as { tx?: number; ty?: number; ox?: number; oy?: number } | undefined ?? {};
+              // Ưu tiên cache từ SignalR, fallback sang API
+              const tx = cached.tx ?? (r.X ? (r.X / 100) : undefined);
+              const ty = cached.ty ?? (r.Y ? (r.Y / 100) : undefined);
+              const ox = cached.ox ?? tx;
+              const oy = cached.oy ?? ty;
               return {
                 deviceId: r.DeviceId ?? r.deviceId,
                 pointId: pid,
                 value: r.Value ?? r.value ?? 0,
-                tx: cached.tx, ty: cached.ty,
-                ox: cached.ox, oy: cached.oy,
+                tx, ty, ox, oy,
               };
             });
             this.drawPoints(enriched);

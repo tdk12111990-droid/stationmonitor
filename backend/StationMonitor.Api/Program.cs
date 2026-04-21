@@ -59,8 +59,7 @@ builder.Services.AddHostedService<PlcPollingWorker>();
 builder.Services.AddHostedService<RuleEvaluationWorker>();
 // MaintenanceReminderWorker: nhắc nhở lịch bảo trì mỗi 1 giờ
 builder.Services.AddHostedService<MaintenanceReminderWorker>();
-// EarlyWarningWorker: phát hiện xu hướng tăng bất thường (linear regression, mỗi 30 phút)
-builder.Services.AddHostedService<EarlyWarningWorker>();
+// EarlyWarningWorker: đã tắt — dùng rule engine thay thế
 // HealthScoreWorker: tính điểm sức khỏe 0-100 mỗi thiết bị (mỗi 1 giờ)
 // Đăng ký singleton để AnalyticsController có thể trigger recalculate thủ công
 builder.Services.AddSingleton<HealthScoreWorker>();
@@ -82,7 +81,9 @@ builder.Services.AddHostedService<StationMonitor.Api.Services.AIEngineManagedWor
 
 // ── SignalR ───────────────────────────────────────────────
 // Client kết nối: ws://localhost:5056/ws/realtime
-builder.Services.AddSignalR();
+builder.Services.AddSignalR().AddJsonProtocol(options => {
+    options.PayloadSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase;
+});
 
 // ── JWT Authentication ────────────────────────────────────
 var jwtKey = builder.Configuration["Jwt:Key"]!;

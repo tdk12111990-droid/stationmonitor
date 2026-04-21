@@ -19,7 +19,6 @@ export class DashboardPage {
   private sensors: SensorPoint[] = [];
   private kpiInterval?: ReturnType<typeof setInterval>;
   private alertInterval?: ReturnType<typeof setInterval>;
-  private healthInterval?: ReturnType<typeof setInterval>;
   private editMode = false;
 
   // Pan/zoom/rotate state (cần truy cập từ nhiều method)
@@ -215,47 +214,73 @@ export class DashboardPage {
         </label>
       </div>
 
-      <!-- ══ KPI nổi (top-left) ══ -->
-      <div id="floatKpi" style="position:absolute;top:10px;left:10px;z-index:30;width:240px;
+      <!-- ══ KPI — Cluster cards tủ điện (top-left) ══ -->
+      <div id="floatKpi" style="position:absolute;top:10px;left:10px;z-index:30;width:248px;
         background:rgba(15,23,42,0.88);backdrop-filter:blur(12px);
         border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;">
         <div style="display:flex;justify-content:space-between;align-items:center;
           padding:6px 10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-          <span style="font-size:0.7rem;font-weight:800;color:#94a3b8;letter-spacing:.5px;">📊 CHỈ SỐ HỆ THỐNG</span>
+          <span style="font-size:0.68rem;font-weight:800;color:#94a3b8;letter-spacing:.5px;">🏭 GIÁM SÁT TỦ ĐIỆN</span>
           <button id="btnCollapseKpi" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem;line-height:1;padding:0 2px;">▲</button>
         </div>
-        <div id="kpiBody" style="padding:6px 8px;display:flex;flex-direction:column;gap:4px;">
-          <div class="kpi-row-item" style="border-left:3px solid #ef4444;">
-            <span class="kpi-row-label">🌡 NHIỆT ĐỘ CAO NHẤT</span>
-            <span class="kpi-row-val kpi-text-red"><span class="kpi-val">--</span> °C</span>
+        <div id="kpiBody" style="padding:8px;display:flex;flex-direction:column;gap:6px;">
+
+          <!-- Tủ 471 -->
+          <div id="cluster-tu471" style="background:#0f172a;border-radius:8px;padding:10px 12px;
+            border:1px solid #1e3a5f;cursor:pointer;transition:border-color .2s;"
+            onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='#1e3a5f'">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+              <span style="font-size:0.78rem;font-weight:800;color:#e2e8f0;">Tủ 471</span>
+              <span id="tu471-status" style="font-size:0.62rem;font-weight:700;padding:2px 7px;
+                border-radius:10px;background:#052e16;color:#10b981;">● ONLINE</span>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:5px 8px;">
+              <div>
+                <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">MAX NHIỆT PHA</div>
+                <div id="tu471-temp" style="font-size:0.9rem;font-weight:800;color:#f87171;">-- °C</div>
+              </div>
+              <div>
+                <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">PHÓNG ĐIỆN</div>
+                <div id="tu471-pd" style="font-size:0.9rem;font-weight:800;color:#fbbf24;">-- dB</div>
+              </div>
+              <div>
+                <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">SỨC KHỎE</div>
+                <div id="tu471-health" style="font-size:0.9rem;font-weight:800;color:#10b981;">--</div>
+              </div>
+              <div>
+                <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">CẢNH BÁO</div>
+                <div id="tu471-alerts" style="font-size:0.9rem;font-weight:800;color:#94a3b8;">--</div>
+              </div>
+            </div>
           </div>
-          <div class="kpi-row-item" style="border-left:3px solid #f59e0b;">
-            <span class="kpi-row-label">⚡ PHÓNG ĐIỆN (PD)</span>
-            <span class="kpi-row-val kpi-text-orange"><span class="kpi-val">--</span> dB</span>
+
+          <!-- Placeholder tủ khác (mai mốt thêm) -->
+          <div style="border:1px dashed #1e293b;border-radius:8px;padding:8px;text-align:center;
+            color:#334155;font-size:0.62rem;cursor:default;">
+            + Thêm tủ điện
           </div>
-          <div class="kpi-row-item" style="border-left:3px solid #10b981;">
-            <span class="kpi-row-label">📡 THIẾT BỊ ONLINE</span>
-            <span class="kpi-row-val kpi-text-green"><span class="kpi-val">--</span></span>
-          </div>
-          <div class="kpi-row-item" style="border-left:3px solid #ef4444;">
-            <span class="kpi-row-label">🔔 CẢNH BÁO ĐANG MỞ</span>
-            <span class="kpi-row-val kpi-text-red"><span class="kpi-val">--</span></span>
-          </div>
+
         </div>
       </div>
 
-      <!-- ══ Health widget (bên trái, dưới KPI) ══ -->
-      <div id="floatHealth" style="position:absolute;top:auto;left:10px;z-index:30;width:240px;
+
+      <!-- ══ Camera nhiệt — 10 điểm đo (trái, dưới Tủ 471) ══ -->
+      <div id="floatCamGrid" style="position:absolute;top:auto;left:10px;z-index:30;width:248px;
         background:rgba(15,23,42,0.88);backdrop-filter:blur(12px);
-        border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;
-        margin-top:4px;">
+        border:1px solid rgba(255,255,255,0.1);border-radius:10px;overflow:hidden;margin-top:4px;">
         <div style="display:flex;justify-content:space-between;align-items:center;
           padding:5px 10px;border-bottom:1px solid rgba(255,255,255,0.08);">
-          <span style="font-size:0.7rem;font-weight:800;color:#94a3b8;letter-spacing:.5px;">🛡 SỨC KHỎE HỆ THỐNG</span>
-          <button id="btnCollapseHealth" style="background:none;border:none;color:#64748b;cursor:pointer;font-size:0.9rem;line-height:1;padding:0 2px;">▲</button>
+          <span style="font-size:0.65rem;font-weight:800;color:#e2e8f0;">🌡 CAMERA NHIỆT — 10 ĐIỂM</span>
+          <span id="camGrid-max" style="font-size:0.6rem;color:#f43f5e;font-weight:700;"></span>
         </div>
-        <div id="healthBody" style="padding:5px 8px;display:flex;flex-direction:column;gap:3px;">
-          <div style="color:#475569;font-size:0.68rem;text-align:center;padding:6px;">Đang tải...</div>
+        <div style="padding:7px 8px;">
+          <div id="camThermalGrid" style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;">
+            ${Array.from({length:10},(_,i)=>`
+            <div style="text-align:center;padding:5px 2px;background:#0f172a;border-radius:5px;border:1px solid #1e293b;">
+              <div style="font-size:0.55rem;color:#475569;margin-bottom:2px;">P${i+1}</div>
+              <div id="cam-p${i+1}" style="font-size:0.72rem;font-weight:800;color:#64748b;">--</div>
+            </div>`).join('')}
+          </div>
         </div>
       </div>
 
@@ -298,8 +323,8 @@ export class DashboardPage {
           </div>
           <div id="camBody">
             <div style="position:relative;width:100%;aspect-ratio:16/9;background:#000;overflow:hidden;">
-              <iframe src="${GO2RTC_URL}/stream.html?src=camera_152_normal&mode=mse&controls=0"
-                style="width:100%;height:100%;border:none;pointer-events:none;display:block;transform:scale(1.2) translateX(-4%);" allow="autoplay">
+              <iframe id="dashCamFrame" src="/camera-stream.html?src=camera_152_normal&mode=webrtc,mse&go2rtc=${GO2RTC_URL}"
+                style="width:100%;height:100%;border:none;pointer-events:none;display:block;" allow="autoplay">
               </iframe>
             </div>
           </div>
@@ -343,9 +368,33 @@ export class DashboardPage {
     // Polling
     this.kpiInterval = setInterval(() => this.refreshKpi(), 5000);
     this.alertInterval = setInterval(() => this.refreshAlerts(), 15000);
-    this.healthInterval = setInterval(() => this.refreshHealth(), 120000); // mỗi 2 phút
     await this.refreshHealth();
-    this.positionHealthWidget();
+    this.positionLeftPanels();
+    this.initCamStream();
+  }
+
+  private camRetryTimer: number | null = null;
+
+  private initCamStream(): void {
+    const iframe = document.getElementById('dashCamFrame') as HTMLIFrameElement | null;
+    if (!iframe) return;
+    // Reload iframe every 15s if stream hasn't loaded (handles "unknown error")
+    this.camRetryTimer = window.setInterval(() => {
+      const el = document.getElementById('dashCamFrame') as HTMLIFrameElement | null;
+      if (!el) return;
+      const src = el.src;
+      el.src = '';
+      el.src = src;
+    }, 15000);
+  }
+
+  private positionLeftPanels(): void {
+    const kpi = document.getElementById('floatKpi');
+    const cam = document.getElementById('floatCamGrid');
+    if (!kpi || !cam) return;
+    const kpiRect = kpi.getBoundingClientRect();
+    const vpTop = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
+    cam.style.top = (kpiRect.bottom - vpTop + 8) + 'px';
   }
 
   // ── SLD load ────────────────────────────────────────────────
@@ -449,10 +498,7 @@ export class DashboardPage {
       circ.setAttribute('stroke-width', '1.5');
       g.appendChild(circ);
 
-      const isCamera = p.deviceType?.toLowerCase().startsWith('camera');
-      if (false) { // Mở Badge cho cả Camera (bỏ qua điều kiện ẩn cũ)
-          // Skip badge for cameras
-      } else {
+      if (true) {
         // ══ Measurement Badge ══
         // QUAN TRỌNG: tách 2 group để tránh CSS animation override SVG transform.
         // posG: chứa SVG transform (vị trí + scale) — KHÔNG có class animation
@@ -1106,9 +1152,9 @@ if (main && p.deviceId) {
       await stationApi.uploadSldSvg(this.stationId, file);
       // Reload toàn bộ SLD: SVG mới (URL có version mới) + xóa nodes cũ + reset drawer
       await this.loadSld();
-      this.showToast('Upload SVG thành công — tất cả node đã được reset', 'success');
+      alert('Upload SVG thành công — tất cả node đã được reset');
     } catch (e) {
-      this.showToast(`Lỗi upload: ${(e as Error).message}`, 'error');
+      alert(`Lỗi upload: ${(e as Error).message}`);
     } finally {
       btn.textContent = '↑ Upload SVG mới';
       btn.removeAttribute('disabled');
@@ -1240,7 +1286,6 @@ if (main && p.deviceId) {
   setup('btnCollapseKpi', 'kpiBody');
     setup('btnCollapseAlerts', 'alertsBody');
     setup('btnCollapseCam', 'camBody');
-    setup('btnCollapseHealth', 'healthBody');
 }
 
   // ── Color picker ─────────────────────────────────────────────
@@ -1268,15 +1313,94 @@ if (main && p.deviceId) {
 
     const temps = points.filter(p => p.pointId.startsWith('nhiet_do'));
     const pd = points.find(p => p.pointId === 'phong_dien');
-    const online = devices.filter(d => d.status === 'online').length;
 
-    const rows = document.querySelectorAll<HTMLElement>('#floatKpi .kpi-row-item');
-    const val = (i: number) => rows[i]?.querySelector('.kpi-val');
+    // ── Phân loại cảnh báo theo nguồn ──────────────────────────
+    const PLC_POINTS  = ['nhiet_do_pha_1','nhiet_do_pha_2','nhiet_do_pha_3','phong_dien'];
+    const CAM_POINT_IDS = ['P1','P2','P3','P4','P5','P6','P7','P8','P9','P10'];
+    const plcDeviceIds  = devices.filter(d => d.type === 'plc_s7').map(d => d.id.toLowerCase());
+    const camDeviceIds  = devices.filter(d => d.type?.includes('camera')).map(d => d.id.toLowerCase());
 
-    if(temps.length) val(0)!.textContent = Math.max(...temps.map(p => p.value)).toFixed(1);
-  if(pd) val(1)!.textContent = `${pd.value.toFixed(1)}`;
-val(2)!.textContent = `${online}/${devices.length}`;
-val(3)!.textContent = String(alerts.length);
+    const activeAlerts = alerts.filter(a => a.status === 'open' || a.status === 'acked');
+    const plcAlerts = activeAlerts.filter(a => {
+      const pid = this.extractPointIdFromAlert(a)?.toLowerCase() ?? '';
+      const did = (a.deviceId ?? '').toLowerCase();
+      return PLC_POINTS.includes(pid) || plcDeviceIds.includes(did);
+    });
+    const camAlerts = activeAlerts.filter(a => {
+      const pid = this.extractPointIdFromAlert(a)?.toUpperCase() ?? '';
+      const did = (a.deviceId ?? '').toLowerCase();
+      return CAM_POINT_IDS.includes(pid) || camDeviceIds.includes(did);
+    });
+
+    // ── Cluster card Tủ 471 ─────────────────────────────────────
+    const maxTemp = temps.length ? Math.max(...temps.map(p => p.value)) : null;
+
+    const tempEl = document.getElementById('tu471-temp');
+    const pdEl   = document.getElementById('tu471-pd');
+    const alEl   = document.getElementById('tu471-alerts');
+    const stEl   = document.getElementById('tu471-status');
+
+    if (tempEl) {
+      tempEl.textContent = maxTemp !== null ? `${maxTemp.toFixed(1)} °C` : '-- °C';
+      tempEl.style.color = maxTemp !== null && maxTemp >= 65 ? '#ef4444' : maxTemp !== null && maxTemp >= 50 ? '#f59e0b' : '#f87171';
+    }
+    if (pdEl && pd) {
+      pdEl.textContent = `${pd.value.toFixed(1)} dB`;
+      pdEl.style.color = pd.value >= -20 ? '#ef4444' : pd.value >= -30 ? '#f59e0b' : '#fbbf24';
+    }
+    if (alEl) {
+      alEl.textContent = plcAlerts.length > 0 ? String(plcAlerts.length) : '✓ OK';
+      alEl.style.color = plcAlerts.length > 0 ? '#ef4444' : '#10b981';
+    }
+    if (stEl) {
+      const plcOnline = devices.some(d => d.type === 'plc_s7' && d.status === 'online');
+      stEl.textContent = plcOnline ? '● ONLINE' : '● OFFLINE';
+      stEl.style.color = plcOnline ? '#10b981' : '#ef4444';
+      stEl.style.background = plcOnline ? '#052e16' : '#3b0a0a';
+    }
+
+    // ── Camera thermal grid P1-P10 ───────────────────────────────
+    let camMax = -Infinity; let camMaxId = '';
+    let camMin = Infinity;  let camMinId = '';
+    const camVals: {pid: string; v: number}[] = [];
+
+    CAM_POINT_IDS.forEach((pid, i) => {
+      const s = points.find(p => p.pointId === pid);
+      const el = document.getElementById(`cam-p${i+1}`);
+      const wrapper = el?.parentElement;
+      if (!el) return;
+      if (s) {
+        const v = s.value;
+        camVals.push({pid, v});
+        el.textContent = `${v.toFixed(1)}°`;
+        el.style.color = v >= 50 ? '#ef4444' : v >= 40 ? '#f59e0b' : '#10b981';
+        if (v > camMax) { camMax = v; camMaxId = pid; }
+        if (v < camMin) { camMin = v; camMinId = pid; }
+        // Reset border
+        if (wrapper) wrapper.style.borderColor = '#1e293b';
+      } else {
+        el.textContent = '--';
+        el.style.color = '#334155';
+      }
+    });
+
+    // Highlight max (đỏ) và min (xanh dương)
+    CAM_POINT_IDS.forEach((pid, i) => {
+      const wrapper = document.getElementById(`cam-p${i+1}`)?.parentElement;
+      if (!wrapper) return;
+      if (pid === camMaxId) wrapper.style.borderColor = '#ef4444';
+      else if (pid === camMinId) wrapper.style.borderColor = '#3b82f6';
+    });
+
+    // Header: hiện max, min, cảnh báo camera
+    const maxLabel = document.getElementById('camGrid-max');
+    if (maxLabel && camVals.length) {
+      const camAlertTxt = camAlerts.length > 0 ? ` · 🔔${camAlerts.length}` : '';
+      maxLabel.innerHTML =
+        `<span style="color:#ef4444;">▲${camMaxId} ${camMax.toFixed(1)}°</span>` +
+        `&nbsp;<span style="color:#3b82f6;">▼${camMinId} ${camMin.toFixed(1)}°</span>` +
+        `<span style="color:#f59e0b;">${camAlertTxt}</span>`;
+    }
 
 const statusEl = document.getElementById('statusPlc');
 if (statusEl) statusEl.innerHTML = `<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;"></span> PLC: Online`;
@@ -1381,56 +1505,22 @@ listEl.innerHTML = alerts.map(a => `
 }
 
   // ── Toast Notification ───────────────────
-  private showToast(msg: string, type: 'success' | 'error' | 'warning' | 'alarm', thumb?: string): void {
-     // Forward to AppShell or just let AppShell handle AlertNew globally
-  }
 
-  // ── Health scores ─────────────────────────────────────────
-  private async refreshHealth(): Promise < void> {
-  const body = document.getElementById('healthBody');
-  if(!body) return;
-  try {
-    const scores = await stationApi.getHealthScores(this.stationId || undefined);
-    if(scores.length === 0) {
-  body.innerHTML = '<div style="color:#475569;font-size:0.68rem;text-align:center;padding:6px;">Chưa có dữ liệu</div>';
-  return;
-}
-const riskColor: Record<string, string> = {
-  good: '#10b981', fair: '#f59e0b', poor: '#f97316', critical: '#ef4444',
-};
-const riskLabel: Record<string, string> = {
-  good: 'Tốt', fair: 'Trung bình', poor: 'Kém', critical: 'Nguy hiểm',
-};
-body.innerHTML = scores.map((s: HealthScore) => {
-  const col = riskColor[s.risk] ?? '#64748b';
-  const lbl = riskLabel[s.risk] ?? s.risk;
-  const pct = s.score;
-  const icon = s.deviceType.startsWith('camera') ? '📷' : s.deviceType === 'plc_s7' ? '🔌' : '📡';
-  return `
-          <div style="padding:3px 2px;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px;">
-              <span style="font-size:0.65rem;color:#e2e8f0;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px;">
-                ${icon} ${s.deviceName}
-              </span>
-              <span style="font-size:0.6rem;font-weight:800;color:${col};">${s.score} · ${lbl}</span>
-            </div>
-            <div style="background:#1e293b;border-radius:3px;height:4px;overflow:hidden;">
-              <div style="width:${pct}%;height:100%;background:${col};border-radius:3px;transition:width 0.4s;"></div>
-            </div>
-          </div>`;
-}).join('');
-    } catch {
-  /* silently fail — backend mới có thể chưa tính */
-}
-  }
-
-  private positionHealthWidget(): void {
-  const kpi = document.getElementById('floatKpi');
-  const health = document.getElementById('floatHealth');
-  if(!kpi || !health) return;
-const kpiBottom = kpi.getBoundingClientRect().bottom;
-const vpTop = document.getElementById('sldViewport')?.getBoundingClientRect().top ?? 0;
-health.style.top = (kpiBottom - vpTop + 8) + 'px';
+  // ── Health score → cập nhật cluster card Tủ 471 ──────────────
+  private async refreshHealth(): Promise<void> {
+    try {
+      const allScores = await stationApi.getHealthScores(this.stationId || undefined);
+      const plcScore = allScores.find((s: HealthScore) => s.deviceType === 'plc_s7');
+      if (!plcScore) return;
+      const riskColor: Record<string, string> = {
+        good: '#10b981', fair: '#f59e0b', poor: '#f97316', critical: '#ef4444',
+      };
+      const healthEl = document.getElementById('tu471-health');
+      if (healthEl) {
+        healthEl.textContent = `${plcScore.score}/100`;
+        healthEl.style.color = riskColor[plcScore.risk] ?? '#64748b';
+      }
+    } catch { /* silently fail */ }
   }
 
   private connectSignalR(): void {
@@ -1498,7 +1588,7 @@ health.style.top = (kpiBottom - vpTop + 8) + 'px';
 destroy(): void {
   clearInterval(this.kpiInterval);
   clearInterval(this.alertInterval);
-  clearInterval(this.healthInterval);
+  if (this.camRetryTimer) clearInterval(this.camRetryTimer);
   if(this.hubConnection) this.hubConnection.stop();
 }
 }

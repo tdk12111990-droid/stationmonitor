@@ -35,12 +35,13 @@ public class CameraWebhookController : ControllerBase
         IWebHostEnvironment env, ILogger<CameraWebhookController> logger)
     {
         _db = db; _notifier = notifier; _env = env; _logger = logger;
-        // Hardcode đường dẫn tuyệt đối để tránh sai lệch khi chạy ở chế độ Debug/Release
-        _rootPath = @"D:\StationMonitor\backend\StationMonitor.Api\wwwroot";
+        // Sử dụng WebRootPath động để tương thích cả Windows và Docker
+        _rootPath = env.WebRootPath ?? Path.Combine(env.ContentRootPath, "wwwroot");
+        var mediaPath = Path.Combine(_rootPath, "media");
         
-        // Đảm bảo thư mục tồn tại
-        if (!Directory.Exists(Path.Combine(_rootPath, "detections"))) Directory.CreateDirectory(Path.Combine(_rootPath, "detections"));
-        if (!Directory.Exists(Path.Combine(_rootPath, "videos")))     Directory.CreateDirectory(Path.Combine(_rootPath, "videos"));
+        // Đảm bảo các thư mục tồn tại
+        if (!Directory.Exists(Path.Combine(mediaPath, "detections"))) Directory.CreateDirectory(Path.Combine(mediaPath, "detections"));
+        if (!Directory.Exists(Path.Combine(mediaPath, "videos")))     Directory.CreateDirectory(Path.Combine(mediaPath, "videos"));
     }
 
     // ── Nhận push từ camera ───────────────────────────────────
@@ -122,8 +123,9 @@ public class CameraWebhookController : ControllerBase
 
         var (detType, alertLevel, shouldAlert) = MapType(eventType);
 
-        string webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-        string detDir = Path.Combine(webRoot, "detections");
+        // Chuẩn hóa thư mục lưu media
+        string mediaRootDir = Path.Combine(_rootPath, "media");
+        string detDir = Path.Combine(mediaRootDir, "detections");
         if (!Directory.Exists(detDir)) Directory.CreateDirectory(detDir);
 
         // Lưu ảnh snapshot
@@ -133,7 +135,7 @@ public class CameraWebhookController : ControllerBase
             var fname = $"{Guid.NewGuid()}.jpg";
             var fullPath = Path.Combine(detDir, fname);
             await System.IO.File.WriteAllBytesAsync(fullPath, imgBytes);
-            snapshotUrl = $"/detections/{fname}";
+            snapshotUrl = $"/media/detections/{fname}";
             _logger.LogInformation("[CamWebhook] Saved snapshot: {path}", fullPath);
         }
 
@@ -151,8 +153,9 @@ public class CameraWebhookController : ControllerBase
                 Message     = BuildMessage(camIp, device?.Name, detType, desc, maxTemp),
                 Value       = maxTemp,
                 TriggeredAt = detectedAt,
-                // Lấy URL của cục Ảnh Mini vừa lưu ra
-                ThumbnailUrl = HttpContext.Items["ThumbnailUrl"] as string
+                // Gán URL ảnh cho Alert
+                ImageUrl     = snapshotUrl,
+                ThumbnailUrl = snapshotUrl // Dùng chung ảnh snapshot cho thumbnail nếu không có thumb riêng
             };
             _db.Alerts.Add(alert);
             _db.AlertHistories.Add(new AlertHistory
@@ -196,13 +199,19 @@ public class CameraWebhookController : ControllerBase
             alertId       = alert?.Id,
         };
         await _notifier.SendCameraEventAsync(pushPayload);
-        if (shouldAlert && alert != null)
+        if (shouldAlert && alert != null && alert.Id != Guid.Empty)
             await _notifier.SendAlertAsync(new
             {
-                id = alert.Id, level = alert.Level, status = alert.Status,
-                message = alert.Message, source = alert.Source,
-                triggeredAt = alert.TriggeredAt, deviceId = alert.DeviceId,
-                thumbnailUrl = alert.ThumbnailUrl
+                id = alert.Id, 
+                level = alert.Level, 
+                status = alert.Status,
+                message = alert.Message, 
+                source = alert.Source,
+                triggeredAt = alert.TriggeredAt, 
+                deviceId = alert.DeviceId,
+                thumbnailUrl = alert.ThumbnailUrl,
+                imageUrl = alert.ImageUrl,
+                videoUrl = alert.VideoUrl
             });
     }
 
@@ -218,7 +227,7 @@ public class CameraWebhookController : ControllerBase
         if (device == null) return NotFound("Không tìm thấy Camera IP này trên hệ thống.");
 
         string webRoot = _env.WebRootPath ?? Path.Combine(_env.ContentRootPath, "wwwroot");
-        var dir = Path.Combine(webRoot, "videos");
+        var dir = Path.Combine(webRoot, "media", "videos");
         Directory.CreateDirectory(dir);
         var fname = $"{Guid.NewGuid()}.mp4";
         var path = Path.Combine(dir, fname);
@@ -229,7 +238,7 @@ public class CameraWebhookController : ControllerBase
         }
         _logger.LogInformation("[CamWebhook] Saved video: {path}", path);
 
-        var videoUrl = $"/videos/{fname}";
+        var videoUrl = $"/media/videos/{fname}";
 
         // Tự động rà soát lấy Cảnh báo (Alert) gần nhất ĐANG MỞ của Camera này để gắn link Video vào
         var latestAlert = await _db.Alerts

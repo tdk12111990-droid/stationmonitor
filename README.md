@@ -1,6 +1,23 @@
-# StationMonitor – Hệ thống Giám sát Trạm Điện Thông Minh
+# StationMonitor
 
-Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phóng điện (PLC Siemens S7-1200), camera an ninh/nhiệt ảnh (Hikvision), và AI phát hiện xâm nhập (YOLO – Phase 4).
+Hệ thống giám sát trạm biến áp 110kV thông minh — thu thập dữ liệu PLC, camera nhiệt, phóng điện; cảnh báo realtime; dashboard web.
+
+---
+
+## Quick Start
+
+**Yêu cầu:** .NET 8, Node.js 18+, Python 3.11+, Docker Desktop, TimescaleDB
+
+```bash
+# 1. Cài môi trường (chạy 1 lần, quyền Administrator)
+scripts\setup-env.bat
+
+# 2. Khởi động toàn hệ thống
+start.bat
+
+# Truy cập: http://localhost:5173
+# Tài khoản: admin / Admin@123
+```
 
 ---
 
@@ -8,133 +25,113 @@ Phần mềm giám sát trạm biến áp gồm: cảm biến nhiệt độ/phó
 
 ```
 StationMonitor/
-├── backend/            ASP.NET Core 8 API
-│   └── Dockerfile      Cấu hình đóng gói cho Linux/Jetson
-├── frontend/           Vite + TypeScript
-├── docker-compose.yml  Cấu hình chạy đa dịch vụ (DB, MQTT, API)
-├── setup-env.bat       Cài đặt môi trường (Windows)
-├── deploy-jetson.sh    Cài đặt môi trường (Linux/Jetson)
-├── start.bat           Khởi động tất cả (Windows)
-├── stop.bat            Dừng tất cả (Windows)
-└── requirements.txt    Python deps cho AI module
+│
+├── start.bat / stop.bat        Khởi động / dừng toàn hệ thống
+│
+├── backend/                    ASP.NET Core 8 — REST API + SignalR + Workers
+│   ├── StationMonitor.Api/     Controllers, Hubs, Program.cs
+│   ├── StationMonitor.Data/    EF Core entities, Migrations
+│   ├── StationMonitor.Services/ Business logic, Camera, Auth
+│   ├── StationMonitor.Workers/ Background workers (PLC, Rules, Health)
+│   ├── StationMonitor.Tests/   Unit tests (.NET)
+│   └── docs/
+│       ├── KNOWN-ISSUES.md     Bug history & fixes
+│       └── CHANGELOG.md        Nhật ký phát triển theo ngày
+│
+├── frontend/                   Vite + TypeScript — Web dashboard
+│   ├── src/pages/              13 trang UI
+│   ├── e2e/                    Playwright E2E tests
+│   └── docs/
+│       └── sld-editor-spec.md  Spec trang SLD diagram editor
+│
+├── sdk-relay/                  Python — Hikvision SDK relay (chạy trên server)
+│   ├── enhanced_relay.py       Đọc dữ liệu nhiệt từ camera 152, push vào backend
+│   ├── hikvision/              SDK wrapper (HCNetSDK)
+│   └── test_sdk/               Hikvision SDK DLLs (vendor, gitignored)
+│
+├── media-server/               go2rtc + ffmpeg + mediamtx binaries
+│   └── go2rtc.yaml             Config streams camera 152/153
+│
+├── tests/api/                  Node.js API integration tests
+│   ├── test-api.mjs            35 tests Phase 1–4
+│   └── test-protocol.mjs       Protocol tests (Modbus, BACnet...)
+│
+├── scripts/                    Script vận hành
+│   ├── setup-env.bat           Cài đặt môi trường (chạy 1 lần)
+│   ├── run-tests.bat           Health check tổng thể
+│   └── cloudflare-tunnel.bat   Expose ra internet qua Cloudflare
+│
+├── jetson/                     Placeholder — AI model (Phase AI-1/2/3)
+├── app-mobile/                 React Native — Mobile app
+│
+├── docs/
+│   ├── system.md               Kiến trúc hệ thống & luồng dữ liệu
+│   └── archive/                Tài liệu cũ lưu trữ
+│
+├── ROADMAP.md                  Kế hoạch phase — nguồn sự thật duy nhất
+└── CLAUDE.md                   Hướng dẫn cho Claude Code
 ```
 
 ---
 
-## 🚀 Clone & Chạy (Người mới bắt đầu)
+## Services & Ports
 
-> Chỉ cần **2 bước** để chạy được dự án từ đầu.
-
-### Bước 1 — Clone code về máy
-```bash
-git clone https://github.com/tdk12111990-droid/stationmonitor.git
-cd stationmonitor
-```
-
-### Bước 2 — Cài đặt môi trường (Chạy 1 lần duy nhất)
-Chuột phải vào **`setup-env.bat`** → chọn **"Run as Administrator"**
-
-Script này sẽ tự động:
-- ✅ Kiểm tra và cài .NET 8, Node.js, Docker, Git, DBeaver, Python
-- ✅ Tạo container TimescaleDB (Database) tự động
-- ✅ Cài thư viện Python cho AI module
-
-> ⚠️ Nếu script yêu cầu **khởi động lại máy** (sau khi cài Docker) → Khởi động lại rồi chạy lại `setup-env.bat` một lần nữa.
-
-### Bước 3 — Chạy hệ thống hàng ngày
-Double-click **`start.bat`** — trình duyệt sẽ tự động mở.
-
-```
-Tài khoản mặc định:
-  Username: admin
-  Password: Admin@123
-```
+| Service | Port | Mô tả |
+|---------|------|--------|
+| Frontend (Vite) | 5173 | Web dashboard |
+| Backend API | 5056 | REST API + SignalR Hub |
+| go2rtc | 1984 | WebRTC camera streams |
+| go2rtc RTSP | 8554 | RTSP push từ sdk-relay |
+| TimescaleDB | 5432 | PostgreSQL + TimescaleDB |
 
 ---
 
-## 🔄 Cập nhật khi có code mới
-
-Khi nhận được thông báo có bản cập nhật mới, chạy lệnh:
-
-```bash
-git pull
-```
-
-Nếu có thay đổi về thư viện (thông báo trong release notes):
-```bash
-# Cập nhật thư viện Frontend
-cd frontend && npm install && cd ..
-
-# Cập nhật thư viện Backend
-cd backend && dotnet restore && cd ..
-```
-
-Sau đó chạy lại `start.bat` như bình thường.
-
----
-
-## 🚢 Triển khai lên Jetson Orin Nano (Linux/ARM64)
-
-Dự án đã được đóng gói sẵn để chạy trên Jetson mà **không cần cài đặt thủ công** từng phần mềm.
-
-1. **Zip** toàn bộ thư mục `StationMonitor` và copy sang Jetson.
-2. Mở Terminal tại thư mục dự án trên Jetson và chạy:
-   ```bash
-   chmod +x deploy-jetson.sh
-   sudo ./deploy-jetson.sh
-   ```
-3. Xem chi tiết tại: [Hướng dẫn Triển khai Jetson](.system_generated/artifacts/walkthrough.md) (Xem trong file `walkthrough.md` nếu đường dẫn lỗi).
-
----
-
-## 📤 Đẩy code lên GitHub (Dành cho Developer)
+## Chạy từng phần thủ công
 
 ```bash
-# 1. Kiểm tra những gì đã thay đổi
-git status
+# Backend
+cd backend/StationMonitor.Api && dotnet run
 
-# 2. Thêm tất cả file đã sửa
-git add .
+# Frontend
+cd frontend && npm run dev
 
-# 3. Tạo commit với mô tả rõ ràng
-git commit -m "feat: mô tả tính năng mới"
-#  hoặc:
-git commit -m "fix: mô tả lỗi đã sửa"
-#  hoặc:
-git commit -m "docs: cập nhật tài liệu"
+# go2rtc
+cd media-server && go2rtc.exe -config go2rtc.yaml
 
-# 4. Đẩy lên GitHub
-git push
+# SDK Relay (camera nhiệt)
+cd sdk-relay && python enhanced_relay.py
 ```
 
-### Quy ước đặt tên commit:
-| Prefix | Ý nghĩa | Ví dụ |
-|:---|:---|:---|
-| `feat:` | Tính năng mới | `feat: thêm trang báo cáo PDF` |
-| `fix:` | Sửa lỗi | `fix: sửa lỗi camera 153 màn đen` |
-| `docs:` | Cập nhật tài liệu | `docs: thêm hướng dẫn cài đặt` |
-| `refactor:` | Dọn dẹp code | `refactor: tái cấu trúc DashboardPage` |
-| `chore:` | Việc lặt vặt | `chore: cập nhật .gitignore` |
+---
+
+## Cameras
+
+| Camera | IP | Creds | Vai trò |
+|--------|----|-------|---------|
+| 152 | 192.168.10.152 | admin / Demo@2024 | Nhiệt + Quang học |
+| 153 | 192.168.10.153 | tladmin / Ab@12345 | Phóng điện |
 
 ---
 
-## 📚 Tài liệu chi tiết
+## Tests
 
-| Tài liệu | Nội dung |
-|----------|---------|
-| `backend/README.md` | Hướng dẫn chạy backend, cấu hình DB, JWT |
-| `backend/docs/progress.md` | Nhật ký tiến độ theo từng Phase |
-| `backend/docs/bugs_and_fixes.md` | Lỗi đã gặp và cách xử lý |
-| `backend/docs/plan_backend.md` | Kế hoạch backend đầy đủ |
-| `frontend/FRONTEND_GUIDE.md` | Kiến trúc frontend, Mobile/PWA strategy |
+```bash
+node tests/api/test-api.mjs            # API integration (cần backend chạy)
+node tests/api/test-protocol.mjs       # Protocol tests
+cd frontend && npx tsc --noEmit        # TypeScript check
+cd frontend && npx playwright test     # E2E UI tests
+cd backend && dotnet test              # .NET unit tests
+scripts\run-tests.bat                  # Health check tổng thể
+```
 
 ---
 
-## 📊 Trạng thái các Phase
+## Tài liệu
 
-| Phase | Nội dung | Trạng thái |
-|-------|---------|-----------|
-| Phase 1 | Frontend 13 trang, Auth, Router | ✅ Hoàn thành |
-| Phase 2 | Backend API, PLC polling, SignalR, go2rtc, Device CRUD | ✅ Hoàn thành |
-| Phase 3 | Rule Engine, Alert System, Cloudflare Tunnel | 🔄 Đang làm |
-| Phase 4 | AI YOLO pipeline, báo cáo PDF, Mobile PWA | ⏳ Chưa bắt đầu |
+| File | Nội dung |
+|------|---------|
+| `ROADMAP.md` | Kế hoạch phase, sprint hiện tại, next steps |
+| `docs/system.md` | Kiến trúc, luồng dữ liệu, cấu hình |
+| `backend/docs/KNOWN-ISSUES.md` | Bug đã gặp và cách fix — đọc trước khi debug |
+| `backend/docs/CHANGELOG.md` | Nhật ký kỹ thuật theo ngày |
+| `frontend/docs/sld-editor-spec.md` | Spec SLD diagram editor |
