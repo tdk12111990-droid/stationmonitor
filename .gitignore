@@ -88,10 +88,14 @@ alerts/
 *.mp4
 *.avi
 
-# ── SDK binaries (download separately) ──
-sdk-relay/test_sdk/lib/linux/
-sdk-relay/test_sdk/lib/*.dll
-sdk-relay/test_sdk/lib/*.lib
+# ── SDK binaries (download separately - too large for git) ──
+sdk-relay/test_sdk/lib/windows/*.dll
+sdk-relay/test_sdk/lib/windows/*.exe
+sdk-relay/test_sdk/lib/windows/*.lib
+sdk-relay/test_sdk/lib/windows/ClientDemoDll/
+sdk-relay/test_sdk/lib/linux/*.so
+sdk-relay/test_sdk/lib/linux/*.so.*
+sdk-relay/test_sdk/lib/linux/HCNetSDKCom/
 sdk-relay/test_sdk/lib/*.exe
 sdk-relay/test_sdk/lib/*.zip
 

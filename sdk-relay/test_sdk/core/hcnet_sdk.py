@@ -325,11 +325,11 @@ class HCNetSDK:
         
         # Xác định thư mục chứa thư viện dựa trên OS
         if sys.platform == 'win32':
-            self.lib_path = os.path.join(sdk_path, "lib")
+            self.lib_path = os.path.join(sdk_path, "lib", "windows")
             os.add_dll_directory(self.lib_path)
             if os.path.exists(os.path.join(self.lib_path, "HCNetSDKCom")):
                 os.add_dll_directory(os.path.join(self.lib_path, "HCNetSDKCom"))
-            
+
             lib_file = os.path.join(self.lib_path, "HCNetSDK.dll")
             try:
                 self.hcnetsdk = ctypes.WinDLL(lib_file)
