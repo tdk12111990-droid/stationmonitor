@@ -5,6 +5,9 @@
     "port": 8000,
     "user": "admin",
     "password": "Demo@2024",
+    "rtsp_port": 554,
+    "rtsp_stream_thermal": "/Streaming/tracks/202",
+    "rtsp_stream_optical": "/Streaming/tracks/101",
     "isapi_alert_stream_url": "/ISAPI/Event/notification/alertStream",
     "thresholds": {
       "thermal_alarm_temp_c": 80.0,
@@ -34,6 +37,8 @@
     "port": 8000,
     "user": "tladmin",
     "password": "Ab@12345",
+    "rtsp_port": 554,
+    "rtsp_stream_video": "/Streaming/tracks/101",
     "isapi_alert_stream_url": "/ISAPI/Event/notification/alertStream",
     "thresholds": {
       "decibel_alarm_db": 85.0,
