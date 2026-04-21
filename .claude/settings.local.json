@@ -50,7 +50,13 @@
       "Bash(docker exec stationmonitor-db *)",
       "Bash(tee /tmp/points_response.json)",
       "Bash(python -c \" import sys,json data = json.load\\(sys.stdin\\) if isinstance\\(data, list\\): for p in data: print\\(f\\\\\"pointId={p.get\\('pointId'\\)}, label={p.get\\('label'\\)}, deviceId={p.get\\('deviceId'\\)}\\\\\"\\) else: print\\(data\\) \"')",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('token','NO_TOKEN'\\)[:50] if 'token' in d else d\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(d.get\\('token','NO_TOKEN'\\)[:50] if 'token' in d else d\\)\")",
+      "Bash(git push *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(cp -r '/d/EN-HCNetSDKV6.1.9.4_build20220412_linux64/EN-HCNetSDKV6.1.9.4_build20220412_linux64/lib/*' /d/StationMonitor/sdk-relay/test_sdk/lib/linux/)",
+      "Bash(chmod +x '/d/StationMonitor/sdk-relay/test_sdk/lib/linux/*.so')",
+      "Bash(chmod -R +x /d/StationMonitor/sdk-relay/test_sdk/lib/linux/HCNetSDKCom/)"
     ]
   }
 }
