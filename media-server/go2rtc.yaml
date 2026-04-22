@@ -9,9 +9,9 @@ streams:
   camera_152_normal:
   camera_152_thermal:
 
-  # Camera 153 — direct RTSP (enhanced_relay không xử lý cam 153)
-  camera_153_pd:     rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
-  camera_153_pd_sub: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/102
+  # Camera 153 — dùng ffmpeg để force TCP transport (tránh UDP bị block)
+  camera_153_pd:     ffmpeg:-rtsp_transport tcp -i rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101#video=copy
+  camera_153_pd_sub: ffmpeg:-rtsp_transport tcp -i rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/102#video=copy
 
   # Camera 152 sub (direct, không overlay)
   camera_152_normal_sub: rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/102
