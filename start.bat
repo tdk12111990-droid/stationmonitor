@@ -2,7 +2,7 @@
 title StationMonitor - Khoi dong he thong
 echo.
 echo  ================================================
-echo   STATION MONITOR - KHOI DONG HE THONG (EXEC MODE)
+echo   STATION MONITOR - KHOI DONG HE THONG
 echo  ================================================
 echo.
 
@@ -14,7 +14,7 @@ if %errorlevel%==0 (
     echo  go2rtc dang chay - bo qua
 ) else (
     echo  Khoi dong go2rtc...
-    start "go2rtc" cmd /k "cd /d "%~dp0media-server" && go2rtc.exe -config go2rtc.yaml"
+    start "go2rtc" /d "%~dp0media-server" cmd /k go2rtc.exe -config go2rtc.yaml
     timeout /t 2 /nobreak >nul
 )
 
@@ -24,7 +24,7 @@ if %errorlevel%==0 (
     echo  Backend dang chay tren port 5056 - bo qua
 ) else (
     echo  Khoi dong Backend...
-    start "Backend API" cmd /k "cd /d "%~dp0backend\StationMonitor.Api" && dotnet run"
+    start "Backend API" /d "%~dp0backend\StationMonitor.Api" cmd /k dotnet run
     timeout /t 5 /nobreak >nul
 )
 
@@ -34,23 +34,20 @@ if %errorlevel%==0 (
     echo  Sidecar dang chay - bo qua
 ) else (
     echo  Khoi dong Sidecar...
-    start "Sidecar" cmd /k "cd /d "%~dp0frontend" && node src-tauri/sidecar/local-api-server.mjs --port 46123"
+    start "Sidecar" /d "%~dp0frontend" cmd /k node src-tauri/sidecar/local-api-server.mjs --port 46123
     timeout /t 2 /nobreak >nul
 )
 
 echo [3.5/4] Khoi dong AI Stream Relay...
-cd /d "%~dp0"
-echo  Khoi dong AI Engine (Stream Relay)...
-start "AI Stream Relay" cmd /k "cd /d "%~dp0sdk-relay" && python enhanced_relay.py"
+start "AI Stream Relay" /d "%~dp0sdk-relay" cmd /k python enhanced_relay.py
 timeout /t 3 /nobreak >nul
 
 echo [3.7/4] Khoi dong Camera Notification System...
-echo  Khoi dong Camera Listener (Thermal + Acoustic)...
-start "Camera Notifications" cmd /k "cd /d "%~dp0sdk-relay\notifications" && python main.py"
+start "Camera Notifications" /d "%~dp0sdk-relay\notifications" cmd /k python main.py
 timeout /t 2 /nobreak >nul
 
 echo [4/4] Khoi dong Frontend...
-start "Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
+start "Frontend" /d "%~dp0frontend" cmd /k npm run dev
 
 echo.
 echo  ================================================
