@@ -47,7 +47,11 @@ class Camera152Listener(Thread):
                 self._listen_loop()
             except Exception as e:
                 logger.error(f"[CAM152] Error in listen loop: {e}")
-                time.sleep(self.config.get("reconnect_delay_seconds", 5))
+            # Always delay before reconnect — even if _listen_loop() swallowed the error
+            if not self.stopped.is_set():
+                delay = self.config.get("reconnect_delay_seconds", 5)
+                logger.info(f"[CAM152] Reconnecting in {delay}s...")
+                time.sleep(delay)
 
     def _listen_loop(self):
         """Stream and parse ISAPI alerts."""
@@ -60,6 +64,11 @@ class Camera152Listener(Thread):
                 auth=auth,
                 stream=True,
                 timeout=self.config.get("stream_timeout_seconds", 30),
+                headers={
+                    "Accept": "multipart/x-mixed-replace, application/xml, */*",
+                    "Connection": "keep-alive",
+                    "User-Agent": "Mozilla/5.0 (compatible; Hikvision Client)",
+                },
             )
 
             if r.status_code != 200:
