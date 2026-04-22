@@ -696,11 +696,6 @@ if __name__ == "__main__":
     relay_thm = StreamRelay("THERMAL", THERMAL_URL, "camera_152_thermal", is_thermal=True)
     relay_opt.start(); relay_thm.start()
 
-    # Camera 153 (Phóng điện)
-    camera_153_url = f"rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101"
-    relay_153 = StreamRelay("CAMERA_153_PD", camera_153_url, "camera_153_pd", is_thermal=False, draw_points=False)
-    relay_153.start()
-    
     try:
         while True: time.sleep(1)
     except KeyboardInterrupt:
