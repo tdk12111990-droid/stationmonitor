@@ -107,8 +107,10 @@ class Camera153Listener(Thread):
 
         except requests.exceptions.Timeout:
             logger.warning(f"[CAM153] Stream timeout (normal if no events)")
+        except requests.exceptions.ConnectionError as e:
+            logger.error(f"[CAM153] Connection error: {str(e)[:200]}")
         except Exception as e:
-            logger.error(f"[CAM153] Stream error: {e}")
+            logger.error(f"[CAM153] Stream error: {type(e).__name__} - {str(e)[:200]}", exc_info=True)
 
     def _process_event(self, xml_str: str):
         """Parse XML event and check thresholds."""

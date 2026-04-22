@@ -3,12 +3,28 @@
 
 import json
 import subprocess
-import time
+import shutil
 import logging
 from pathlib import Path
 from threading import Thread
 
 logger = logging.getLogger(__name__)
+
+
+def _find_ffmpeg() -> str:
+    """Find ffmpeg binary — works on both Windows and Linux."""
+    # Try local media-server folder (bundled on Windows)
+    for name in ["ffmpeg.exe", "ffmpeg"]:
+        local = Path(__file__).parent.parent.parent / "media-server" / name
+        if local.exists():
+            return str(local)
+
+    # Try system PATH
+    found = shutil.which("ffmpeg")
+    if found:
+        return found
+
+    raise FileNotFoundError("ffmpeg not found — install with: apt install ffmpeg  OR  choco install ffmpeg")
 
 
 class VideoRecorder:
@@ -24,25 +40,20 @@ class VideoRecorder:
         if not cam:
             return None
 
-        # Format: rtsp://user:password@ip:554/stream_path
         user = cam.get("user", "admin")
         passwd = cam.get("password", "")
         ip = cam.get("ip")
         port = cam.get("rtsp_port", 554)
 
-        # Common Hikvision RTSP paths:
-        # Cam 152 (thermal): /Streaming/tracks/202 (thermal channel)
-        # Cam 153 (normal): /Streaming/tracks/101 (video channel)
-
+        # Hikvision RTSP path format: /Streaming/Channels/<channel><stream>
+        # Channel 1 = optical/normal, Channel 2 = thermal
+        # Stream 01 = main stream, 02 = sub stream
         if camera_id == "camera_152":
-            # Thermal channel (channel 2)
-            stream_path = "/Streaming/tracks/202"
+            stream_path = "/Streaming/Channels/201"  # thermal main stream
         else:
-            # Normal video channel
-            stream_path = "/Streaming/tracks/101"
+            stream_path = "/Streaming/Channels/101"  # normal video main stream
 
-        rtsp_url = f"rtsp://{user}:{passwd}@{ip}:{port}{stream_path}"
-        return rtsp_url
+        return f"rtsp://{user}:{passwd}@{ip}:{port}{stream_path}"
 
     def record_video(self, camera_id, output_file, duration=10, callback=None):
         """
@@ -72,23 +83,30 @@ class VideoRecorder:
         # -c:a copy: copy audio codec
         # output_file: save location
 
+        try:
+            ffmpeg_bin = _find_ffmpeg()
+        except FileNotFoundError as e:
+            logger.error(f"[VIDEO] {e}")
+            if callback:
+                callback(None, False)
+            return False
+
         cmd = [
-            'ffmpeg',
-            '-rtsp_transport', 'tcp',  # More reliable
+            ffmpeg_bin,
+            '-rtsp_transport', 'tcp',
             '-i', rtsp_url,
-            '-t', str(duration),  # Record for N seconds
-            '-c:v', 'copy',  # No re-encoding (faster)
+            '-t', str(duration),
+            '-c:v', 'copy',
             '-c:a', 'copy',
-            '-y',  # Overwrite
+            '-y',
             str(output_file)
         ]
 
         try:
-            # Run ffmpeg
             result = subprocess.run(
                 cmd,
                 capture_output=True,
-                timeout=duration + 10  # Timeout slightly longer than duration
+                timeout=duration + 10
             )
 
             if result.returncode == 0 and Path(output_file).exists():
@@ -108,8 +126,7 @@ class VideoRecorder:
                 return False
 
         except FileNotFoundError:
-            logger.error("[VIDEO] ffmpeg not found - install ffmpeg first")
-            logger.error("        Command: choco install ffmpeg")
+            logger.error("[VIDEO] ffmpeg not found")
             if callback:
                 callback(None, False)
             return False
@@ -156,9 +173,9 @@ class ImageCapturer:
         port = cam.get("rtsp_port", 554)
 
         if camera_id == "camera_152":
-            stream_path = "/Streaming/tracks/202"  # Thermal
+            stream_path = "/Streaming/Channels/201"  # thermal main stream
         else:
-            stream_path = "/Streaming/tracks/101"  # Normal
+            stream_path = "/Streaming/Channels/101"  # normal video main stream
 
         return f"rtsp://{user}:{passwd}@{ip}:{port}{stream_path}"
 
@@ -185,12 +202,18 @@ class ImageCapturer:
         # -vframes 1: capture 1 frame
         # -y: overwrite
 
+        try:
+            ffmpeg_bin = _find_ffmpeg()
+        except FileNotFoundError as e:
+            logger.error(f"[IMAGE] {e}")
+            return False
+
         cmd = [
-            'ffmpeg',
+            ffmpeg_bin,
             '-rtsp_transport', 'tcp',
             '-i', rtsp_url,
-            '-vframes', '1',  # Capture 1 frame
-            '-y',  # Overwrite
+            '-vframes', '1',
+            '-y',
             str(output_file)
         ]
 
@@ -212,7 +235,7 @@ class ImageCapturer:
                 return False
 
         except FileNotFoundError:
-            logger.error("[IMAGE] ffmpeg not found")
+            logger.error("[IMAGE] ffmpeg binary not found during subprocess")
             return False
 
         except subprocess.TimeoutExpired:
