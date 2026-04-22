@@ -44,6 +44,11 @@ echo  Khoi dong AI Engine (Stream Relay)...
 start "AI Stream Relay" cmd /k "cd /d "%~dp0sdk-relay" && python enhanced_relay.py"
 timeout /t 3 /nobreak >nul
 
+echo [3.7/4] Khoi dong Camera Notification System...
+echo  Khoi dong Camera Listener (Thermal + Acoustic)...
+start "Camera Notifications" cmd /k "cd /d "%~dp0sdk-relay\notifications" && python main.py"
+timeout /t 2 /nobreak >nul
+
 echo [4/4] Khoi dong Frontend...
 start "Frontend" cmd /k "cd /d "%~dp0frontend" && npm run dev"
 
@@ -51,12 +56,15 @@ echo.
 echo  ================================================
 echo   TAT CA SERVICE DA KHOI DONG!
 echo.
-echo   Frontend : http://localhost:5173
-echo   Backend  : http://localhost:5056
-echo   go2rtc   : http://localhost:1984
+echo   Frontend              : http://localhost:5173
+echo   Backend API           : http://localhost:5056
+echo   go2rtc                : http://localhost:1984
+echo   AI Stream Relay       : sdk-relay (enhanced_relay.py)
+echo   Camera Notifications  : sdk-relay/notifications (main.py)
 echo.
-echo   * Chế độ Enhanced Viewer tự động kích hoạt
-echo     khi bạn xem Camera 152 trên Web.
+echo   * Thong bao Camera (Thermal + Acoustic) tu dong
+echo     duoc cap nhat tren Dashboard va AlertsHistory
+echo   * Enhanced Viewer kich hoat khi xem Camera 152
 echo  ================================================
 echo.
 echo   Dang mo trinh duyet...

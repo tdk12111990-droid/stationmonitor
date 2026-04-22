@@ -12,6 +12,8 @@ import requests
 from requests.auth import HTTPDigestAuth
 from threading import Lock
 
+from sdk_snapshot_capture import SDKSnapshotCapture
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,11 +25,13 @@ class AlertManager:
         Args:
             config: alert_manager section from config.json
                     Must have: alerts_dir, save_image, log_file
+                    Optional: backend_url (for webhooks)
         """
         self.alerts_dir = config.get("alerts_dir", "alerts")
         self.save_image = config.get("save_image", True)
         self.log_file = config.get("log_file", "notifications.log")
         self.max_alerts_per_day = config.get("max_alerts_per_day", 1000)
+        self._backend_url = config.get("backend_url", "")
 
         # Create alerts directory
         Path(self.alerts_dir).mkdir(parents=True, exist_ok=True)
@@ -115,32 +119,119 @@ class AlertManager:
         with open(json_file, "w", encoding="utf-8") as f:
             json.dump(alert, f, indent=2, ensure_ascii=False)
 
-        logger.info(f"✅ Alert saved: {json_file}")
+        logger.info(f"[OK] Alert saved: {json_file}")
+
+        # Post to backend webhook if configured
+        if self._backend_url and self.save_image:
+            image_path = os.path.join(self.alerts_dir, image_file) if image_file else None
+            self.post_to_backend(camera_ip, event_dict, image_path)
+
         return json_file
+
+    def _build_webhook_xml(self, camera_ip: str, event_dict: dict) -> str:
+        """Build minimal XML for backend CameraWebhookController to parse."""
+        event_type = event_dict.get("type", "unknown")
+        max_temp = event_dict.get("thermal", {}).get("max_c")
+        iso_time = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        xml = (
+            "<EventNotificationAlert>"
+            f"<ipAddress>{camera_ip}</ipAddress>"
+            f"<eventType>{event_type}</eventType>"
+            "<eventState>active</eventState>"
+            f"<dateTime>{iso_time}</dateTime>"
+        )
+        if max_temp is not None:
+            xml += f"<maxTemp>{max_temp}</maxTemp>"
+        xml += "</EventNotificationAlert>"
+        return xml
+
+    def post_to_backend(self, camera_ip: str, event_dict: dict, image_path: str = None) -> bool:
+        """POST alert to backend webhook as multipart (XML + JPEG)."""
+        if not self._backend_url:
+            return False
+
+        xml = self._build_webhook_xml(camera_ip, event_dict)
+        data = {"event": xml}
+        files = {}
+
+        # Attach JPEG if available
+        if image_path and os.path.exists(image_path):
+            try:
+                files["image_hd"] = ("snapshot.jpg", open(image_path, "rb"), "image/jpeg")
+            except Exception as e:
+                logger.warning(f"Failed to attach image: {e}")
+
+        try:
+            resp = requests.post(
+                f"{self._backend_url}/camera-webhook",
+                data=data,
+                files=files,
+                timeout=10
+            )
+            if resp.status_code < 300:
+                logger.info(f"[WEBHOOK] Posted to backend: {resp.status_code}")
+                return True
+            else:
+                logger.warning(f"[WEBHOOK] Backend returned {resp.status_code}")
+                return False
+        except Exception as e:
+            logger.warning(f"[WEBHOOK] POST failed: {e}")
+            return False
+
+    def post_video_to_backend(self, camera_ip: str, video_path: str) -> bool:
+        """POST video to backend /camera-webhook/video endpoint."""
+        if not self._backend_url or not os.path.exists(video_path):
+            return False
+
+        try:
+            with open(video_path, "rb") as f:
+                resp = requests.post(
+                    f"{self._backend_url}/camera-webhook/video",
+                    data={"camIp": camera_ip},
+                    files={"video.mp4": ("video.mp4", f, "video/mp4")},
+                    timeout=60
+                )
+            if resp.status_code < 300:
+                logger.info(f"[WEBHOOK] Posted video to backend: {resp.status_code}")
+                return True
+            else:
+                logger.warning(f"[WEBHOOK] Video upload failed: {resp.status_code}")
+                return False
+        except Exception as e:
+            logger.warning(f"[WEBHOOK] Video POST failed: {e}")
+            return False
 
     def _fetch_snapshot(
         self, camera_ip: str, user: str, password: str, filename_base: str
     ) -> Optional[str]:
         """
-        Fetch camera snapshot via ISAPI.
+        Fetch camera snapshot via SDK + RTSP + FFmpeg.
 
         Returns:
             Filename of saved image, or None if failed
         """
-        # Channel 1 is main channel for visible light snapshot
-        # For thermal, channel 2 or 3 might be used, but start with 1
-        url = f"http://{camera_ip}:8000/ISAPI/Streaming/channels/101/picture"
-        auth = HTTPDigestAuth(user, password)
-
         try:
-            r = requests.get(url, auth=auth, timeout=5)
-            if r.status_code == 200:
-                image_file = f"{filename_base}.jpg"
-                image_path = os.path.join(self.alerts_dir, image_file)
-                with open(image_path, "wb") as f:
-                    f.write(r.content)
-                logger.info(f"  📸 Snapshot saved: {image_path}")
+            # Map camera IP to camera_id
+            camera_id = None
+            if camera_ip == "192.168.10.152":
+                camera_id = "camera_152"
+            elif camera_ip == "192.168.10.153":
+                camera_id = "camera_153"
+            else:
+                logger.warning(f"Unknown camera IP: {camera_ip}")
+                return None
+
+            # Use SDK to capture snapshot
+            image_file = f"{filename_base}.jpg"
+            image_path = os.path.join(self.alerts_dir, image_file)
+
+            if SDKSnapshotCapture.capture_snapshot(camera_id, image_path):
+                logger.info(f"  Snapshot saved: {image_path}")
                 return image_file
+            else:
+                logger.debug(f"SDK snapshot capture failed for {camera_id}")
+
         except Exception as e:
             logger.debug(f"Snapshot fetch error: {e}")
 

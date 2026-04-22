@@ -20,6 +20,13 @@ taskkill /IM go2rtc.exe /F >nul 2>&1
 echo Dung Sidecar...
 taskkill /FI "WindowTitle eq Sidecar*" /F >nul 2>&1
 
+echo Dung AI Stream Relay...
+taskkill /FI "WindowTitle eq AI Stream Relay*" /F >nul 2>&1
+
+echo Dung Camera Notifications...
+taskkill /FI "WindowTitle eq Camera Notifications*" /F >nul 2>&1
+taskkill /IM python.exe /F >nul 2>&1
+
 echo.
 echo  Tat ca service da dung.
 timeout /t 2 /nobreak >nul

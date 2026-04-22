@@ -7,6 +7,7 @@ from requests.auth import HTTPDigestAuth
 import xml.etree.ElementTree as ET
 import logging
 import time
+from datetime import datetime
 from threading import Thread, Event
 from typing import Dict, Optional
 from alert_manager import AlertManager
@@ -152,6 +153,9 @@ class Camera152Listener(Thread):
                 camera_password=self.password,
             )
             self.events_saved += 1
+
+            # Async: record video and post to backend (non-blocking)
+            self._trigger_video_recording(event_type)
 
         except ET.ParseError as e:
             logger.debug(f"[CAM152] XML parse error: {e}")
@@ -317,6 +321,29 @@ class Camera152Listener(Thread):
             return True
 
         return True
+
+    def _trigger_video_recording(self, event_type: str):
+        """Trigger async video recording and upload to backend."""
+        def record_and_post():
+            try:
+                from video_recorder import VideoRecorder
+                recorder = VideoRecorder()
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                video_file = f"{self.alert_mgr.alerts_dir}/{timestamp}_cam152_{event_type}.mp4"
+
+                logger.info(f"[CAM152] Recording 15s video to {video_file}...")
+                success = recorder.record_video("camera_152", video_file, duration=15)
+
+                if success:
+                    logger.info(f"[CAM152] Video recorded, posting to backend...")
+                    self.alert_mgr.post_video_to_backend(self.ip, video_file)
+                else:
+                    logger.warning(f"[CAM152] Video recording failed")
+            except Exception as e:
+                logger.error(f"[CAM152] Video recording error: {e}")
+
+        # Start in background (daemon thread)
+        Thread(target=record_and_post, daemon=True).start()
 
     def stop(self):
         """Stop listening."""

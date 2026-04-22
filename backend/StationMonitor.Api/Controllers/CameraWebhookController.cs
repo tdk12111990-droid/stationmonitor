@@ -339,8 +339,11 @@ public class CameraWebhookController : ControllerBase
     {
         "thermalexception"      => ("thermal_hotspot",   "alarm",   true),
         "temperaturedetection"  => ("thermal_hotspot",   "alarm",   true),
+        "temperaturealarm"      => ("thermal_hotspot",   "alarm",   true),
         "firedetection"         => ("fire",              "alarm",   true),
+        "firealarm"             => ("fire",              "alarm",   true),
         "smokedetection"        => ("smoke",             "alarm",   true),
+        "smokealarm"            => ("smoke",             "alarm",   true),
         "linedetection"         => ("intrusion",         "warning", true),
         "fielddetection"        => ("intrusion",         "warning", true),
         "videotampering"        => ("tampering",         "warning", true),
@@ -349,7 +352,9 @@ public class CameraWebhookController : ControllerBase
         "diskfull"              => ("storage_error",     "warning", true),
         "diskerror"             => ("storage_error",     "warning", true),
         "acousticexception"     => ("partial_discharge", "alarm",   true),
+        "audioexception"        => ("partial_discharge", "alarm",   true),
         "pddetection"           => ("partial_discharge", "alarm",   true),
+        "dischargedetection"    => ("partial_discharge", "alarm",   true),
         _                       => (t,                   "warning", true),
     };
 }

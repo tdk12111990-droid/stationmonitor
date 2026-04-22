@@ -58,7 +58,8 @@
     "alerts_dir": "alerts",
     "save_image": true,
     "max_alerts_per_day": 1000,
-    "log_file": "notifications.log"
+    "log_file": "notifications.log",
+    "backend_url": "http://localhost:5056/api/v1"
   },
   "global": {
     "reconnect_delay_seconds": 5,
