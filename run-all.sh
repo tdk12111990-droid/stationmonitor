@@ -23,12 +23,12 @@ cd "$SCRIPT_DIR"
 # ═══════════════════════════════════════════════════════
 echo "[1/4] Khoi dong Backend (Docker)..."
 
-if command -v docker-compose &> /dev/null; then
-    sudo docker-compose up -d
+if command -v docker &> /dev/null && docker compose version &> /dev/null; then
+    sudo docker compose up -d
     sleep 5
     echo "✅ Backend dang chay tren port 5056"
-elif command -v docker &> /dev/null; then
-    sudo docker compose up -d
+elif command -v docker-compose &> /dev/null; then
+    sudo docker-compose up -d
     sleep 5
     echo "✅ Backend dang chay tren port 5056"
 else

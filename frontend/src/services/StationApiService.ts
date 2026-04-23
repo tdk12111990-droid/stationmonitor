@@ -174,8 +174,8 @@ class StationApiService {
   async getAlerts(status?: string, from?: string, to?: string, limit = 200): Promise<AlertItem[]> {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
-    if (from)   params.set('from', from);
-    if (to)     params.set('to', to);
+    if (from) params.set('from', from);
+    if (to) params.set('to', to);
     params.set('limit', String(limit));
     return apiFetch<AlertItem[]>(`/alerts?${params.toString()}`);
   }
@@ -195,24 +195,24 @@ class StationApiService {
   // ── Logs ──────────────────────────────────────────────────
   async getAuditLogs(opts?: { action?: string; entityType?: string; from?: string; to?: string; limit?: number }): Promise<AuditLogEntry[]> {
     const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
-    if (opts?.action)      params.set('action',      opts.action);
-    if (opts?.entityType)  params.set('entityType',  opts.entityType);
-    if (opts?.from)        params.set('from',         opts.from);
-    if (opts?.to)          params.set('to',           opts.to);
+    if (opts?.action) params.set('action', opts.action);
+    if (opts?.entityType) params.set('entityType', opts.entityType);
+    if (opts?.from) params.set('from', opts.from);
+    if (opts?.to) params.set('to', opts.to);
     return apiFetch(`/logs/audit?${params}`);
   }
 
   async getLoginLogs(opts?: { from?: string; to?: string; limit?: number }): Promise<LoginLogEntry[]> {
     const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
     if (opts?.from) params.set('from', opts.from);
-    if (opts?.to)   params.set('to',   opts.to);
+    if (opts?.to) params.set('to', opts.to);
     return apiFetch(`/logs/login?${params}`);
   }
 
   async getNotifyLogs(opts?: { from?: string; to?: string; status?: string; limit?: number }): Promise<any[]> {
     const params = new URLSearchParams({ limit: String(opts?.limit ?? 200) });
-    if (opts?.from)   params.set('from',   opts.from);
-    if (opts?.to)     params.set('to',     opts.to);
+    if (opts?.from) params.set('from', opts.from);
+    if (opts?.to) params.set('to', opts.to);
     if (opts?.status) params.set('status', opts.status);
     return apiFetch(`/logs/notify?${params}`);
   }
@@ -335,8 +335,8 @@ class StationApiService {
   async getMaintenance(stationId?: string, status?: string, deviceId?: string): Promise<MaintenanceTask[]> {
     const params = new URLSearchParams();
     if (stationId) params.set('stationId', stationId);
-    if (status)    params.set('status', status);
-    if (deviceId)  params.set('deviceId', deviceId);
+    if (status) params.set('status', status);
+    if (deviceId) params.set('deviceId', deviceId);
     const q = params.toString() ? `?${params}` : '';
     return apiFetch<MaintenanceTask[]>(`/maintenance${q}`);
   }
@@ -385,7 +385,7 @@ class StationApiService {
   async getUpcomingMaintenance(stationId?: string, days?: number): Promise<MaintenanceTask[]> {
     const params = new URLSearchParams();
     if (stationId) params.set('stationId', stationId);
-    if (days)      params.set('days', String(days));
+    if (days) params.set('days', String(days));
     const q = params.toString() ? `?${params}` : '';
     return apiFetch<MaintenanceTask[]>(`/maintenance/upcoming${q}`);
   }
@@ -406,11 +406,11 @@ class StationApiService {
 
   async getRuleTriggerLogs(params: { from?: string; to?: string; ruleId?: string; deviceId?: string; limit?: number }): Promise<any[]> {
     const p = new URLSearchParams();
-    if (params.from)   p.set('from', params.from);
-    if (params.to)     p.set('to', params.to);
+    if (params.from) p.set('from', params.from);
+    if (params.to) p.set('to', params.to);
     if (params.ruleId) p.set('ruleId', params.ruleId);
     if (params.deviceId) p.set('deviceId', params.deviceId);
-    if (params.limit)  p.set('limit', String(params.limit));
+    if (params.limit) p.set('limit', String(params.limit));
     return apiFetch(`/logs/rule-triggers?${p.toString()}`);
   }
 

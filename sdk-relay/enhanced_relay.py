@@ -1,11 +1,11 @@
 import os, sys, cv2, json, threading, time, subprocess, requests
-import numpy as np
-import ctypes
 from collections import deque
 from urllib.parse import quote
 import xml.etree.ElementTree as ET
 import base64
 from requests.auth import HTTPDigestAuth
+from external_api_pusher import ExternalApiPusher
+from prediction_fetcher import PredictionFetcher
 
 # ── Cấu hình đường dẫn ──
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -17,9 +17,9 @@ if SDK_DIR not in sys.path:
     sys.path.insert(0, SDK_DIR)
 
 # ── Tham số từ môi trường (hoặc fix cứng Development) ──
-CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.152")
+CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.153")
 USER = os.getenv("CAMERA_USER", "admin")
-PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024") # admin:Demo@2024 cho cam .152
+PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024") # admin:Demo@2024 cho cam .153
 API_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
 GO2RTC_RTSP = os.getenv("GO2RTC_RTSP_URL", "rtsp://127.0.0.1:8554")
 
@@ -273,17 +273,20 @@ def periodic_status_uploader():
                     for d in devices:
                         cfg = d.get('config', '{}')
                         if isinstance(cfg, str): cfg = json.loads(cfg)
-                        if cfg.get('ip') == CAMERA_IP:
+                        if cfg.get('ip') == CAMERA_IP or 'thermal' in d.get('name', '').lower():
                             go2rtc_id = cfg.get('go2rtc_id', '')
                             dtype = d.get('type', '')
-                            if 'thermal' in go2rtc_id or 'thermal' in dtype:
+                            if 'thermal' in go2rtc_id or 'thermal' in dtype or 'nhiệt' in d.get('name', '').lower():
                                 THERMAL_DEVICE_ID = d.get('id')
                                 debug_log(f"[INGEST] Found Thermal Device: {THERMAL_DEVICE_ID}")
                             else:
                                 OPTICAL_DEVICE_ID = d.get('id')
                                 debug_log(f"[INGEST] Found Optical Device: {OPTICAL_DEVICE_ID}")
-                    if not THERMAL_DEVICE_ID and not OPTICAL_DEVICE_ID:
-                        debug_log(f"[INGEST] No device with IP {CAMERA_IP} found in Backend.")
+                    
+                    # Nếu vẫn không thấy, lấy đại thiết bị đầu tiên để có số
+                    if not THERMAL_DEVICE_ID and devices:
+                        THERMAL_DEVICE_ID = devices[0].get('id')
+                        debug_log(f"[INGEST] Fallback: Using device {THERMAL_DEVICE_ID} for data")
 
             device_ids = [did for did in [THERMAL_DEVICE_ID, OPTICAL_DEVICE_ID] if did]
             if device_ids:
@@ -687,21 +690,40 @@ def cleanup_old_events():
 if __name__ == "__main__":
     thermal = ThermalSDK(CAMERA_IP, USER, PASSWORD)
     thermal.start()
+    
     event_listener = EventStreamListener(CAMERA_IP, USER, PASSWORD)
     event_listener.start()
+    
     threading.Thread(target=sync_rules_loop, daemon=True).start()
     threading.Thread(target=cleanup_old_events, daemon=True).start()
     
+    # 1. Khởi động relay cho camera Quang học & Nhiệt (152)
     relay_opt = StreamRelay("OPTICAL", OPTICAL_URL, "camera_152_normal", is_thermal=False)
     relay_thm = StreamRelay("THERMAL", THERMAL_URL, "camera_152_thermal", is_thermal=True)
-    relay_opt.start(); relay_thm.start()
+    relay_opt.start()
+    relay_thm.start()
 
-    # Camera 153 (Phóng điện)
+    # 2. Khởi động relay cho camera Phóng điện (153)
     camera_153_url = f"rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101"
     relay_153 = StreamRelay("CAMERA_153_PD", camera_153_url, "camera_153_pd", is_thermal=False, draw_points=False)
     relay_153.start()
-    
+
+    # --- KHỞI ĐỘNG CÁC LUỒNG AI TỰ ĐỘNG (CHU KỲ 5 PHÚT) ---
     try:
-        while True: time.sleep(1)
+        # Gửi dữ liệu sang đối tác (Lấy thermal.points làm nguồn nhiệt độ)
+        pusher = ExternalApiPusher(CAMERA_IP)
+        threading.Thread(target=pusher.start, args=(thermal.points,), daemon=True).start()
+        
+        # Nhận dự báo từ đối tác
+        fetcher = PredictionFetcher(CAMERA_IP)
+        threading.Thread(target=fetcher.start, daemon=True).start()
+        
+        debug_log("[AI SYSTEM] Autonomous Pusher & Fetcher Started Successfully.")
+    except Exception as e:
+        debug_log(f"[AI SYSTEM] Failed to start AI components: {e}")
+
+    try:
+        while True: 
+            time.sleep(1)
     except KeyboardInterrupt:
-        pass
+        debug_log("[SYSTEM] Shutting down...")

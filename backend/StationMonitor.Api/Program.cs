@@ -24,6 +24,36 @@ var builder = WebApplication.CreateBuilder(args);
 // ── QuestPDF license ──────────────────────────────────────
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
+// ── Wait for Database (Critical for Docker) ────────────────
+string? connString = builder.Configuration.GetConnectionString("Default");
+if (!string.IsNullOrEmpty(connString))
+{
+    Console.WriteLine("[Startup] Checking database connectivity...");
+    int retryCount = 0;
+    while (retryCount < 20)
+    {
+        try
+        {
+            using var conn = new Npgsql.NpgsqlConnection(connString);
+            conn.Open();
+            Console.WriteLine("[Startup] Database is READY.");
+            break;
+        }
+        catch (Exception ex)
+        {
+            retryCount++;
+            Console.WriteLine($"[Startup] Database not ready (Attempt {retryCount}/20): {ex.Message}");
+            System.Threading.Thread.Sleep(3000);
+            if (retryCount >= 20)
+            {
+                Console.WriteLine("[Startup] FATAL: Could not connect to database. Exiting.");
+                throw;
+            }
+        }
+    }
+}
+
+
 // ── Database ──────────────────────────────────────────────
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));

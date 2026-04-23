@@ -1,11 +1,3 @@
-# ============================================================
-# StationMonitor - Docker Compose Configuration
-# Mục tiêu: Chạy toàn bộ hệ thống (Backend, DB, MQTT, Streaming)
-# chỉ bằng 1 câu lệnh trên Jetson Orin Nano / Linux.
-# ============================================================
-
-version: '3.8'
-
 services:
   # 1. Cơ sở dữ liệu: TimescaleDB (PostgreSQL + Time-series)
   stationmonitor-db:
@@ -25,6 +17,8 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks:
+      - sm-network
 
   # 2. MQTT Broker: Eclipse Mosquitto ( IoT communication )
   stationmonitor-mqtt:
@@ -38,6 +32,8 @@ services:
       - ./data/mosquitto/config:/mosquitto/config
       - ./data/mosquitto/data:/mosquitto/data
       - ./data/mosquitto/log:/mosquitto/log
+    networks:
+      - sm-network
 
   # 3. Video Streaming: go2rtc ( RTSP -> Web )
   stationmonitor-streaming:
@@ -78,36 +74,29 @@ services:
       - "Go2Rtc__ApiUrl=http://stationmonitor-streaming:1984"
       - "Go2Rtc__RtspUrl=rtsp://stationmonitor-streaming:8554"
       - "Media__FFmpegPath=ffmpeg"
-      - "Security__TrustedNetworks=172.,100."
+      - "Security__TrustedNetworks=172.,100.,::ffff:172.,::ffff:192.168."
     volumes:
       - ./data/media:/app/wwwroot/media # Thư mục chung cho ảnh/video
     networks:
       - sm-network
 
-  # 5. AI Engine: Xử lý nhiệt độ & hình ảnh (GPU support)
+  # 5. AI Engine: Xử lý nhiệt độ & hình ảnh (CPU Mode)
   stationmonitor-ai:
     build:
       context: ./sdk-relay
       dockerfile: Dockerfile
     container_name: stationmonitor-ai
     restart: always
-    privileged: true # Cần để truy cập driver NVIDIA
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     environment:
-      - API_URL=http://stationmonitor-backend:8080/api/v1
-      - GO2RTC_RTSP_URL=rtsp://stationmonitor-streaming:8554
       - CAMERA_IP=192.168.10.152
       - CAMERA_USER=admin
       - CAMERA_PASSWORD=Demo@2024
-      - WWWROOT_PATH=/app/wwwroot/media
+      - API_URL=http://stationmonitor-backend:8080/api/v1
+      - GO2RTC_RTSP_URL=rtsp://stationmonitor-streaming:8554
+      - WWWROOT_PATH=/app/data/media
     volumes:
       - ./data/media:/app/wwwroot/media # Chia sẻ thư mục media với backend
+      - ./sdk-relay:/app # [MỚI THÊM] Map thẳng mã nguồn bên ngoài vào Docker để không cần Build lại khi sửa code
     depends_on:
       - stationmonitor-backend
     networks:

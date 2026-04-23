@@ -439,9 +439,13 @@ export class AlertsHistoryPage {
         day: '2-digit', month: '2-digit', year: 'numeric',
         hour: '2-digit', minute: '2-digit', second: '2-digit',
       });
-      const levelBadge = a.level === 'alarm'
+      let levelBadge = a.level === 'alarm'
         ? '<span class="tag tag-danger">🚨 Alarm</span>'
         : '<span class="tag tag-warning">⚠️ Warning</span>';
+      
+      if (a.source === 'ai_prediction') {
+        levelBadge = '<span class="tag" style="background:linear-gradient(135deg, #8b5cf6, #6d28d9);color:white;border:none;box-shadow:0 0 8px rgba(139, 92, 246, 0.4);">🔮 AI Predict</span>';
+      }
       const statusBadge = a.status === 'open'
         ? '<span class="tag tag-danger">Chưa xử lý</span>'
         : a.status === 'acked'
@@ -546,6 +550,7 @@ export class AlertsHistoryPage {
     };
     const sourceLabel: Record<string, string> = {
       rule_engine: 'Rule Engine', ai_detection: 'AI Detection',
+      ai_prediction: 'AI Dự đoán',
       manual: 'Thủ công', maintenance: 'Bảo trì',
     };
     const fmt = (ts?: string) => ts
@@ -633,7 +638,8 @@ export class AlertsHistoryPage {
 
     <!-- Actions -->
     <div class="ah-detail-actions">
-      ${a.status !== 'closed' ? `<button id="adCloseBtn" class="btn-industrial btn-danger" style="flex:1;font-weight:700;">🚨 ĐÓNG CẢNH BÁO NÀY</button>` : ''}
+      ${a.source === 'ai_prediction' ? `<button id="adAnalyticsBtn" class="btn-industrial" style="flex:1;background:linear-gradient(135deg, #8b5cf6, #6d28d9);color:white;border:none;font-weight:700;">🔍 XEM PHÂN TÍCH AI</button>` : ''}
+      ${a.status !== 'closed' ? `<button id="adCloseBtn" class="btn-industrial btn-danger" style="flex:1;font-weight:700;">🚨 ĐÓNG CẢNH BÁO</button>` : ''}
       ${a.status === 'open' ? `<button id="adAckBtn" class="btn-industrial btn-primary" style="flex:1">✓ ACK</button>` : ''}
     </div>`;
   }

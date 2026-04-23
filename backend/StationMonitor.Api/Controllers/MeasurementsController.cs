@@ -35,8 +35,8 @@ public class MeasurementsController : ControllerBase
     private bool IsTrustedInternal(string ip)
     {
         if (ip == "127.0.0.1" || ip == "::1" || ip.Contains("127.0.0.1")) return true;
-        var extra = _config["Security:TrustedNetworks"] ?? "172.,100.";
-        return extra.Split(',').Any(p => ip.StartsWith(p.Trim()));
+        var extra = _config["Security:TrustedNetworks"] ?? "172.,100.,192.168.";
+        return extra.Split(',').Any(p => ip.Contains(p.Trim()));
     }
 
     /// <summary>
