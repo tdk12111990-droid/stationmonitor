@@ -111,6 +111,10 @@ export class LoginPage {
               </button>
             </div>
           </div>
+          <div class="gm-input-group">
+            <label>License Key</label>
+            <input type="text" id="loginLicenseKey" placeholder="SM-XXXX-XXXX-XXXX" required style="letter-spacing: 0.1em; text-transform: uppercase;">
+          </div>
           <button type="submit" id="loginBtn" class="gm-btn-login">
             <span id="loginBtnText">ĐĂNG NHẬP</span>
             <span id="loginBtnSpinner" style="display:none">⏳</span>
@@ -138,10 +142,17 @@ export class LoginPage {
       e.preventDefault();
       const username = (document.getElementById('loginUsername') as HTMLInputElement).value.trim();
       const password = (document.getElementById('loginPassword') as HTMLInputElement).value;
+      const licenseKey = (document.getElementById('loginLicenseKey') as HTMLInputElement).value.trim();
       const errorEl = document.getElementById('loginError')!;
       const btn = document.getElementById('loginBtn') as HTMLButtonElement;
       const btnText = document.getElementById('loginBtnText')!;
       const btnSpinner = document.getElementById('loginBtnSpinner')!;
+
+      if (!licenseKey) {
+        errorEl.textContent = 'License key là bắt buộc';
+        errorEl.style.display = 'block';
+        return;
+      }
 
       // Loading state
       btn.disabled = true;
@@ -152,13 +163,15 @@ export class LoginPage {
       // Simulate async (future: Tauri invoke)
       await new Promise(r => setTimeout(r, 600));
 
-      const result = await authService.login(username, password);
+      const result = await authService.login(username, password, licenseKey);
 
       btn.disabled = false;
       btnText.style.display = 'inline';
       btnSpinner.style.display = 'none';
 
       if (result.success) {
+        // Lưu license key vào localStorage để auto-fill lần sau
+        localStorage.setItem('station_license_key', licenseKey);
         router.navigate('dashboard');
       } else {
         errorEl.textContent = result.error || 'Đăng nhập thất bại';
@@ -176,6 +189,26 @@ export class LoginPage {
         (document.getElementById('loginForm') as HTMLFormElement)?.requestSubmit();
       }
     });
+
+    // Auto-format license key: uppercase, add dashes
+    document.getElementById('loginLicenseKey')?.addEventListener('input', (e) => {
+      const inp = e.target as HTMLInputElement;
+      let value = inp.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+      // Auto-insert dashes: SM-XXXX-XXXX-XXXX
+      if (value.length > 0) {
+        value = value.replace(/^([A-Z]{2})-?/, '$1-');
+        if (value.length > 8) value = value.substring(0, 8) + '-' + value.substring(8);
+        if (value.length > 13) value = value.substring(0, 13) + '-' + value.substring(13);
+        if (value.length > 18) value = value.substring(0, 18);
+      }
+      inp.value = value;
+    });
+
+    // Restore saved license key
+    const savedLicenseKey = localStorage.getItem('station_license_key');
+    if (savedLicenseKey) {
+      (document.getElementById('loginLicenseKey') as HTMLInputElement).value = savedLicenseKey;
+    }
 
     // Focus username on load
     setTimeout(() => (document.getElementById('loginUsername') as HTMLInputElement)?.focus(), 100);

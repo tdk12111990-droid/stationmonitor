@@ -28,6 +28,8 @@ public class AppDbContext : DbContext
     public DbSet<Report> Reports => Set<Report>();
     public DbSet<SyncQueue> SyncQueues => Set<SyncQueue>();
     public DbSet<MaintenanceTask> MaintenanceTasks => Set<MaintenanceTask>();
+    public DbSet<LicenseKey> LicenseKeys => Set<LicenseKey>();
+    public DbSet<ActiveSession> ActiveSessions => Set<ActiveSession>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

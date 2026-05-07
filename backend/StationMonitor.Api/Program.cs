@@ -162,7 +162,8 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Serve static files (SVG diagrams) từ wwwroot/
+// Serve static files from wwwroot (frontend build, SVG diagrams, etc.)
+app.UseDefaultFiles(); // Serve index.html when root / is requested
 app.UseStaticFiles();
 
 app.UseCors();
@@ -176,6 +177,16 @@ app.MapHub<RealtimeHub>("/ws/realtime");
 
 // Hangfire dashboard (admin only in production)
 app.UseHangfireDashboard("/hangfire");
+
+// SPA fallback: serve index.html for all non-API routes
+app.MapFallback(ctx =>
+{
+    ctx.Request.Path = "/index.html";
+    return app.Services.GetRequiredService<IWebHostEnvironment>()
+        .ContentRootFileProvider.GetFileInfo("wwwroot/index.html").Exists
+        ? Results.File("wwwroot/index.html", "text/html").ExecuteAsync(ctx)
+        : Results.NotFound().ExecuteAsync(ctx);
+});
 
 // Đăng ký recurring job: tạo báo cáo ngày lúc 00:05 hàng ngày
 RecurringJob.AddOrUpdate<ReportSchedulerWorker>(

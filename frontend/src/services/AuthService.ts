@@ -18,16 +18,23 @@ class AuthService {
         this.restoreSession();
     }
 
-    public async login(username: string, password: string): Promise<{ success: boolean; error?: string }> {
+    public async login(username: string, password: string, licenseKey: string): Promise<{ success: boolean; error?: string }> {
         try {
             const res = await fetch(`${API_BASE}/auth/login`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password }),
+                body: JSON.stringify({ username, password, licenseKey }),
             });
 
             if (!res.ok) {
-                return { success: false, error: 'Sai tên đăng nhập hoặc mật khẩu' };
+                const errData = await res.json().catch(() => ({}));
+                const message = errData.message || 'Sai tên đăng nhập hoặc mật khẩu';
+
+                // Xác định loại lỗi dựa trên status code
+                if (res.status === 403) {
+                    return { success: false, error: message }; // License error
+                }
+                return { success: false, error: message };
             }
 
             const data = await res.json();
@@ -50,18 +57,42 @@ class AuthService {
 
             localStorage.setItem(TOKEN_KEY, token);
             localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+
+            // Lưu license info nếu có
+            if (data.licenseInfo) {
+                localStorage.setItem('station_license_info', JSON.stringify(data.licenseInfo));
+            }
+
             this.currentUser = user;
             return { success: true };
 
         } catch (err) {
+            console.error('Login error:', err);
             return { success: false, error: 'Không thể kết nối tới máy chủ' };
         }
     }
 
-    public logout(): void {
-        this.currentUser = null;
-        localStorage.removeItem(SESSION_KEY);
-        localStorage.removeItem(TOKEN_KEY);
+    public async logout(): Promise<void> {
+        try {
+            const token = this.getToken();
+            if (token) {
+                // Notify backend to revoke session
+                await fetch(`${API_BASE}/auth/logout`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    }
+                }).catch(() => {}); // Ignore errors during logout
+            }
+        } catch {}
+        finally {
+            this.currentUser = null;
+            localStorage.removeItem(SESSION_KEY);
+            localStorage.removeItem(TOKEN_KEY);
+            localStorage.removeItem('station_license_info');
+            localStorage.removeItem('station_license_key');
+        }
     }
 
     public getToken(): string | null {

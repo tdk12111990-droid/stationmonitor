@@ -7,6 +7,7 @@
 // ============================================================
 
 using System.Security.Claims;
+using System.IdentityModel.Tokens.Jwt;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -30,35 +31,44 @@ public class AuthController : ControllerBase
     }
 
     /// <summary>
-    /// Đăng nhập bằng username/password
-    /// Trả về: JWT token (8h), refresh token, thông tin user
+    /// Đăng nhập bằng username/password/licenseKey
+    /// Trả về: JWT token, refresh token, thông tin user, thông tin license
     /// Lỗi 401: sai thông tin hoặc tài khoản bị khóa
+    /// Lỗi 403: license key không hợp lệ, hết hạn, hoặc đạt giới hạn session
     /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequest req)
     {
-        var result = await _auth.LoginAsync(req.Username, req.Password);
-        if (result == null)
-            return Unauthorized(new { message = "Tên đăng nhập hoặc mật khẩu không đúng" });
-
-        var (token, refreshToken, user) = result.Value;
-
-        // Lưu refresh token vào SystemSettings (đơn giản, không cần bảng riêng)
-        await SaveRefreshTokenAsync(user.Id, refreshToken);
-
-        return Ok(new
+        try
         {
-            token,
-            refreshToken,
-            user = new
+            var result = await _auth.LoginAsync(req.Username, req.Password, req.LicenseKey);
+            if (result == null)
+                return Unauthorized(new { message = "Tên đăng nhập hoặc mật khẩu không đúng" });
+
+            var user = result.User;
+
+            // Lưu refresh token vào SystemSettings (đơn giản, không cần bảng riêng)
+            await SaveRefreshTokenAsync(user.Id, result.RefreshToken);
+
+            return Ok(new
             {
-                id = user.Id,
-                username = user.Username,
-                fullName = user.FullName,
-                role = user.Role,
-                email = user.Email
-            }
-        });
+                token = result.Token,
+                refreshToken = result.RefreshToken,
+                user = new
+                {
+                    id = user.Id,
+                    username = user.Username,
+                    fullName = user.FullName,
+                    role = user.Role,
+                    email = user.Email
+                },
+                licenseInfo = result.LicenseInfo
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return StatusCode(403, new { message = ex.Message });
+        }
     }
 
     /// <summary>
@@ -129,6 +139,31 @@ public class AuthController : ControllerBase
         return Ok(new { userId, username, role, fullName });
     }
 
+    /// <summary>
+    /// Đăng xuất: revoke session
+    /// Yêu cầu: Header Authorization: Bearer {token}
+    /// </summary>
+    [Authorize]
+    [HttpPost("logout")]
+    public async Task<IActionResult> Logout()
+    {
+        var jti = User.FindFirstValue(JwtRegisteredClaimNames.Jti);
+        if (string.IsNullOrEmpty(jti))
+            return BadRequest(new { message = "Không thể xác định session" });
+
+        // Đánh dấu session là revoked
+        var session = await _db.ActiveSessions
+            .FirstOrDefaultAsync(s => s.SessionToken == jti);
+
+        if (session != null)
+        {
+            session.IsRevoked = true;
+            await _db.SaveChangesAsync();
+        }
+
+        return Ok(new { message = "Đăng xuất thành công" });
+    }
+
     // ── Helpers ──────────────────────────────────────────────
     private async Task SaveRefreshTokenAsync(Guid userId, string token)
     {
@@ -166,5 +201,5 @@ public class AuthController : ControllerBase
 }
 
 // ── Request Models ────────────────────────────────────────
-public record LoginRequest(string Username, string Password);
+public record LoginRequest(string Username, string Password, string LicenseKey);
 public record RefreshRequest(string RefreshToken);
