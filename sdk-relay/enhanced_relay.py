@@ -1,6 +1,9 @@
-import os, sys, cv2, json, threading, time, subprocess, requests
+import os, sys, cv2, json, threading, time, subprocess, requests, numpy as np, ctypes
 from collections import deque
 from urllib.parse import quote
+# Tắt hoàn toàn các log nhiễu từ thư viện hệ thống
+os.environ["OPENCV_LOG_LEVEL"] = "OFF"
+os.environ["FFMPEG_LOG_LEVEL"] = "QUIET"
 import xml.etree.ElementTree as ET
 import base64
 from requests.auth import HTTPDigestAuth
@@ -17,7 +20,7 @@ if SDK_DIR not in sys.path:
     sys.path.insert(0, SDK_DIR)
 
 # ── Tham số từ môi trường (hoặc fix cứng Development) ──
-CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.153")
+CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.152")
 USER = os.getenv("CAMERA_USER", "admin")
 PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024") # admin:Demo@2024 cho cam .153
 API_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
@@ -77,6 +80,7 @@ SNAPSHOT_EVENT = threading.Event()
 SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
 
 LIVE_TEMPS = {}     # { ruleID: temperature }
+PREDICTED_TEMPS = {} # { ruleID: temperature } - Dữ liệu dự báo AI
 ALARM_RULES = {}    # { ruleID: { "pre_alarm": float, "alarm": float, "name": str } }
 COOLDOWN_MAP = {}   # { ruleID: next_allowed_time }
 STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
@@ -92,7 +96,7 @@ class RuleEngine:
         self.api_url = api_url
         self.streaks = {}      # { ruleId: count }
         self.cooldowns = {}    # { ruleId: timestamp }
-        self.confirm_needed = 10
+        self.confirm_needed = 150 # Xác nhận trong 10 giây (15fps * 10s)
 
     def check(self, rule_id, temp, frame):
         now = time.time()
@@ -435,9 +439,11 @@ class ThermalSDK:
                         temp = data.fMaxTemperature
                         if 1 <= rid <= 20 and -50 < temp < 2000:
                             LIVE_TEMPS[rid] = temp
+                            if rid == 1:
+                                debug_log(f"[THERMAL] Received P1: {temp}C (Total points: {len(LIVE_TEMPS)})")
                             _cb_count[0] += 1
                             if _cb_count[0] % 10 == 1:
-                                debug_log(f"[THERMAL] SDK data: rule={rid} temp={temp:.1f}C LIVE_TEMPS={dict(list(LIVE_TEMPS.items())[:3])}")
+                                pass # Xóa log nhiễu
                     except Exception as e:
                         debug_log(f"[THERMAL] Callback error: {e}")
 
@@ -480,6 +486,9 @@ class ThermalSDK:
             try:
                 url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/jpegPicWithAppendData?format=json"
                 r = session.get(url, auth=auth, timeout=5)
+                if r.status_code != 200:
+                    debug_log(f"[THERMAL] ISAPI failed: {r.status_code} - {r.reason}")
+                
                 if r.status_code == 200:
                     import re, struct
                     raw = r.content
@@ -499,6 +508,7 @@ class ThermalSDK:
                                     matrix = arr[:thermal_h * thermal_w].reshape(thermal_h, thermal_w)
 
                                     # Extract temperature ở 10 điểm
+                                    debug_log(f"[THERMAL] Matrix Stats: Min={matrix.min():.1f}, Max={matrix.max():.1f}")
                                     for pid, coords in POINT_COORDS.items():
                                         tx = coords.get('tx')
                                         ty = coords.get('ty')
@@ -508,10 +518,17 @@ class ThermalSDK:
                                             px = max(0, min(px, thermal_w - 1))
                                             py = max(0, min(py, thermal_h - 1))
                                             temp = float(matrix[py, px])
-                                            if -50 < temp < 2000:
-                                                LIVE_TEMPS[int(pid)] = temp
+                                            # TRÍCH XUẤT TỪ MA TRẬN: Đảm bảo lấy đủ mọi điểm trong points_local
+                                            try:
+                                                temp = float(matrix[py, px])
+                                                if -10 < temp < 150:
+                                                    LIVE_TEMPS[int(pid)] = temp
+                                                else:
+                                                    LIVE_TEMPS[int(pid)] = 0.0
+                                            except:
+                                                LIVE_TEMPS[int(pid)] = 0.0
 
-                                    debug_log(f"[THERMAL] ISAPI matrix: min={valid.min():.1f} max={valid.max():.1f} | Extracted: {dict(list(LIVE_TEMPS.items())[:5])}")
+                                    # Đã lấy xong dữ liệu, không in log mỗi giây để tránh nhiễu
                                     break
             except Exception as e:
                 pass
@@ -601,7 +618,8 @@ class StreamRelay:
     def _get_ffmpeg_process(self, w, h):
         cmd = [ FFMPEG_BIN, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
             '-s', f"{w}x{h}", '-r', '20', '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-            '-preset', 'ultrafast', '-tune', 'zerolatency', '-crf', '28', '-f', 'rtsp', self.output_url ]
+            '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '40', '-crf', '28', 
+            '-maxrate', '2M', '-bufsize', '1M', '-f', 'rtsp', self.output_url ]
         return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def _draw_points(self, frame, blink):
@@ -620,7 +638,7 @@ class StreamRelay:
             if alarm and temp >= alarm: color = (0, 0, 255) if blink else (255, 255, 255)
             elif pre and temp >= pre: color = (0, 255, 255)
 
-            size = 2 if self.is_thermal else 10
+            size = 6 if self.is_thermal else 10
             cv2.line(frame, (x - size, y), (x + size, y), color, 1)
             cv2.line(frame, (x, y - size), (x, y + size), color, 1)
 
@@ -646,20 +664,41 @@ class StreamRelay:
                 cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
                 (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
                 cv2.putText(frame, line2, (tx, ty + th1 + 2), font, font_scale, color, thickness, cv2.LINE_AA)
+                
+                # [NEW] Vẽ thêm dòng dự báo nếu có dữ liệu
+                pred_val = PREDICTED_TEMPS.get(rule_id)
+                if pred_val:
+                    line3 = f"P: {pred_val:.1f}"
+                    (_, th2), _ = cv2.getTextSize(line2, font, font_scale, thickness)
+                    cv2.putText(frame, line3, (tx, ty + th1 + th2 + 4), font, font_scale, (255, 255, 0), thickness, cv2.LINE_AA)
 
     def _run(self):
         while self.running:
             cap = cv2.VideoCapture(self.rtsp_url)
+            # Thêm timeout cho OpenCV để tránh treo nếu camera lỗi
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+            
             if not cap.isOpened():
                 time.sleep(5); continue
-            w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-            if w <= 0: cap.release(); time.sleep(1); continue
+            cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            w_orig, h_orig = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            if w_orig <= 0: cap.release(); time.sleep(1); continue
+            
+            # Giảm độ phân giải cam Optical (1080p -> 720p) để mượt hơn, Thermal (384) giữ nguyên
+            w, h = w_orig, h_orig
+            if not self.is_thermal and w_orig > 1280:
+                w, h = 1280, 720
+                
             pipe = self._get_ffmpeg_process(w, h)
             blink = 0
             try:
                 while self.running:
                     ret, frame = cap.read()
                     if not ret: break
+                    
+                    if not self.is_thermal and (w != w_orig):
+                        frame = cv2.resize(frame, (w, h))
                     blink = (blink + 1) % 10
                     
                     # Burn overlay — chỉ cam 152 (thermal + optical)
@@ -688,6 +727,7 @@ def cleanup_old_events():
         time.sleep(300)
 
 if __name__ == "__main__":
+    debug_log("--- [SYSTEM] AI ENGINE RELAY STARTING ---")
     thermal = ThermalSDK(CAMERA_IP, USER, PASSWORD)
     thermal.start()
     
@@ -704,22 +744,26 @@ if __name__ == "__main__":
     relay_thm.start()
 
     # 2. Khởi động relay cho camera Phóng điện (153)
-    camera_153_url = f"rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101"
+    camera_153_url = f"rtsp://admin:Demo%402024@192.168.10.153:554/Streaming/Channels/101"
     relay_153 = StreamRelay("CAMERA_153_PD", camera_153_url, "camera_153_pd", is_thermal=False, draw_points=False)
     relay_153.start()
 
-    # --- KHỞI ĐỘNG CÁC LUỒNG AI TỰ ĐỘNG (CHU KỲ 5 PHÚT) ---
+    # --- KHỞI ĐỘNG CÁC LUỒNG AI TỰ ĐỘNG ---
     try:
-        # Gửi dữ liệu sang đối tác (Lấy thermal.points làm nguồn nhiệt độ)
-        pusher = ExternalApiPusher(CAMERA_IP)
-        threading.Thread(target=pusher.start, args=(thermal.points,), daemon=True).start()
+        debug_log("[AI SYSTEM] Initializing AI threads...")
+        # Khởi tạo bộ lấy dự báo
+        fetcher = PredictionFetcher(CAMERA_IP, debug_logger=debug_log)
+        fetcher.live_temps = LIVE_TEMPS 
+        fetcher.predicted_temps = PREDICTED_TEMPS
         
-        # Nhận dự báo từ đối tác
-        fetcher = PredictionFetcher(CAMERA_IP)
-        threading.Thread(target=fetcher.start, daemon=True).start()
+        # Bắt đầu bộ đẩy dữ liệu
+        pusher = ExternalApiPusher(CAMERA_IP, debug_logger=debug_log)
+        ai_thread = threading.Thread(target=pusher.start, args=(LIVE_TEMPS, fetcher), daemon=True)
+        ai_thread.start()
         
-        debug_log("[AI SYSTEM] Autonomous Pusher & Fetcher Started Successfully.")
+        debug_log(f"[AI SYSTEM] Pusher Thread Started (ID: {ai_thread.ident}). Cycle: 5 minutes.")
     except Exception as e:
+        debug_log(f"[AI SYSTEM] FATAL ERROR starting AI threads: {e}")
         debug_log(f"[AI SYSTEM] Failed to start AI components: {e}")
 
     try:
