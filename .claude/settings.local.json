@@ -56,7 +56,11 @@
       "Bash(git commit *)",
       "Bash(cp -r '/d/EN-HCNetSDKV6.1.9.4_build20220412_linux64/EN-HCNetSDKV6.1.9.4_build20220412_linux64/lib/*' /d/StationMonitor/sdk-relay/test_sdk/lib/linux/)",
       "Bash(chmod +x '/d/StationMonitor/sdk-relay/test_sdk/lib/linux/*.so')",
-      "Bash(chmod -R +x /d/StationMonitor/sdk-relay/test_sdk/lib/linux/HCNetSDKCom/)"
+      "Bash(chmod -R +x /d/StationMonitor/sdk-relay/test_sdk/lib/linux/HCNetSDKCom/)",
+      "Bash(grep -E \"\\\\.cs$\")",
+      "Bash(chmod +x *)",
+      "Bash(sudo apt *)",
+      "Bash(PGPASSWORD=postgres123 psql -h localhost -U postgres -d stationmonitor -c \"SELECT \\\\\"Key\\\\\", \\\\\"IssuedTo\\\\\", \\\\\"MaxConcurrentSessions\\\\\", \\\\\"IsActive\\\\\", \\\\\"ExpiresAt\\\\\" FROM \\\\\"LicenseKeys\\\\\";\")"
     ]
   }
 }

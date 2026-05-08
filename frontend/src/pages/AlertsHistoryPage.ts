@@ -52,14 +52,11 @@ export class AlertsHistoryPage {
       /* ── Grid list ── */
       .ah-grid-header, .ah-grid-row {
         display: grid;
-        grid-template-columns: 80px 155px 100px minmax(0, 1fr) 120px 100px;
+        grid-template-columns: 80px 155px 100px minmax(250px, 1fr) 120px 100px;
         align-items: center;
         width: 100%;
+        min-width: 800px;
         box-sizing: border-box;
-      }
-      .ah-detail-panel.open ~ * .ah-grid-header,
-      .ah-detail-panel.open ~ * .ah-grid-row {
-        grid-template-columns: 60px 140px 90px minmax(0, 1fr) 110px 90px;
       }
       .ah-grid-header {
         border-bottom: 1px solid var(--admin-border);
@@ -222,7 +219,7 @@ export class AlertsHistoryPage {
         <!-- Danh sách alerts -->
         <div class="ah-list-col">
           <div class="admin-card" style="padding:0;overflow:hidden;">
-            <div style="overflow-y:scroll;max-height:calc(100vh - 260px);">
+            <div style="overflow:auto;max-height:calc(100vh - 260px);">
               <div class="ah-grid-header" id="ahGridHeader">
                 <div>ẢNH</div>
                 <div class="ah-sortable-th" id="sort-time" data-sort="time">

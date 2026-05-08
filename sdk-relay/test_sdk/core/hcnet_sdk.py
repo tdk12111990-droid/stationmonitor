@@ -269,7 +269,10 @@ class NET_DVR_THERMOMETRY_ALARM(ctypes.Structure):
         ("byRes", ctypes.c_ubyte * 60)
     ]
 
-MSGCALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(NET_DVR_ALARMER), ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_void_p)
+if sys.platform == 'win32':
+    MSGCALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(NET_DVR_ALARMER), ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_void_p)
+else:
+    MSGCALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(NET_DVR_ALARMER), ctypes.POINTER(ctypes.c_char), ctypes.c_uint32, ctypes.c_void_p)
 
 class NET_DVR_XML_CONFIG_INPUT(ctypes.Structure):
     _fields_ = [
@@ -312,8 +315,12 @@ class NET_DVR_PREVIEWINFO(ctypes.Structure):
         ("byRes", ctypes.c_ubyte * 223)
     ]
 
-REALDATACALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_void_p)
-RemoteConfigCallback = ctypes.WINFUNCTYPE(None, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+if sys.platform == 'win32':
+    REALDATACALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_void_p)
+    RemoteConfigCallback = ctypes.WINFUNCTYPE(None, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
+else:
+    REALDATACALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_long, ctypes.c_uint32, ctypes.POINTER(ctypes.c_ubyte), ctypes.c_uint32, ctypes.c_void_p)
+    RemoteConfigCallback = ctypes.CFUNCTYPE(None, ctypes.c_uint32, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_void_p)
 
 class HCNetSDK:
     def __init__(self, sdk_path=None):
@@ -465,7 +472,10 @@ class HCNetSDK:
 
         # Decode Callback
         # void (CALLBACK *fDecCB)(long nPort, char * pBuf, long nSize, FRAME_INFO * pFrameInfo, long nReserved1, long nReserved2)
-        self.DECCALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(ctypes.c_char), ctypes.c_long, ctypes.c_void_p, ctypes.c_long, ctypes.c_long)
+        if sys.platform == 'win32':
+            self.DECCALLBACK = ctypes.WINFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(ctypes.c_char), ctypes.c_long, ctypes.c_void_p, ctypes.c_long, ctypes.c_long)
+        else:
+            self.DECCALLBACK = ctypes.CFUNCTYPE(None, ctypes.c_long, ctypes.POINTER(ctypes.c_char), ctypes.c_long, ctypes.c_void_p, ctypes.c_long, ctypes.c_long)
         
         try:
             self.playctrl.PlayM4_SetDecCallBack.restype = ctypes.c_bool

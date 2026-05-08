@@ -9,7 +9,7 @@ import { stationApi, type AlertItem, type Device, type SensorPoint, type Rule } 
 import { API_BASE_URL } from '@/utils/env';
 
 type TimeRange = '1H' | '6H' | '1D' | '1W' | '1M';
-type TabId = 'overview' | 'temp' | 'pd' | 'correlation' | 'alerts' | 'health';
+type TabId = 'overview' | 'temp' | 'pd' | 'correlation' | 'alerts' | 'health' | 'ai';
 interface HP { time: string; value: number; }
 
 // Threshold từ Rule: { value, level: 'warning'|'alarm', op: '>'|'>='|'<'|'<=' }
@@ -329,18 +329,37 @@ export class AnalyticsPage {
 
   private async buildAi(): Promise<void> {
     await this.loadHistory();
+    
+    // [FIX] Lấy dữ liệu dự báo qua Proxy Backend để tránh lỗi Cross-Domain/Firewall
+    // Gọi qua Reverse Proxy (/ai-api/) để tránh lỗi Mixed Content (HTTPS)
+    const aiPreds = await fetch(`${window.location.origin}/ai-api/api/ai-predictions`)
+      .then(r => r.json())
+      .catch(() => []);
+
     const aiPoints = CAM_IDS.slice(0, 6).map((id, i) => {
       const sensor = this.sensors.find(s => s.pointId === id);
       const history = this.camH[id] ?? [];
-      const last = history[history.length - 1];
+      const last = history[history.length - 1] as any;
       const realVal = sensor?.value ?? 0;
-      const predVal = (last as any)?.predictedValue; 
+      
+      // 1. Ưu tiên lấy từ API AI (Realtime nhất)
+      const latestPred = aiPreds.filter((p: any) => p.PointId === id).pop();
+      let predVal = latestPred ? parseFloat(latestPred.PredictedValue) : null;
+      
+      // 2. Dự phòng: Lấy từ lịch sử Backend (nếu API AI lỗi hoặc chưa có data mới)
+      if (predVal === null && last && last.predictedValue !== undefined) {
+        predVal = last.predictedValue;
+      }
+      
       return {
         id, label: CAM_LABELS[i],
         real: realVal,
         pred: predVal,
-        diff: predVal ? predVal - realVal : 0,
-        status: predVal > 60 ? 'CRITICAL' : predVal > 50 ? 'WARNING' : 'STABLE'
+        diff: predVal !== null ? predVal - realVal : 0,
+        status: (predVal !== null && predVal > 60) ? 'CRITICAL' : (predVal !== null && predVal > 50) ? 'WARNING' : 'STABLE',
+        // Thêm thông tin thời gian
+        realTime: latestPred ? latestPred.Timestamp : (last?.time ? new Date(last.time).toLocaleTimeString('vi-VN') : '---'),
+        predTime: latestPred?.ForecastTime || '---'
       };
     });
 
@@ -349,7 +368,7 @@ export class AnalyticsPage {
 
     this.setTabHTML('ai', `
       <div style="display:grid;grid-template-columns: 1fr 340px; gap: 12px; height: calc(100vh - 170px); overflow:hidden;">
-        <!-- LEFT: Biểu đồ tự co giãn theo chiều cao màn hình -->
+        <!-- LEFT: Biểu đồ -->
         <div style="display:flex;flex-direction:column;min-height:0;">
           <div style="background:#1e293b;border-radius:10px;padding:16px;border:1px solid #334155;flex:1;display:flex;flex-direction:column;min-height:0;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;">
@@ -368,7 +387,7 @@ export class AnalyticsPage {
           </div>
         </div>
 
-        <!-- RIGHT: Bảng chỉ số (Có thanh cuộn riêng nếu quá dài) -->
+        <!-- RIGHT: Bảng chỉ số chi tiết -->
         <div style="display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding-right:4px;">
           <div style="background:#1e293b;border-radius:10px;padding:16px;border:1px solid #334155;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
@@ -377,18 +396,23 @@ export class AnalyticsPage {
             </div>
             <div style="display:flex;flex-direction:column;gap:10px;">
               ${aiPoints.map(p => `
-                <div style="background:#0f172a;border-radius:8px;padding:10px;border:1px solid #1e293b;">
-                  <div style="display:flex;justify-content:space-between;margin-bottom:6px;">
-                    <span style="font-weight:700;color:#e2e8f0;font-size:0.75rem;">Điểm ${p.label}</span>
+                <div style="background:#0f172a;border-radius:8px;padding:12px;border:1px solid #1e293b;">
+                  <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                    <span style="font-weight:700;color:#e2e8f0;font-size:0.8rem;">Điểm ${p.label}</span>
                     <span style="font-size:0.6rem;font-weight:800;padding:1px 5px;border-radius:4px;background:${p.pred ? statusColors[p.status] : '#334155'}22;color:${p.pred ? statusColors[p.status] : '#64748b'};">
                       ${p.pred ? p.status : 'WAITING'}
                     </span>
                   </div>
-                  <div style="display:flex;align-items:center;justify-content:space-between;">
-                    <div><div style="font-size:0.6rem;color:#64748b;">HIỆN TẠI</div><div style="font-size:1rem;font-weight:800;color:#e2e8f0;">${p.real.toFixed(1)}°C</div></div>
+                  <div style="display:flex;align-items:flex-start;justify-content:space-between;">
+                    <div>
+                      <div style="font-size:0.55rem;color:#64748b;font-weight:700;">HIỆN TẠI</div>
+                      <div style="font-size:1.1rem;font-weight:900;color:#e2e8f0;line-height:1.1;">${p.real.toFixed(1)}°C</div>
+                      <div style="font-size:0.5rem;color:#475569;margin-top:2px;">🕒 ${p.realTime}</div>
+                    </div>
                     <div style="text-align:right;">
-                      <div style="font-size:0.6rem;color:#8b5cf6;">AI DỰ BÁO</div>
-                      <div style="font-size:1rem;font-weight:800;color:#8b5cf6;">${p.pred ? p.pred.toFixed(1) + '°C' : '---'}</div>
+                      <div style="font-size:0.55rem;color:#8b5cf6;font-weight:700;">AI DỰ BÁO</div>
+                      <div style="font-size:1.1rem;font-weight:900;color:#a78bfa;line-height:1.1;">${p.pred ? p.pred.toFixed(1) + '°C' : '---'}</div>
+                      <div style="font-size:0.5rem;color:#6d28d9;margin-top:2px;">📅 ${p.predTime}</div>
                     </div>
                   </div>
                 </div>`).join('')}

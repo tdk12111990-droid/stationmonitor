@@ -44,7 +44,7 @@ public class RuleEvaluationWorker : BackgroundService
     private readonly Dictionary<Guid, DateTime> _cooldownUntil  = new();
 
     // Global confirm threshold từ Settings (camera_filter_time_s / 5s)
-    private int _globalConfirmReadings = 2; // mặc định ~10 giây
+    private int _globalConfirmReadings = 3; // Mặc định ~10-15 giây (3 nhịp x 5s)
 
     public RuleEvaluationWorker(
         IServiceScopeFactory scopeFactory,

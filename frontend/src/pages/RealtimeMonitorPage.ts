@@ -443,10 +443,17 @@ export class RealtimeMonitorPage {
     // Grid dùng _sub (nếu có cấu hình), nếu không thì fallback về luồng thường.
     const subId: string = cfg.go2rtc_sub_id ?? go2rtcId;
     const mainId: string = cfg.go2rtc_main_id ?? go2rtcId;
-    const activeId = fullscreen ? mainId : subId;
+    let activeId = fullscreen ? mainId : subId;
+    
+    // Tauri Linux optimization: Force MJPEG fallback to avoid WebRTC lag
+    const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
+    if (isTauri && activeId.includes('camera_152')) {
+        activeId += '_mjpeg';
+    }
+
     const status: string = (cam.status as string) ?? 'unknown';
 
-    const streamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=webrtc,mse&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
+    const streamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=webrtc,mse,mjpeg&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
 
     return `
     <div class="nvr-cell" data-cam-id="${cam.id}" data-go2rtc="${go2rtcId}"
@@ -580,10 +587,15 @@ export class RealtimeMonitorPage {
         .forEach(c => { c.style.display = 'none'; });
 
       // Switch to main (high-res) stream for fullscreen
-      const mainId = cell.dataset.main ?? cell.dataset.go2rtc ?? '';
+      let mainId = cell.dataset.main ?? cell.dataset.go2rtc ?? '';
+      const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
+      if (isTauri && mainId.includes('camera_152') && !mainId.endsWith('_mjpeg')) {
+        mainId += '_mjpeg';
+      }
+
       const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
       if (iframe && mainId) {
-        iframe.src = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(mainId)}&mode=mse&controls=0`;
+        iframe.src = `${GO2RTC_URL}stream.html?src=${encodeURIComponent(mainId)}&mode=webrtc,mse,mjpeg&controls=0`;
       }
 
       // Toolbar: show back + camera name
@@ -603,10 +615,15 @@ export class RealtimeMonitorPage {
     // Switch back to sub-stream
     if (expanded) {
       const camId = expanded.dataset.camId ?? '';
-      const subId = expanded.dataset.sub ?? expanded.dataset.go2rtc ?? '';
+      let subId = expanded.dataset.sub ?? expanded.dataset.go2rtc ?? '';
+      const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
+      if (isTauri && subId.includes('camera_152') && !subId.endsWith('_mjpeg')) {
+        subId += '_mjpeg';
+      }
+
       const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
       if (iframe && subId) {
-        iframe.src = `${GO2RTC_URL}/stream.html?src=${encodeURIComponent(subId)}&mode=mse&controls=0`;
+        iframe.src = `${GO2RTC_URL}stream.html?src=${encodeURIComponent(subId)}&mode=webrtc,mse,mjpeg&controls=0`;
       }
       expanded.classList.remove('expanded');
     }

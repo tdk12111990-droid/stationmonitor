@@ -47,6 +47,20 @@ public class AppDbContext : DbContext
             .HasIndex(x => new { x.StationId, x.Key })
             .IsUnique();
 
+        // LicenseKeys — seed default demo license
+        modelBuilder.Entity<LicenseKey>().HasData(
+            new LicenseKey
+            {
+                Id = new Guid("11111111-1111-1111-1111-111111111111"),
+                Key = "SM-DEMO-0000-FREE1",
+                IssuedTo = "Demo Account",
+                MaxConcurrentSessions = 1,
+                ExpiresAt = null,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow
+            }
+        );
+
         // JSON columns (PostgreSQL JSONB)
         modelBuilder.Entity<Station>().Property(x => x.Location).HasColumnType("jsonb");
         modelBuilder.Entity<Device>().Property(x => x.Config).HasColumnType("jsonb");

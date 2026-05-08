@@ -63,7 +63,7 @@ public class StorageMonitorWorker : BackgroundService
         if (station == null) return;
 
         var drives = DriveInfo.GetDrives()
-            .Where(d => d.IsReady && d.DriveType == DriveType.Fixed)
+            .Where(d => d.IsReady && d.DriveType == DriveType.Fixed && !d.Name.Contains("/snap/"))
             .ToList();
 
         var metrics = new List<object>();

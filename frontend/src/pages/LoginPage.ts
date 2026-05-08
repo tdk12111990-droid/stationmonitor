@@ -190,18 +190,10 @@ export class LoginPage {
       }
     });
 
-    // Auto-format license key: uppercase, add dashes
+    // Auto-format license key: gỡ bỏ logic ép định dạng để nhập tự do
     document.getElementById('loginLicenseKey')?.addEventListener('input', (e) => {
       const inp = e.target as HTMLInputElement;
-      let value = inp.value.toUpperCase().replace(/[^A-Z0-9-]/g, '');
-      // Auto-insert dashes: SM-XXXX-XXXX-XXXX
-      if (value.length > 0) {
-        value = value.replace(/^([A-Z]{2})-?/, '$1-');
-        if (value.length > 8) value = value.substring(0, 8) + '-' + value.substring(8);
-        if (value.length > 13) value = value.substring(0, 13) + '-' + value.substring(13);
-        if (value.length > 18) value = value.substring(0, 18);
-      }
-      inp.value = value;
+      inp.value = inp.value.toUpperCase(); // Chỉ giữ lại viết hoa
     });
 
     // Restore saved license key

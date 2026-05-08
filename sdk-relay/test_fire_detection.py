@@ -19,8 +19,8 @@ from requests.auth import HTTPDigestAuth
 # ════════════════════════════════════════════════════════════
 
 CAMERA_IP = "192.168.10.153"
-CAMERA_USER = "tladmin"
-CAMERA_PASSWORD = "Ab@12345"
+CAMERA_USER = "admin"
+CAMERA_PASSWORD = "Demo@2024"
 
 BASE_URL = f"http://{CAMERA_IP}"
 AUTH = HTTPDigestAuth(CAMERA_USER, CAMERA_PASSWORD)

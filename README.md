@@ -109,7 +109,7 @@ cd sdk-relay && python enhanced_relay.py
 | Camera | IP | Creds | Vai trò |
 |--------|----|-------|---------|
 | 152 | 192.168.10.152 | admin / Demo@2024 | Nhiệt + Quang học |
-| 153 | 192.168.10.153 | tladmin / Ab@12345 | Phóng điện |
+| 153 | 192.168.10.153 | admin / Demo@2024 | Phóng điện |
 
 ---
 

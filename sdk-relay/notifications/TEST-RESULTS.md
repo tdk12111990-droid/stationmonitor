@@ -160,7 +160,7 @@ class CameraConfigurer:
 2. Verify IP addresses: `192.168.10.152` and `192.168.10.153`
 3. Verify credentials:
    - Camera 152: `admin / Demo@2024`
-   - Camera 153: `tladmin / Ab@12345`
+   - Camera 153: `admin / Demo@2024`
 4. Ensure backend API is running at `192.168.1.100:5056` (or update config.json)
 
 ### Run Full Test Suite

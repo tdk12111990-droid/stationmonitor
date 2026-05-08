@@ -37,10 +37,10 @@ print("="*60)
 # Thử đọc trigger cụ thể
 r = get("/ISAPI/Event/triggers/audioexception-1")
 if r.status_code == 403:
-    print("  Dùng tladmin thử...")
+    print("  Dùng admin thử...")
     r = requests.get(BASE + "/ISAPI/Event/triggers/audioexception-1",
-                     auth=HTTPDigestAuth("tladmin","Ab@12345"), timeout=6)
-    print(f"  tladmin → {r.status_code}")
+                     auth=HTTPDigestAuth("admin","Demo@2024"), timeout=6)
+    print(f"  admin → {r.status_code}")
 
 # Bật audioexception + thêm center notification + arming schedule 24/7
 AUDIO_TRIGGER_XML = """<?xml version="1.0" encoding="UTF-8"?>

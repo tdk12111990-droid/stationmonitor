@@ -4,7 +4,9 @@
 // ============================================================
 
 export const GO2RTC_URL: string =
-  (import.meta.env.VITE_GO2RTC_URL as string | undefined) ?? 'http://localhost:1984';
+  (import.meta.env.VITE_GO2RTC_URL as string | undefined) || 
+  (typeof window !== 'undefined' ? `${window.location.origin}/rtc/` : 'http://localhost:1984/');
 
 export const API_BASE_URL: string =
-  (import.meta.env.VITE_API_URL as string | undefined) ?? 'http://localhost:5056';
+  (import.meta.env.VITE_API_URL as string | undefined) || 
+  (typeof window !== 'undefined' ? window.location.origin : 'http://localhost:5056');

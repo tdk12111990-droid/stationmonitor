@@ -795,8 +795,8 @@ if __name__ == "__main__":
       },
       {
         "Id": "192.168.10.153",
-        "User": "tladmin",
-        "Password": "Ab@12345"
+        "User": "admin",
+        "Password": "Demo@2024"
       }
     ]
   },

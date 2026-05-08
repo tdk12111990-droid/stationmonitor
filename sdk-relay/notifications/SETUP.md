@@ -42,8 +42,8 @@ Sửa `config.json`:
   },
   "camera_153": {
     "ip": "192.168.10.153",
-    "user": "tladmin",
-    "password": "Ab@12345",
+    "user": "admin",
+    "password": "Demo@2024",
     ...
   }
 }

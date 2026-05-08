@@ -347,8 +347,14 @@ export class DashboardPage {
   }
 
   async mount(): Promise<void> {
+    console.log('[Dashboard] Mounting page...');
     // Load station ID
-    this.stationId = await stationApi.getFirstStationId() ?? '';
+    try {
+        this.stationId = await stationApi.getFirstStationId() ?? '';
+        console.log('[Dashboard] Station ID loaded:', this.stationId);
+    } catch (e) {
+        console.error('[Dashboard] Failed to get station ID:', e);
+    }
 
     this.initPanZoom();
     this.initCollapse();
@@ -361,6 +367,7 @@ export class DashboardPage {
     this.connectSignalR();
 
     // Load data
+    console.log('[Dashboard] Loading SLD data...');
     await this.loadSld();
     await this.refreshKpi();
     await this.refreshAlerts();
@@ -457,7 +464,11 @@ export class DashboardPage {
 
     if (svgUrl) {
       const img = document.createElementNS(ns, 'image');
-      img.setAttribute('href', `${API_BASE}${svgUrl}`);
+      // Sửa lỗi ghép nối URL để tránh dấu // thừa
+      const cleanSvgUrl = svgUrl.startsWith('/') ? svgUrl.substring(1) : svgUrl;
+      const cleanApiBase = API_BASE.endsWith('/') ? API_BASE : `${API_BASE}/`;
+      
+      img.setAttribute('href', `${cleanApiBase}${cleanSvgUrl}`);
       img.setAttribute('x', '0'); img.setAttribute('y', '0');
       img.setAttribute('width', String(SLD_W)); img.setAttribute('height', String(SLD_H));
       img.setAttribute('preserveAspectRatio', 'xMidYMid meet');

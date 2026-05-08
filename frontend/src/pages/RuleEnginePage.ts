@@ -15,14 +15,6 @@ const FALLBACK_POINTS = [
   { value: 'phong_dien', label: 'Phóng điện PD (dB)' },
 ];
 
-const OP_LABELS: Record<string, string> = {
-  '>': '> lớn hơn',
-  '<': '< nhỏ hơn',
-  '>=': '≥ lớn hơn hoặc bằng',
-  '<=': '≤ nhỏ hơn hoặc bằng',
-  '==': '= bằng',
-};
-
 export class RuleEnginePage {
   private rules: Rule[] = [];
   private editingId: string | null = null;
@@ -478,17 +470,14 @@ export class RuleEnginePage {
             let updated = false;
             let pre_alarm = 50;
             let alarm = 70;
-            let enabled = true;
 
             if (cond.point === 'P1') {
               pre_alarm = 30;
               alarm = 50;
-              enabled = false; // Tắt P1
               updated = true;
             } else if (cond.point.match(/^P[2-9]$/) || cond.point === 'P10') {
               pre_alarm = 50;
               alarm = 70;
-              enabled = true;
               updated = true;
             }
 
@@ -724,11 +713,6 @@ export class RuleEnginePage {
     } catch {
       return { doHealth: false, penalty: 10, doAlert: true, level: 'warning', doMaintenance: false, maintType: 'inspection', maintDays: 30 };
     }
-  }
-
-  private parseLevel(actionsJson: string): string {
-    const a = this.parseActions(actionsJson);
-    return a.level;
   }
 
   destroy(): void { }

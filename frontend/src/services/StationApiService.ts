@@ -27,6 +27,7 @@ export interface SensorPoint {
   deviceId: string;
   pointId: string;    // nhiet_do_pha_1 | nhiet_do_pha_2 | nhiet_do_pha_3 | phong_dien
   value: number;
+  predictedValue?: number; // [NEW] Thêm giá trị dự báo
   unit: string;
   quality: number;
   time: string;
@@ -142,7 +143,7 @@ class StationApiService {
     from?: string,
     to?: string,
     limit = 500
-  ): Promise<Array<{ time: string; value: number; quality: number }>> {
+  ): Promise<Array<{ time: string; value: number; predictedValue?: number; quality: number }>> {
     const params = new URLSearchParams({ deviceId, pointId, limit: String(limit) });
     if (from) params.set('from', from);
     if (to) params.set('to', to);

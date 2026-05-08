@@ -337,7 +337,7 @@
 | 13 | SignalR CORS + Credentials | `AllowAnyOrigin` không tương thích `AllowCredentials` | `WithOrigins(specific_url)` | Program.cs |
 | 14 | Camera config JSON string | Backend trả string, frontend expect object | `JSON.parse(d.config)` trong StationApiService | StationApiService.ts |
 | 15 | Camera 153 màn đen (channel sai) | Channel /102 là audio-only | Đổi sang /101 (main stream) | go2rtc.yaml, DB |
-| 16 | Camera 153 credentials sai | DB dùng admin/Demo@2024, thực tế là tladmin/Ab@12345 | Update DB qua PUT /api/v1/devices/{id} | DB config |
+| 16 | Camera 153 credentials sai | DB dùng admin/Demo@2024, thực tế là admin/Demo@2024 | Update DB qua PUT /api/v1/devices/{id} | DB config |
 | 17 | Camera 153 từ chối reconnect | Hikvision giới hạn RTSP slots | Restart go2rtc sau khi update yaml | go2rtc.yaml |
 | 18 | Login 500 — FK violation SystemSettings | `StationId = userId` vi phạm FK constraint | Dùng station ID thật + key `refresh_token_{userId}` | AuthController.cs |
 | 19 | TS error: `sldFileId` declared never read | Field chỉ ghi, không đọc | Xóa field | DashboardPage.ts |
@@ -379,8 +379,8 @@ PLC S7-1200: 192.168.10.100, DB32, rack=0, slot=1
 Camera 152 (Hikvision): admin / Demo@2024
   - Normal: rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101
   - Thermal: rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201
-Camera 153 (Hikvision): tladmin / Ab@12345
-  - PD: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
+Camera 153 (Hikvision): admin / Demo@2024
+  - PD: rtsp://admin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
 go2rtc IDs: camera_152_normal, camera_152_thermal, camera_153_pd
 Hikvision channels: 101=Main H264, 102=Sub/Audio-only, 201=Thermal
 ```

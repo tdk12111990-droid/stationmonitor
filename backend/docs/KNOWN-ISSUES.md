@@ -258,19 +258,19 @@ curl http://localhost:1984/api/streams
 
 **Triệu chứng:** go2rtc không thêm được stream `camera_153_pd` dù PUT API trả 200, stream không xuất hiện trong danh sách.
 
-**Nguyên nhân:** DB config camera 192.168.10.153 dùng `username: "admin"`, `password: "Demo@2024"` nhưng camera thực tế yêu cầu `username: "tladmin"`, `password: "Ab@12345"`. go2rtc kết nối thất bại và silently drop stream khỏi danh sách.
+**Nguyên nhân:** DB config camera 192.168.10.153 dùng `username: "admin"`, `password: "Demo@2024"` nhưng camera thực tế yêu cầu `username: "admin"`, `password: "Demo@2024"`. go2rtc kết nối thất bại và silently drop stream khỏi danh sách.
 
 **Cách xác minh:**
 ```bash
 # Stream hikvision_sub đang chạy với credentials nào?
 curl http://localhost:1984/api/streams | python -c "import sys,json; d=json.load(sys.stdin); print(d['hikvision_sub']['producers'][0]['url'])"
-# → rtsp://tladmin:Ab%4012345@192.168.10.153:554/...  ← credentials thực tế
+# → rtsp://admin:Ab%4012345@192.168.10.153:554/...  ← credentials thực tế
 ```
 
 **Cách sửa:** Cập nhật DB config qua API:
 ```bash
 curl -X PUT http://localhost:5056/api/v1/devices/{id} \
-  -d '{"config": "{\"ip\":\"192.168.10.153\",\"username\":\"tladmin\",\"password\":\"Ab@12345\",\"rtsp_path\":\"/Streaming/Channels/101\",\"go2rtc_id\":\"camera_153_pd\"}"}'
+  -d '{"config": "{\"ip\":\"192.168.10.153\",\"username\":\"admin\",\"password\":\"Demo@2024\",\"rtsp_path\":\"/Streaming/Channels/101\",\"go2rtc_id\":\"camera_153_pd\"}"}'
 ```
 
 **Bài học:** Khi thêm camera vào DB, luôn kiểm tra credentials bằng cách xem stream đang chạy trong go2rtc trước.
@@ -286,14 +286,14 @@ curl -X PUT http://localhost:5056/api/v1/devices/{id} \
 **Cách xác minh:**
 ```bash
 # go2rtc trả 200 OK nhưng stream 153 không xuất hiện
-curl -X PUT http://localhost:1984/api/streams -d '{"test_153": "rtsp://tladmin:Ab%4012345@192.168.10.153:554/Channels/101"}'
+curl -X PUT http://localhost:1984/api/streams -d '{"test_153": "rtsp://admin:Ab%4012345@192.168.10.153:554/Channels/101"}'
 # Response chỉ còn 2 streams (.152), không có test_153
 ```
 
 **Cách sửa:** Cập nhật `go2rtc.yaml` rồi **restart go2rtc** để tạo fresh connection:
 ```yaml
 streams:
-  camera_153_pd: rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
+  camera_153_pd: rtsp://admin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
 ```
 
 **Phòng tránh:** Không xóa stream camera đang active qua DELETE API trong giờ vận hành. Nếu cần đổi config, dùng PUT thay vì DELETE+ADD.
@@ -346,7 +346,7 @@ if (device.Type.StartsWith("camera"))
 streams:
   camera_152_normal:  rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/101
   camera_152_thermal: rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201
-  camera_153_pd:      rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
+  camera_153_pd:      rtsp://admin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
 ```
 
 **Quy tắc:** `go2rtc_id` trong DB phải trùng với key trong `go2rtc.yaml` và là gì frontend dùng để embed iframe (`stream.html?src=<go2rtc_id>`).

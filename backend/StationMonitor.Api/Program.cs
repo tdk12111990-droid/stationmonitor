@@ -7,6 +7,7 @@ using System.Text;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using Microsoft.AspNetCore.StaticFiles;
 using Hangfire;
 using Hangfire.PostgreSql;
 using StationMonitor.Api.Hubs;
@@ -160,16 +161,68 @@ builder.Services.AddCors(options =>
               .AllowCredentials());
 });
 
+builder.Services.AddReverseProxy()
+    .LoadFromMemory(
+        new[] { 
+            new Yarp.ReverseProxy.Configuration.RouteConfig { 
+                RouteId = "rtc-route", 
+                ClusterId = "rtc-cluster", 
+                Match = new Yarp.ReverseProxy.Configuration.RouteMatch { Path = "/rtc/{**catchall}" },
+                Transforms = new[] { new Dictionary<string, string> { { "PathRemovePrefix", "/rtc" } } }
+            },
+            new Yarp.ReverseProxy.Configuration.RouteConfig { 
+                RouteId = "ai-api-route", 
+                ClusterId = "ai-api-cluster", 
+                Match = new Yarp.ReverseProxy.Configuration.RouteMatch { Path = "/ai-api/{**catchall}" },
+                Transforms = new[] { new Dictionary<string, string> { { "PathRemovePrefix", "/ai-api" } } }
+            }
+        },
+        new[] { 
+            new Yarp.ReverseProxy.Configuration.ClusterConfig { 
+                ClusterId = "rtc-cluster", 
+                Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig> { 
+                    { "destination1", new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = "http://localhost:1984/" } } 
+                } 
+            },
+            new Yarp.ReverseProxy.Configuration.ClusterConfig { 
+                ClusterId = "ai-api-cluster", 
+                Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig> { 
+                    { "destination1", new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = "http://localhost:8080/" } } 
+                } 
+            }
+        }
+    );
+
+// ── Background Workers (Dịch vụ chạy ngầm) ────────────────
+builder.Services.AddHostedService<StationMonitor.Workers.Polling.PlcPollingWorker>();
+builder.Services.AddHostedService<StationMonitor.Workers.Polling.ModbusTcpWorker>();
+builder.Services.AddHostedService<StationMonitor.Workers.Polling.MqttSubscriberWorker>();
+builder.Services.AddHostedService<StationMonitor.Workers.Polling.RuleEvaluationWorker>();
+builder.Services.AddHostedService<StationMonitor.Workers.Polling.HealthScoreWorker>();
+
 var app = builder.Build();
 
-// Serve static files from wwwroot (frontend build, SVG diagrams, etc.)
-app.UseDefaultFiles(); // Serve index.html when root / is requested
-app.UseStaticFiles();
+// ── Static Files (Frontend, SVG, Media) ──────────────────
+var provider = new FileExtensionContentTypeProvider();
+provider.Mappings[".svg"] = "image/svg+xml";
+provider.Mappings[".svgz"] = "image/svg+xml";
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    ContentTypeProvider = provider
+});
+app.UseStaticFiles(); // Dành cho các file chuẩn khác trong wwwroot
+// Serve index.html when root / is requested
+app.UseDefaultFiles();
 
 app.UseCors();
 app.UseAuthentication();
 app.UseAuthorization();
-app.UseMiddleware<AuditMiddleware>(); // Ghi audit log tự động
+
+// Map Reverse Proxy CÀNG SỚM CÀNG TỐT (đặc biệt cho /rtc)
+app.MapReverseProxy();
+
+app.UseMiddleware<AuditMiddleware>();
 app.MapControllers();
 
 // SignalR endpoint
@@ -179,14 +232,7 @@ app.MapHub<RealtimeHub>("/ws/realtime");
 app.UseHangfireDashboard("/hangfire");
 
 // SPA fallback: serve index.html for all non-API routes
-app.MapFallback(ctx =>
-{
-    ctx.Request.Path = "/index.html";
-    return app.Services.GetRequiredService<IWebHostEnvironment>()
-        .ContentRootFileProvider.GetFileInfo("wwwroot/index.html").Exists
-        ? Results.File("wwwroot/index.html", "text/html").ExecuteAsync(ctx)
-        : Results.NotFound().ExecuteAsync(ctx);
-});
+app.MapFallbackToFile("index.html");
 
 // Đăng ký recurring job: tạo báo cáo ngày lúc 00:05 hàng ngày
 RecurringJob.AddOrUpdate<ReportSchedulerWorker>(
@@ -199,6 +245,33 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     db.Database.Migrate();
+
+    // Đảm bảo bảng LicenseKeys tồn tại (phòng trường hợp migration lỗi)
+    await db.Database.ExecuteSqlRawAsync(@"
+        CREATE TABLE IF NOT EXISTS ""LicenseKeys"" (
+            ""Id"" uuid NOT NULL PRIMARY KEY,
+            ""Key"" text NOT NULL,
+            ""IssuedTo"" text NOT NULL,
+            ""MaxConcurrentSessions"" integer NOT NULL,
+            ""ExpiresAt"" timestamp with time zone,
+            ""IsActive"" boolean NOT NULL,
+            ""CreatedAt"" timestamp with time zone NOT NULL
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS ""IX_LicenseKeys_Key"" ON ""LicenseKeys"" (""Key"");
+        
+        CREATE TABLE IF NOT EXISTS ""ActiveSessions"" (
+            ""Id"" uuid NOT NULL PRIMARY KEY,
+            ""UserId"" uuid NOT NULL,
+            ""LicenseKeyId"" uuid NOT NULL REFERENCES ""LicenseKeys""(""Id"") ON DELETE CASCADE,
+            ""SessionToken"" text NOT NULL,
+            ""IpAddress"" text,
+            ""UserAgent"" text,
+            ""LoginAt"" timestamp with time zone NOT NULL,
+            ""LastSeenAt"" timestamp with time zone NOT NULL,
+            ""ExpiresAt"" timestamp with time zone NOT NULL,
+            ""IsRevoked"" boolean NOT NULL
+        );
+    ");
 
     // Đảm bảo các cột được thêm vào kể cả khi migration đã bị đánh dấu "applied" mà DDL chưa chạy
     await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Rules"" ADD COLUMN IF NOT EXISTS ""RuleSet"" text;");
@@ -226,6 +299,12 @@ using (var scope = app.Services.CreateScope())
 
     // Seed 10 rules nhiệt độ cho Camera 152 (P1 -> P10)
     await SeedThermalPointsRulesAsync(db);
+
+    // Seed license key mặc định nếu chưa có
+    await SeedDefaultLicenseAsync(db);
+
+    // Seed sơ đồ một sợi (SLD) mặc định
+    await SeedDefaultSldAsync(db);
 
     // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
     var deviceService = scope.ServiceProvider.GetRequiredService<DeviceService>();
@@ -464,4 +543,55 @@ static async Task SeedThermalPointsRulesAsync(AppDbContext db)
     }
     await db.SaveChangesAsync();
     Console.WriteLine("[Startup] Đã seed 10 rules nhiệt độ camera (P1-P10)");
+}
+
+// ── Seed License Key mặc định ─────────────────────────────
+static async Task SeedDefaultLicenseAsync(StationMonitor.Data.AppDbContext db)
+{
+    if (await db.LicenseKeys.AnyAsync(l => l.Key == "STATION-MONITOR-FREE")) return;
+
+    db.LicenseKeys.Add(new StationMonitor.Data.Entities.LicenseKey
+    {
+        Key = "STATION-MONITOR-FREE",
+        IssuedTo = "Hệ thống mặc định",
+        MaxConcurrentSessions = 100,
+        IsActive = true,
+        CreatedAt = DateTime.UtcNow
+    });
+    await db.SaveChangesAsync();
+    Console.WriteLine("[Startup] Đã tạo License Key mặc định: STATION-MONITOR-FREE");
+
+    if (!await db.LicenseKeys.AnyAsync(l => l.Key == "STATION-STANDARD-10"))
+    {
+        db.LicenseKeys.Add(new StationMonitor.Data.Entities.LicenseKey
+        {
+            Key = "STATION-STANDARD-10",
+            IssuedTo = "Gói tiêu chuẩn 10 thiết bị",
+            MaxConcurrentSessions = 10, // GIỚI HẠN 10 TAB
+            IsActive = true,
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+        Console.WriteLine("[Startup] Đã tạo License Standard (10 máy): STATION-STANDARD-10");
+    }
+}
+
+// ── Seed Sơ đồ một sợi (SLD) mặc định ──────────────────────
+static async Task SeedDefaultSldAsync(StationMonitor.Data.AppDbContext db)
+{
+    var stations = await db.Stations.ToListAsync();
+    foreach (var station in stations)
+    {
+        if (!await db.SldFiles.AnyAsync(f => f.StationId == station.Id))
+        {
+            db.SldFiles.Add(new StationMonitor.Data.Entities.SldFile
+            {
+                StationId = station.Id,
+                SvgUrl = "/sodo1so_00001.svg",
+                Version = 1
+            });
+            Console.WriteLine($"[Startup] Đã gán sơ đồ mặc định cho trạm: {station.Name}");
+        }
+    }
+    await db.SaveChangesAsync();
 }

@@ -160,7 +160,7 @@
 
 **Fix camera phóng điện (192.168.10.153) màn đen**
 - Root cause 1: `go2rtc.yaml` hardcode `hikvision_sub` trỏ vào channel `/102` (audio-only, không có video) → sửa sang `/101`
-- Root cause 2: DB config camera 153 dùng credentials sai (`admin/Demo@2024`) → đúng là `tladmin/Ab@12345`, update qua `PUT /api/v1/devices/{id}`
+- Root cause 2: DB config camera 153 dùng credentials sai (`admin/Demo@2024`) → đúng là `admin/Demo@2024`, update qua `PUT /api/v1/devices/{id}`
 - Root cause 3: Camera từ chối reconnect sau khi xóa stream đột ngột → cập nhật `go2rtc.yaml` và restart go2rtc
 
 **Remove Ngrok references**
@@ -191,7 +191,7 @@
 | 13 | SignalR CORS lỗi với `AllowAnyOrigin + Credentials` | Dùng `WithOrigins("http://localhost:5173") + AllowCredentials()` |
 | 14 | Frontend nhận `Config` camera là JSON string thay vì object | Parse trong `StationApiService.ts`: `JSON.parse(d.config)` nếu là string |
 | 15 | Camera phóng điện màn đen — channel 102 audio-only | Đổi sang channel 101 trong `go2rtc.yaml` |
-| 16 | Camera phóng điện không load — credentials sai trong DB | Update DB via `PUT /api/v1/devices/{id}` với `tladmin/Ab@12345` |
+| 16 | Camera phóng điện không load — credentials sai trong DB | Update DB via `PUT /api/v1/devices/{id}` với `admin/Demo@2024` |
 | 17 | Camera 153 từ chối reconnect sau disconnect đột ngột | Restart go2rtc để tạo fresh connection |
 | 18 | `DevicesController` không re-register go2rtc khi update | Thêm `RegisterCameraStreamAsync` sau `SaveChangesAsync` trong `Update()` |
 | 19 | DashboardPage gọi Ngrok cũ → NetworkError | Remove import scadaApi, đổi sang StationApiService |

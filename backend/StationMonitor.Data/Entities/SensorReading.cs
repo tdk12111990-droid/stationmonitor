@@ -11,6 +11,7 @@ public class SensorReading
     public Guid DeviceId { get; set; }
     [Required] public string PointId { get; set; } = string.Empty; // "pha_A", "nhiet_mba_chinh"
     public double? Value { get; set; }
+    public double? PredictedValue { get; set; } // [NEW] Lưu trữ giá trị AI dự báo
     public string? Unit { get; set; } // "°C", "kV", "A"
     public short Quality { get; set; } = 0; // 0=good, 1=bad, 2=uncertain
 }

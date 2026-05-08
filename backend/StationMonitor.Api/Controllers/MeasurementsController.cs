@@ -29,6 +29,11 @@ public class MeasurementsController : ControllerBase
         _db = db;
         _hubContext = hubContext;
         _config = config;
+
+        // [NEW] Tự động cập nhật DB schema nếu thiếu cột PredictedValue
+        try { 
+            _db.Database.ExecuteSqlRaw("ALTER TABLE \"SensorReadings\" ADD COLUMN IF NOT EXISTS \"PredictedValue\" double precision;"); 
+        } catch { /* Đã tồn tại hoặc lỗi connection */ }
     }
 
     // Cho phép: localhost + Docker bridge (172.x) + Tailscale (100.x) + LAN config
@@ -197,7 +202,7 @@ public class MeasurementsController : ControllerBase
                      && r.Time <= toTime)
             .OrderBy(r => r.Time)
             .Take(limit)
-            .Select(r => new { r.Time, r.Value, r.Quality })
+            .Select(r => new { r.Time, r.Value, r.PredictedValue, r.Quality })
             .ToListAsync();
 
         return Ok(data);
@@ -269,6 +274,7 @@ public class MeasurementsController : ControllerBase
             deviceId = r.DeviceId,
             pointId  = r.PointId,
             value    = r.Value,
+            predictedValue = r.PredictedValue, // [NEW] Gửi thêm giá trị dự báo
             unit     = r.Unit ?? "°C",
             tx       = r.Tx,
             ty       = r.Ty,
@@ -287,6 +293,7 @@ public class MeasurementsController : ControllerBase
                 DeviceId  = r.DeviceId,
                 PointId   = r.PointId,
                 Value     = r.Value,
+                PredictedValue = r.PredictedValue, // [NEW] Lưu vào DB
                 Unit      = r.Unit ?? "°C",
                 Time      = DateTime.UtcNow,
                 Quality   = 0
@@ -304,6 +311,7 @@ public class MeasurementsController : ControllerBase
         public Guid DeviceId { get; set; }
         public string PointId { get; set; } = string.Empty;
         public double Value { get; set; }
+        public double? PredictedValue { get; set; } // [NEW] Hỗ trợ nhận dự báo từ AI
         public string? Unit { get; set; }
         public double? Tx { get; set; }
         public double? Ty { get; set; }

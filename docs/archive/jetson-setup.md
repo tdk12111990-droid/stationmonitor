@@ -219,7 +219,7 @@ streams:
   camera_152_thermal:
     - rtsp://admin:Demo%402024@192.168.10.152:554/Streaming/Channels/201
   camera_153_pd:
-    - rtsp://tladmin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
+    - rtsp://admin:Ab%4012345@192.168.10.153:554/Streaming/Channels/101
 ```
 
 **Lưu:**

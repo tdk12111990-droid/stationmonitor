@@ -54,11 +54,16 @@ class ExternalApiPusher:
                     }
                     
                     self.debug_log(f"\n=== CHUẨN BỊ GỬI DỮ LIỆU ===\n{json.dumps(payload, indent=2)}")
-                else:
-                    self.debug_log(f"--- [EXTERNAL_API] Bỏ qua mẻ gửi này vì LIVE_TEMPS đang rỗng (Đang đợi Camera gửi nhiệt độ...) ---")
                     
                     try:
+                        # 1. Gửi sang Jetson để lấy dự báo
                         res = session.post(EXTERNAL_API_URL, json=payload, timeout=30, verify=False)
+                        
+                        # 2. Gửi một bản copy về Local API để ghi vào CSV hiện lên Web
+                        try:
+                            requests.post("http://localhost:8080/api/prediction", json=payload, timeout=5)
+                        except: pass
+                        
                         if res.status_code == 200:
                             self.debug_log(f"=== GỬI THÀNH CÔNG LÚC {payload['timestamp']} ===\nSTATUS: 200")
                             
@@ -71,6 +76,8 @@ class ExternalApiPusher:
                             self.debug_log(f"=== GỬI THẤT BẠI ===\nSTATUS: {res.status_code}")
                     except Exception as e:
                         self.debug_log(f"❌ LỖI KẾT NỐI: {e}")
+                else:
+                    self.debug_log(f"--- [EXTERNAL_API] Bỏ qua mẻ gửi này vì LIVE_TEMPS đang rỗng (Đang đợi Camera gửi nhiệt độ...) ---")
                         
             except Exception as e:
                 self.debug_log(f"[EXTERNAL_API] Error: {e}")
@@ -78,5 +85,11 @@ class ExternalApiPusher:
             # Nếu stop_event được set (dùng cho test), thoát vòng lặp ngay
             if self._stop_event.is_set(): break
             
-            # Đợi 5 phút mới làm mẻ tiếp theo
-            time.sleep(300)
+            # LOGIC NGỦ THÔNG MINH:
+            if points_list:
+                # Nếu vừa gửi xong một mẻ, ngủ 5 phút
+                self.debug_log(f"--- Đã xong chu kỳ. Nghỉ 5 phút... ---")
+                time.sleep(300)
+            else:
+                # Nếu chưa có dữ liệu, chỉ đợi 5 giây rồi thử lại ngay
+                time.sleep(5)

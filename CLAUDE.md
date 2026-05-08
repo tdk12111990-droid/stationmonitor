@@ -31,7 +31,7 @@
 | go2rtc | `http://localhost:1984` | RTSP→WebRTC |
 | PLC S7-1200 | `192.168.10.100` | Siemens |
 | Camera 152 | `192.168.10.152` admin/Demo@2024 | Thermal + optical |
-| Camera 153 | `192.168.10.153` tladmin/Ab@12345 | Phóng điện |
+| Camera 153 | `192.168.10.153` admin/Demo@2024 | Phóng điện |
 
 ## Khởi động / Dừng
 

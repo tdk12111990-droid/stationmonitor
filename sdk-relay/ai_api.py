@@ -13,15 +13,15 @@ CSV_FILE = os.path.join(CURRENT_DIR, "ai_history_v2.csv")
 INTERNAL_INGEST_URL = "http://localhost:5056/api/v1/measurements/ingest"
 DEVICE_GUID = "b5e3622c-eae8-4e96-8ef9-6bfb55bc8d3d"
 
-def save_to_csv(timestamp, point_id, pred_val, status="OK"):
+def save_to_csv(timestamp, point_id, pred_val, status="OK", forecast_time=""):
     try:
         # Ghi vào file v2
         file_exists = os.path.isfile(CSV_FILE)
         with open(CSV_FILE, 'a', newline='') as f:
             writer = csv.writer(f)
             if not file_exists:
-                writer.writerow(['Timestamp', 'PointId', 'PredictedValue', 'Status'])
-            writer.writerow([timestamp, point_id, pred_val, status])
+                writer.writerow(['Timestamp', 'PointId', 'PredictedValue', 'Status', 'ForecastTime'])
+            writer.writerow([timestamp, point_id, pred_val, status, forecast_time])
     except: pass
 
 @app.route('/api/prediction', methods=['POST', 'GET'])
@@ -41,6 +41,7 @@ def receive_prediction():
     if not prediction:
         return jsonify({"success": False, "message": "No data found"}), 400
     ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    forecast_ts = prediction.get("forecast_timestamp", ts) # Lấy mốc thời gian dự báo từ AI
     
     if prediction:
         ingest_payload = []
@@ -48,7 +49,8 @@ def receive_prediction():
             pid = f"P{i}"
             val = prediction.get(f"ID_{i}_pred")
             if val is not None:
-                save_to_csv(ts, pid, val, "OK")
+                # Lưu vào CSV kèm theo mốc thời gian dự báo
+                save_to_csv(ts, pid, val, "OK", forecast_ts)
                 ingest_payload.append({
                     "DeviceId": DEVICE_GUID, "PointId": pid,
                     "Value": 0, "PredictedValue": val, "Unit": "°C"
