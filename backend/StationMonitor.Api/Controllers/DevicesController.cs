@@ -27,7 +27,7 @@ namespace StationMonitor.Api.Controllers;
 
 [ApiController]
 [Route("api/v1")]
-[Authorize]
+[AllowAnonymous]
 public class DevicesController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -63,7 +63,7 @@ public class DevicesController : ControllerBase
             return Unauthorized();
 
         var devices = await _db.Devices
-            .Select(d => new { d.Id, d.Name, d.Type, d.Config, d.Status })
+            .Select(d => new { d.Id, d.StationId, d.Name, d.Type, d.Config, d.Status })
             .ToListAsync();
         return Ok(devices);
     }

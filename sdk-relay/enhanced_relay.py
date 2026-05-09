@@ -1,9 +1,16 @@
 import os, sys, cv2, json, threading, time, subprocess, requests, numpy as np, ctypes
+# Thiết lập múi giờ Việt Nam
+os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
+try:
+    time.tzset()
+except AttributeError:
+    pass
 from collections import deque
 from urllib.parse import quote
 # Tắt hoàn toàn các log nhiễu từ thư viện hệ thống
 os.environ["OPENCV_LOG_LEVEL"] = "OFF"
 os.environ["FFMPEG_LOG_LEVEL"] = "QUIET"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 import xml.etree.ElementTree as ET
 import base64
 from requests.auth import HTTPDigestAuth
@@ -23,7 +30,7 @@ if SDK_DIR not in sys.path:
 CAMERA_IP = os.getenv("CAMERA_IP", "192.168.10.152")
 USER = os.getenv("CAMERA_USER", "admin")
 PASSWORD = os.getenv("CAMERA_PASSWORD", "Demo@2024") # admin:Demo@2024 cho cam .153
-API_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
+API_URL = os.getenv("API_URL", "http://127.0.0.1:5056/api/v1")
 GO2RTC_RTSP = os.getenv("GO2RTC_RTSP_URL", "rtsp://127.0.0.1:8554")
 
 # ── Cấu hình FFmpeg (Cross-platform: Windows & Jetson) ──
@@ -35,30 +42,180 @@ else:
     FFMPEG_BIN = "ffmpeg"
 
 ENCODED_PASS = quote(PASSWORD)
-OPTICAL_URL = f"rtsp://{USER}:{ENCODED_PASS}@{CAMERA_IP}:554/Streaming/Channels/101"
-THERMAL_URL = f"rtsp://{USER}:{ENCODED_PASS}@{CAMERA_IP}:554/Streaming/Channels/201"
+# Lấy từ go2rtc để giảm tải cho camera (tránh Connection Refused)
+# Thêm ?transport=tcp để ép giao thức ổn định nhất khi chạy trong Docker Host
+OPTICAL_URL = f"rtsp://127.0.0.1:8554/camera_152_normal_src?transport=tcp"
+THERMAL_URL = f"rtsp://127.0.0.1:8554/camera_152_thermal_src?transport=tcp"
 FFMPEG_LOG_PATH = os.path.join(CURRENT_DIR, "ffmpeg_relay.log")
 
 # ── Thư mục dữ liệu ──
 _default_wwwroot = os.path.join(ROOT_DIR, "backend", "StationMonitor.Api", "wwwroot")
 WWWROOT_DIR = os.getenv("WWWROOT_PATH", _default_wwwroot)
-# ALERTS_DIR và VIDEOS_DIR sẽ được RuleEngine tự xác định dựa trên WWWROOT_DIR
 
 # ── Cấu hình File tọa độ (Dùng cho vẽ Dots trên UI) ──
 POINTS_FILE = os.path.join(CURRENT_DIR, "points_local.json")
 
-# ── Logging (định nghĩa trước khi dùng) ──
-DEBUG_LOG_FILE = os.path.join(CURRENT_DIR, "ai_diagnostics.log")
+# ── Global Live Values (Dùng cho AI Pusher) ──
+LIVE_TEMPS = {} # {pointId: value}
+LIVE_PD    = 0.0
+LIVE_FREQ  = 0.0
+LIVE_DB    = 0.0
 
-def debug_log(msg):
-    """Log to file and stdout"""
+# ── Global state ──
+SNAPSHOT_EVENT = threading.Event()
+SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
+
+PREDICTED_TEMPS = {} # { ruleID: temperature } - Dữ liệu dự báo AI
+ALARM_RULES = {}    # { ruleID: { "pre_alarm": float, "alarm": float, "name": str } }
+COOLDOWN_MAP = {}   # { ruleID: next_allowed_time }
+STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
+LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_data": dict } }
+
+# Circular Buffer cho Video: Lưu khoảng 10 giây (150 frames ở 15fps)
+FRAME_BUFFER = deque(maxlen=150)
+RECORDING_LOCK = threading.Lock()
+
+# ── Unified Event & Acoustic Listener (ISAPI Alert Stream) ──
+class UnifiedStreamListener(threading.Thread):
+    def __init__(self, ip, user, password):
+        super().__init__(daemon=True)
+        self.ip = ip
+        # Dùng cổng 8000 cho camera 153 theo cấu hình cũ
+        port = 8000 if ip == "192.168.10.153" else 80
+        self.url = f"http://{ip}:{port}/ISAPI/Event/notification/alertStream?format=json"
+        self.auth = HTTPDigestAuth(user, password)
+        self.running = True
+        self.pending_data = {}
+        self.last_update_time = 0
+
+    def run(self):
+        log_acoustic("[UNIFIED_STREAM] Khởi động luồng giám sát Sự kiện & Âm thanh...")
+        auth_methods = [self.auth, requests.auth.HTTPBasicAuth(USER, PASSWORD)]
+        auth_idx = 0
+        
+        while self.running:
+            try:
+                current_auth = auth_methods[auth_idx]
+                log_acoustic(f"[UNIFIED_STREAM] Đang thử kết nối (Auth Type: {type(current_auth).__name__})...")
+                resp = requests.get(self.url, auth=current_auth, stream=True, timeout=(5, None))
+                
+                if resp.status_code == 200:
+                    log_acoustic("[UNIFIED_STREAM] Đã kết nối thành công!")
+                    buffer = ""
+                    for line in resp.iter_lines():
+                        if not self.running: break
+                        if not line: continue
+                        try:
+                            decoded_line = line.decode('utf-8', 'ignore')
+                            if decoded_line.strip().startswith('{'):
+                                # Xử lý JSON
+                                self._process_json(decoded_line)
+                            else:
+                                # Xử lý XML
+                                if "<EventNotificationAlert" in decoded_line:
+                                    buffer = decoded_line
+                                else:
+                                    buffer += decoded_line
+                                if "</EventNotificationAlert>" in decoded_line:
+                                    self._process_xml(buffer)
+                                    buffer = ""
+                        except: pass
+                elif resp.status_code == 401:
+                    log_acoustic(f"[UNIFIED_STREAM] Lỗi 401 với {type(current_auth).__name__}. Đang đổi phương thức...")
+                    auth_idx = (auth_idx + 1) % len(auth_methods)
+                    time.sleep(10)
+                else:
+                    log_acoustic(f"[UNIFIED_STREAM] Lỗi kết nối: {resp.status_code}")
+                    time.sleep(10)
+            except Exception:
+                time.sleep(10)
+
+    def _process_json(self, json_str):
+        try:
+            data = json.loads(json_str)
+            # Chuyển đổi JSON của Hikvision thành packet phẳng để dùng chung logic
+            packet = {}
+            def flatten(d):
+                for k, v in d.items():
+                    if isinstance(v, dict): flatten(v)
+                    else: packet[k] = str(v)
+            flatten(data)
+            if packet: self._process_packet(packet)
+        except: pass
+
+    def _process_xml(self, xml_data):
+        try:
+            root = ET.fromstring(xml_data)
+            packet = {}
+            for el in root.iter():
+                tag = el.tag.split('}', 1)[1] if '}' in el.tag else el.tag
+                if el.text and el.text.strip():
+                    packet[tag] = el.text.strip()
+            if packet: self._process_packet(packet)
+        except: pass
+
+    def _process_packet(self, new_packet):
+        global LIVE_FREQ, LIVE_DB, LIVE_EVENTS
+        try:
+            now = time.time()
+            if self.pending_data:
+                time_passed = now - self.last_update_time
+                is_duplicate = ('audioDecibel' in new_packet and 'audioDecibel' in self.pending_data) or \
+                               ('frequency' in new_packet and 'frequency' in self.pending_data)
+                if time_passed > 5.0 or is_duplicate:
+                    self.pending_data = {}
+
+            if not self.pending_data:
+                self.pending_data = new_packet
+            else:
+                for k, v in new_packet.items():
+                    self.pending_data[k] = v
+            
+            self.last_update_time = now
+
+            # Nếu đủ bộ Âm thanh + Tần số -> Cập nhật Global
+            if 'audioDecibel' in self.pending_data and 'frequency' in self.pending_data:
+                global LIVE_FREQ; LIVE_FREQ = float(self.pending_data['frequency'])
+                global LIVE_DB; LIVE_DB = float(self.pending_data['audioDecibel'])
+                log_acoustic(f"[ACOUSTIC] 🏆 ĐÃ GỘP: {LIVE_DB} dB | {LIVE_FREQ} Hz")
+                self.pending_data = {}
+
+            # Xử lý Sự kiện
+            etype = new_packet.get("eventType")
+            if etype and etype != "unknown":
+                eid = new_packet.get("eventId")
+                if eid:
+                    cat = self._categorize(etype, new_packet.get("aiEventType", ""))
+                    if cat:
+                        LIVE_EVENTS[eid] = {"type": cat, "detected_at": time.time()}
+                        log_acoustic(f"[EVENT] Phát hiện: {cat} (ID: {eid})")
+        except: pass
+
+    def _categorize(self, etype, ai_type):
+        t = (etype + ai_type).lower()
+        if "fire" in t: return "fire"
+        if "smoke" in t: return "smoke"
+        if "motion" in t: return "motion"
+        return None
+
+# ── Logging ──
+def debug_log(msg, log_type="system"):
+    # Ghi log ra file tương ứng và console
     timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-    formatted_msg = f"[{timestamp}] {msg}\n"
-    print(formatted_msg, end='')
+    formatted_msg = f"[{timestamp}] {msg}"
+    print(formatted_msg)
+    
+    filename = "ai_relay.log"
+    if log_type == "thermal": filename = "ai_thermal.log"
+    elif log_type == "acoustic": filename = "ai_acoustic.log"
+    
     try:
-        with open(DEBUG_LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(formatted_msg)
+        with open(os.path.join(CURRENT_DIR, filename), "a", encoding="utf-8") as f:
+            f.write(formatted_msg + "\n")
     except: pass
+
+def log_thermal(msg): debug_log(msg, "thermal")
+def log_acoustic(msg): debug_log(msg, "acoustic")
 
 def load_points_config():
     if os.path.exists(POINTS_FILE):
@@ -79,16 +236,8 @@ POINT_COORDS = load_points_config()
 SNAPSHOT_EVENT = threading.Event()
 SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
 
-LIVE_TEMPS = {}     # { ruleID: temperature }
-PREDICTED_TEMPS = {} # { ruleID: temperature } - Dữ liệu dự báo AI
-ALARM_RULES = {}    # { ruleID: { "pre_alarm": float, "alarm": float, "name": str } }
-COOLDOWN_MAP = {}   # { ruleID: next_allowed_time }
-STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
-LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_data": dict } }
 
-# Circular Buffer cho Video: Lưu khoảng 10 giây (150 frames ở 15fps)
-FRAME_BUFFER = deque(maxlen=150)
-RECORDING_LOCK = threading.Lock()
+# ── Thư mục dữ liệu cho RuleEngine ──
 
 # ── Rule Engine Logic ──
 class RuleEngine:
@@ -114,7 +263,10 @@ class RuleEngine:
 
         if not trigger_type:
             self.streaks[rule_id] = 0
+            # debug_log(f"[DEBUG] Rule {rule_id}: {temp}C < Pre:{pre_threshold}")
             return
+
+        debug_log(f"[DEBUG] Rule {rule_id} TRIGGERED: {temp}C >= {trigger_type} threshold ({alarm_threshold if trigger_type=='alarm' else pre_threshold})")
 
         # Cooldown 5 phút
         if self.cooldowns.get(rule_id, 0) > now:
@@ -315,7 +467,7 @@ def periodic_status_uploader():
                         if res.status_code == 200:
                             _counter[0] += 1
                             if _counter[0] % 30 == 0:
-                                debug_log(f"[INGEST] OK: {len(payload)} points → {len(device_ids)} cameras")
+                                log_thermal(f"[PUSH] Đã đẩy {len(payload)} điểm nhiệt độ thực tế sang Backend.")
                         else:
                             debug_log(f"[INGEST] Failed: {res.status_code} - {res.text}")
                     except Exception as post_e:
@@ -348,6 +500,7 @@ def sync_rules_loop():
     debug_log("[SYSTEM] Rules Sync Thread Started.")
     while True:
         try:
+
             resp = requests.get(f"{API_URL}/rules", timeout=10)
             if resp.status_code == 200:
                 rules_data = resp.json()
@@ -385,6 +538,8 @@ def sync_rules_loop():
                     except Exception as e:
                         continue
 
+                if len(new_rules) > 0 and len(new_rules) != len(ALARM_RULES):
+                    debug_log(f"[SYSTEM] Rules updated: {len(new_rules)} active rules.")
                 ALARM_RULES = new_rules
             else:
                 debug_log(f"[SYSTEM] Rule Sync Failed: HTTP {resp.status_code}")
@@ -407,14 +562,26 @@ class ThermalSDK:
     def start(self):
         self.running = True
         threading.Thread(target=self._run, daemon=True).start()
-        debug_log("[THERMAL] SDK Thermal Monitor Starting...")
+        log_thermal("[THERMAL] SDK Thermal Monitor Starting...")
 
     def _run(self):
         try:
-            from core.hcnet_sdk import (
-                HCNetSDK, NET_DVR_THERMOMETRY_COND,
-                NET_DVR_THERMOMETRY_UPLOAD, RemoteConfigCallback
-            )
+            # Thêm trực tiếp thư mục core vào path để tránh xung đột tên 'core'
+            core_path = os.path.join(SDK_DIR, "core")
+            if core_path not in sys.path:
+                sys.path.insert(0, core_path)
+            
+            try:
+                import hcnet_sdk
+            except ImportError as ie:
+                debug_log(f"[THERMAL] Direct import failed, trying absolute: {ie}")
+                sys.path.insert(0, SDK_DIR)
+                from core import hcnet_sdk
+
+            HCNetSDK = hcnet_sdk.HCNetSDK
+            NET_DVR_THERMOMETRY_COND = hcnet_sdk.NET_DVR_THERMOMETRY_COND
+            NET_DVR_THERMOMETRY_UPLOAD = hcnet_sdk.NET_DVR_THERMOMETRY_UPLOAD
+            RemoteConfigCallback = hcnet_sdk.RemoteConfigCallback
 
             self.sdk = HCNetSDK(SDK_DIR)
             if not self.sdk.init():
@@ -439,11 +606,9 @@ class ThermalSDK:
                         temp = data.fMaxTemperature
                         if 1 <= rid <= 20 and -50 < temp < 2000:
                             LIVE_TEMPS[rid] = temp
-                            if rid == 1:
-                                debug_log(f"[THERMAL] Received P1: {temp}C (Total points: {len(LIVE_TEMPS)})")
                             _cb_count[0] += 1
-                            if _cb_count[0] % 10 == 1:
-                                pass # Xóa log nhiễu
+                            if _cb_count[0] % 20 == 1:
+                                debug_log(f"[THERMAL] Received data: RuleID={rid}, Temp={temp:.1f}°C")
                     except Exception as e:
                         debug_log(f"[THERMAL] Callback error: {e}")
 
@@ -452,7 +617,6 @@ class ThermalSDK:
             cond = NET_DVR_THERMOMETRY_COND()
             cond.dwSize = ctypes.sizeof(NET_DVR_THERMOMETRY_COND)
             cond.dwChannel = 2
-            cond.wMode = 1
 
             self.handle = self.sdk.hcnetsdk.NET_DVR_StartRemoteConfig(
                 self.user_id,
@@ -534,46 +698,8 @@ class ThermalSDK:
                 pass
             time.sleep(2)
 
-class EventStreamListener:
-    """Listen to camera event stream via ISAPI Digest Auth"""
-    def __init__(self, camera_ip, user, password):
-        self.camera_ip = camera_ip
-        self.user = user
-        self.password = password
-        self.session = requests.Session()
-        self.auth = HTTPDigestAuth(user, password)
-        self.running = False
 
-    def start(self):
-        self.running = True
-        threading.Thread(target=self._listen_loop, daemon=True).start()
-        debug_log("[EVENTS] Event Stream Listener Started (Digest Mode)")
-
-    def _listen_loop(self):
-        while self.running:
-            try:
-                url = f"http://{self.camera_ip}/ISAPI/Event/notification/alertStream"
-                response = self.session.get(url, auth=self.auth, stream=True, timeout=(5, None))
-
-                if response.status_code == 200:
-                    debug_log("[EVENTS] Connected to event stream")
-                    event_buffer = []
-                    for line in response.iter_lines(decode_unicode=True):
-                        if not self.running: break
-                        if not line: continue
-                        if any(line.startswith(m) for m in ["--boundary", "--hikdata", "--"]):
-                            if event_buffer:
-                                self._process_event("\n".join(event_buffer))
-                                event_buffer = []
-                        elif not line.startswith("Content-"):
-                            event_buffer.append(line)
-                else:
-                    debug_log(f"[EVENTS] Stream connection failed: {response.status_code}")
-                    time.sleep(5)
-            except Exception as e:
-                time.sleep(5)
-
-    def _process_event(self, event_xml):
+# Luồng EventStreamListener cũ đã được gộp vào UnifiedStreamListener
         try:
             event_xml = event_xml.strip()
             if not event_xml.startswith("<"): return
@@ -664,13 +790,6 @@ class StreamRelay:
                 cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
                 (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
                 cv2.putText(frame, line2, (tx, ty + th1 + 2), font, font_scale, color, thickness, cv2.LINE_AA)
-                
-                # [NEW] Vẽ thêm dòng dự báo nếu có dữ liệu
-                pred_val = PREDICTED_TEMPS.get(rule_id)
-                if pred_val:
-                    line3 = f"P: {pred_val:.1f}"
-                    (_, th2), _ = cv2.getTextSize(line2, font, font_scale, thickness)
-                    cv2.putText(frame, line3, (tx, ty + th1 + th2 + 4), font, font_scale, (255, 255, 0), thickness, cv2.LINE_AA)
 
     def _run(self):
         while self.running:
@@ -726,13 +845,33 @@ def cleanup_old_events():
         LIVE_EVENTS = {k: v for k, v in LIVE_EVENTS.items() if v.get("detected_at", 0) > now - 3600}
         time.sleep(300)
 
+def sync_pd_loop():
+    """Đồng bộ giá trị phóng điện từ PLC (via Backend) mỗi 5 giây"""
+    global LIVE_PD
+    session = requests.Session()
+    while True:
+        try:
+            resp = session.get("http://127.0.0.1:5056/api/v1/points", timeout=5)
+            if resp.status_code == 200:
+                points = resp.json()
+                pd_p = next((p for p in points if p.get("pointId") == "phong_dien"), None)
+                if pd_p:
+                    LIVE_PD = float(pd_p.get("value", 0.0))
+                    # debug_log(f"[SYNC_PD] Current PD: {LIVE_PD} dB")
+        except: pass
+        time.sleep(5)
+
 if __name__ == "__main__":
     debug_log("--- [SYSTEM] AI ENGINE RELAY STARTING ---")
+    
+if __name__ == "__main__":
+    # Khởi động sync PD
+    threading.Thread(target=sync_pd_loop, daemon=True).start()
+    
     thermal = ThermalSDK(CAMERA_IP, USER, PASSWORD)
     thermal.start()
     
-    event_listener = EventStreamListener(CAMERA_IP, USER, PASSWORD)
-    event_listener.start()
+    # Event Stream giờ đây được xử lý chung trong AI block phía dưới
     
     threading.Thread(target=sync_rules_loop, daemon=True).start()
     threading.Thread(target=cleanup_old_events, daemon=True).start()
@@ -750,21 +889,24 @@ if __name__ == "__main__":
 
     # --- KHỞI ĐỘNG CÁC LUỒNG AI TỰ ĐỘNG ---
     try:
-        debug_log("[AI SYSTEM] Initializing AI threads...")
         # Khởi tạo bộ lấy dự báo
         fetcher = PredictionFetcher(CAMERA_IP, debug_logger=debug_log)
         fetcher.live_temps = LIVE_TEMPS 
         fetcher.predicted_temps = PREDICTED_TEMPS
-        
-        # Bắt đầu bộ đẩy dữ liệu
+
+        # Khởi chạy Unified Stream Listener (Events + Acoustic từ Cam 153)
+        unified_stream = UnifiedStreamListener("192.168.10.153", USER, PASSWORD)
+        unified_stream.start()
+
+        # Khởi chạy Pusher gửi sang Jetson (Real-time mỗi 2s cho DB, 5m cho AI)
         pusher = ExternalApiPusher(CAMERA_IP, debug_logger=debug_log)
-        ai_thread = threading.Thread(target=pusher.start, args=(LIVE_TEMPS, fetcher), daemon=True)
+        pd_func = lambda: { "pd": LIVE_PD, "frequency": LIVE_FREQ, "sound_db": LIVE_DB }
+        ai_thread = threading.Thread(target=pusher.start, args=(LIVE_TEMPS, fetcher, pd_func), daemon=True)
         ai_thread.start()
         
-        debug_log(f"[AI SYSTEM] Pusher Thread Started (ID: {ai_thread.ident}). Cycle: 5 minutes.")
+        debug_log(f"[AI SYSTEM] AI Fetcher & Pusher Threads Started. Prediction interval: 5m.")
     except Exception as e:
         debug_log(f"[AI SYSTEM] FATAL ERROR starting AI threads: {e}")
-        debug_log(f"[AI SYSTEM] Failed to start AI components: {e}")
 
     try:
         while True: 

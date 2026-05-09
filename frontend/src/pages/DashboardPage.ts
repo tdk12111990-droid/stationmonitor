@@ -278,7 +278,7 @@ export class DashboardPage {
             ${Array.from({length:10},(_,i)=>`
             <div style="text-align:center;padding:5px 2px;background:#0f172a;border-radius:5px;border:1px solid #1e293b;">
               <div style="font-size:0.55rem;color:#475569;margin-bottom:2px;">P${i+1}</div>
-              <div id="cam-p${i+1}" style="font-size:0.72rem;font-weight:800;color:#64748b;">--</div>
+              <div id="cam-p${i+1}" style="font-size:0.85rem;font-weight:800;color:#64748b;">--</div>
             </div>`).join('')}
           </div>
         </div>
@@ -523,22 +523,22 @@ export class DashboardPage {
 
         const badgeBg = document.createElementNS(ns, 'rect');
         badgeBg.classList.add('sld-measurement-bg');
-        badgeBg.setAttribute('x', '-18');
-        badgeBg.setAttribute('y', '-20');
-        badgeBg.setAttribute('width', '36');
-        badgeBg.setAttribute('height', '12');
-        badgeBg.setAttribute('rx', '6');
-        badgeBg.setAttribute('fill', 'rgba(15, 23, 42, 0.9)');
+        badgeBg.setAttribute('x', '-47.5');
+        badgeBg.setAttribute('y', '-26');
+        badgeBg.setAttribute('width', '95');
+        badgeBg.setAttribute('height', '18');
+        badgeBg.setAttribute('rx', '9');
+        badgeBg.setAttribute('fill', 'rgba(15, 23, 42, 0.95)');
         badgeBg.setAttribute('stroke', '#facc15');
         badgeBg.setAttribute('stroke-width', '1');
         badgeBg.setAttribute('style', 'cursor: inherit;');
 
         const measureTxt = document.createElementNS(ns, 'text');
         measureTxt.setAttribute('x', '0');
-        measureTxt.setAttribute('y', '-11.5');
+        measureTxt.setAttribute('y', '-14');
         measureTxt.setAttribute('text-anchor', 'middle');
         measureTxt.setAttribute('fill', '#facc15');
-        measureTxt.setAttribute('font-size', '7.5px');
+        measureTxt.setAttribute('font-size', '10px');
         measureTxt.setAttribute('font-weight', '900');
         measureTxt.setAttribute('style', 'pointer-events:none;');
         measureTxt.classList.add('sld-measurement-text');
@@ -547,9 +547,12 @@ export class DashboardPage {
         const pointTag = p.pointId;
         const isUnifiedIcon = pointTag === p.deviceId;
         const mySensors = isUnifiedIcon ? allSensors : allSensors.filter(s => s.pointId === pointTag);
-        measureTxt.textContent = mySensors.length > 0 && mySensors[0]
-          ? `${mySensors[0].value.toFixed(1)}${mySensors[0].unit}`
-          : '--';
+        
+        const sensor = mySensors.length > 0 ? mySensors[0] : null;
+        const valStr = sensor ? `${sensor.value.toFixed(1)}${sensor.unit}` : '--';
+        const predStr = (sensor && sensor.predictedValue) ? ` (P:${sensor.predictedValue.toFixed(1)})` : '';
+        
+        measureTxt.textContent = valStr + predStr;
 
         animG.appendChild(badgeBg);
         animG.appendChild(measureTxt);
@@ -581,12 +584,17 @@ export class DashboardPage {
           return numA - numB;
         });
 
-        const sensorHtml = sortedSensors.map(s => `
+        const sensorHtml = sortedSensors.map(s => {
+          const pred = s.predictedValue ? `<span style="color:#60a5fa;font-size:0.8rem;margin-left:5px;font-weight:700;">(AI: ${s.predictedValue.toFixed(1)})</span>` : '';
+          return `
           <div style="display:flex;justify-content:space-between;gap:15px;margin-bottom:3px;">
             <span style="color:#94a3b8;">${s.pointId.replace('nhiet_do_', '').replace('_', ' ')}:</span>
-            <span style="color:#10b981;font-weight:600;">${s.value.toFixed(1)}${s.unit}</span>
+            <div style="text-align:right;">
+              <span style="color:#10b981;font-weight:600;">${s.value.toFixed(1)}${s.unit}</span>
+              ${pred}
+            </div>
           </div>
-        `).join('') || '<div style="color:#64748b;font-style:italic;">Không có dữ liệu</div>';
+        `}).join('') || '<div style="color:#64748b;font-style:italic;">Không có dữ liệu</div>';
 
         tip.innerHTML = `
           <div style="font-weight:800;color:#e2e8f0;margin-bottom:2px;">${p.label}</div>
@@ -630,6 +638,7 @@ export class DashboardPage {
           const existing = this.sensors.find(s => s.deviceId === item.deviceId && s.pointId === item.pointId);
           if (existing) {
             existing.value = item.value;
+            existing.predictedValue = item.predictedValue; // [NEW] Lưu giá trị dự báo
           } else {
             this.sensors.push(item);
           }
@@ -639,9 +648,12 @@ export class DashboardPage {
               if (isCamera) {
                   const allForDev = this.sensors.filter(s => s.deviceId === item.deviceId);
                   const maxVal = Math.max(...allForDev.map(s => s.value));
-                  mTxt.textContent = `${maxVal.toFixed(1)}°C`;
+                  const maxPred = Math.max(...allForDev.map(s => s.predictedValue || 0));
+                  const predStr = maxPred > 0 ? ` (P:${maxPred.toFixed(1)})` : '';
+                  mTxt.textContent = `${maxVal.toFixed(1)}°C${predStr}`;
               } else {
-                  mTxt.textContent = `${item.value.toFixed(1)}${item.unit}`;
+                  const predStr = item.predictedValue ? ` (P:${item.predictedValue.toFixed(1)})` : '';
+                  mTxt.textContent = `${item.value.toFixed(1)}${item.unit}${predStr}`;
               }
           }
         }
@@ -1352,7 +1364,9 @@ if (main && p.deviceId) {
     const stEl   = document.getElementById('tu471-status');
 
     if (tempEl) {
-      tempEl.textContent = maxTemp !== null ? `${maxTemp.toFixed(1)} °C` : '-- °C';
+      const maxPred = temps.length ? Math.max(...temps.map(p => p.predictedValue || 0)) : 0;
+      const predStr = maxPred > 0 ? ` <span style="font-size:0.85rem;color:#60a5fa;font-weight:700;margin-left:8px;">(Dự báo: ${maxPred.toFixed(1)})</span>` : '';
+      tempEl.innerHTML = (maxTemp !== null ? `${maxTemp.toFixed(1)} °C` : '-- °C') + predStr;
       tempEl.style.color = maxTemp !== null && maxTemp >= 65 ? '#ef4444' : maxTemp !== null && maxTemp >= 50 ? '#f59e0b' : '#f87171';
     }
     if (pdEl && pd) {

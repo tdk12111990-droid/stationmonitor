@@ -313,7 +313,7 @@ export class AlertsHistoryPage {
         console.warn('[Realtime] Received alert without ID:', alert);
         return;
       }
-      
+
       // Map lại object để frontend dùng thống nhất camelCase
       const normalized: AlertItem = {
         id: aid,
@@ -331,7 +331,7 @@ export class AlertsHistoryPage {
       };
 
       if (this.filterStatus && this.filterStatus !== normalized.status) return;
-      
+
       const exists = this.alerts.find(a => a.id === normalized.id);
       if (!exists) {
         this.alerts.unshift(normalized);
@@ -352,7 +352,7 @@ export class AlertsHistoryPage {
       }
     });
 
-    try { await connection.start(); } catch {}
+    try { await connection.start(); } catch { }
   }
 
   private calculateDates(): void {
@@ -439,7 +439,7 @@ export class AlertsHistoryPage {
       let levelBadge = a.level === 'alarm'
         ? '<span class="tag tag-danger">🚨 Alarm</span>'
         : '<span class="tag tag-warning">⚠️ Warning</span>';
-      
+
       if (a.source === 'ai_prediction') {
         levelBadge = '<span class="tag" style="background:linear-gradient(135deg, #8b5cf6, #6d28d9);color:white;border:none;box-shadow:0 0 8px rgba(139, 92, 246, 0.4);">🔮 AI Predict</span>';
       }
@@ -455,8 +455,8 @@ export class AlertsHistoryPage {
           : '';
       const sel = a.id === this.selectedId ? ' ah-selected' : '';
 
-      const thumb = a.thumbnailUrl 
-        ? `<div style="position:relative;width:40px;height:40px;"><img src="${a.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;border:1px solid rgba(255,255,255,0.1);"> ${a.videoUrl ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.8rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));">▶️</div>` : ''}</div>` 
+      const thumb = a.thumbnailUrl
+        ? `<div style="position:relative;width:40px;height:40px;"><img src="${a.thumbnailUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:4px;border:1px solid rgba(255,255,255,0.1);"> ${a.videoUrl ? `<div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:.8rem;filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));">▶️</div>` : ''}</div>`
         : '<div style="width:40px;height:40px;background:rgba(255,255,255,0.05);border-radius:4px;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.2);font-size:0.6rem;">NO IMG</div>';
 
       return `
@@ -594,7 +594,7 @@ export class AlertsHistoryPage {
     // Khối Hiển Thị Bằng Chứng Media
     const mediaSection = (a.imageUrl || a.videoUrl) ? `
     <div class="ah-detail-section" style="padding:0;border-bottom:1px solid rgba(255,255,255,.05);background:#000;">
-      ${a.videoUrl 
+      ${a.videoUrl
         ? `<video style="width:100%;max-height:260px;object-fit:contain;display:block;" controls autoplay loop muted><source src="${a.videoUrl}" type="video/mp4"></video>`
         : `<img src="${a.imageUrl}" style="width:100%;max-height:260px;object-fit:contain;display:block;">`
       }

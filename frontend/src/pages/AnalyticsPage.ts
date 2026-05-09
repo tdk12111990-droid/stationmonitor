@@ -55,6 +55,7 @@ export class AnalyticsPage {
   private activeTab: TabId = 'overview';
   private range: TimeRange = '1D';
   private live: ReturnType<typeof setInterval> | null = null;
+  private aiPoller: ReturnType<typeof setInterval> | null = null;
   private tabReady = new Set<TabId>();
 
   // ── HTML shell ───────────────────────────────────────────────
@@ -118,6 +119,27 @@ export class AnalyticsPage {
     this.bindExportHistory();
     await this.loadAll();
     await this.initTab('overview');
+    this.startAiPoller();
+  }
+
+  private startAiPoller(): void {
+    if (this.aiPoller) return;
+    this.aiPoller = setInterval(async () => {
+      if (this.live) return; // Live mode handles its own updates faster
+      
+      const tab = this.activeTab;
+      if (tab === 'ai' || tab === 'pd' || tab === 'overview') {
+        // Poll latest data specifically for AI/Overview updates
+        try {
+          if (this.stationId) {
+            this.sensors = await stationApi.getLatestPoints(this.stationId);
+          }
+          if (tab === 'ai') await this.buildAi();
+          else if (tab === 'pd') await this.buildPd();
+          else if (tab === 'overview') await this.buildOverview();
+        } catch (e) { console.warn('[Analytics] BG AI poll failed:', e); }
+      }
+    }, 10000); // 10s background refresh for AI values
   }
 
   private bindExportHistory(): void {
@@ -166,22 +188,30 @@ export class AnalyticsPage {
   }
 
   private bindLiveToggle(): void {
-    const cb = document.getElementById('an-live') as HTMLInputElement;
+    const e = document.getElementById('an-live') as HTMLInputElement;
     const track = document.getElementById('an-live-track')!;
     const thumb = document.getElementById('an-live-thumb')!;
-    const dot = document.getElementById('an-live-dot')!;
+    const r = document.getElementById('an-live-dot')!;
     const wrap = document.getElementById('an-live-wrap')!;
     wrap.addEventListener('click', () => {
-      cb.checked = !cb.checked;
-      if (cb.checked) {
+      e.checked = !e.checked;
+      if (e.checked) {
         track.style.background = '#1d4ed8'; thumb.style.left = '18px'; thumb.style.background = '#fff';
-        dot.style.color = '#10b981'; dot.textContent = '● LIVE';
-        this.live = setInterval(() => {
-          this.loadAll().then(() => {
-            this.tabReady.delete(this.activeTab);
-            this.initTab(this.activeTab);
-          });
-        }, 10000);
+        r.style.color = '#10b981'; r.textContent = '● LIVE';
+        this.live = setInterval(async () => {
+          try {
+            await this.loadAll();
+            // Update the active tab without full re-render if it supports it
+            switch(this.activeTab) {
+               case 'overview': await this.buildOverview(); break;
+               case 'temp': await this.buildTemp(); break;
+               case 'pd': await this.buildPd(); break;
+               case 'ai': await this.buildAi(); break;
+            }
+          } catch (err) {
+            console.error('[Analytics] Live update error:', err);
+          }
+        }, 1000);
       } else {
         track.style.background = '#1e293b'; thumb.style.left = '2px'; thumb.style.background = '#475569';
         dot.style.color = '#334155'; dot.textContent = '●';
@@ -206,7 +236,8 @@ export class AnalyticsPage {
   private async initTab(id: TabId): Promise<void> {
     if (this.tabReady.has(id)) return;
     this.tabReady.add(id);
-    this.destroyTabCharts(id);
+    // Do NOT destroy if LIVE is active to avoid flickering
+    if (!this.live) this.destroyTabCharts(id);
     switch (id) {
       case 'overview': await this.buildOverview(); break;
       case 'temp': await this.buildTemp(); break;
@@ -324,137 +355,244 @@ export class AnalyticsPage {
 
   private setTabHTML(id: TabId, html: string): void {
     const el = document.getElementById(`an-tab-${id}`);
-    if (el) el.innerHTML = html;
+    if (el && el.innerHTML !== html) el.innerHTML = html;
   }
 
   private async buildAi(): Promise<void> {
     await this.loadHistory();
     
-    // [FIX] Lấy dữ liệu dự báo qua Proxy Backend để tránh lỗi Cross-Domain/Firewall
-    // Gọi qua Reverse Proxy (/ai-api/) để tránh lỗi Mixed Content (HTTPS)
-    const aiPreds = await fetch(`${window.location.origin}/ai-api/api/ai-predictions`)
-      .then(r => r.json())
-      .catch(() => []);
+    // 1. Fetch dữ liệu dự báo Nhiệt độ & Phóng điện
+    const [aiPreds, pdPreds] = await Promise.all([
+      fetch(`${window.location.origin}/ai-api/api/ai-predictions`).then(r => r.json()).catch(() => []),
+      fetch(`${window.location.origin}/ai-api/api/pd-predictions`).then(r => r.json()).catch(() => [])
+    ]);
 
+    // --- PHẦN NHIỆT ĐỘ ---
     const aiPoints = CAM_IDS.slice(0, 6).map((id, i) => {
       const sensor = this.sensors.find(s => s.pointId === id);
       const history = this.camH[id] ?? [];
       const last = history[history.length - 1] as any;
-      const realVal = sensor?.value ?? 0;
-      
-      // 1. Ưu tiên lấy từ API AI (Realtime nhất)
-      const latestPred = aiPreds.filter((p: any) => p.PointId === id).pop();
-      let predVal = latestPred ? parseFloat(latestPred.PredictedValue) : null;
-      
-      // 2. Dự phòng: Lấy từ lịch sử Backend (nếu API AI lỗi hoặc chưa có data mới)
-      if (predVal === null && last && last.predictedValue !== undefined) {
-        predVal = last.predictedValue;
-      }
-      
+      const latestPred = aiPreds.filter((p: any) => p.Id === id || p.PointId === id).pop();
+      let predVal = latestPred ? parseFloat(latestPred.PredictedValue) : (last?.predictedValue ?? null);
       return {
-        id, label: CAM_LABELS[i],
-        real: realVal,
-        pred: predVal,
-        diff: predVal !== null ? predVal - realVal : 0,
+        id, label: CAM_LABELS[i], real: sensor?.value ?? 0, pred: predVal,
         status: (predVal !== null && predVal > 60) ? 'CRITICAL' : (predVal !== null && predVal > 50) ? 'WARNING' : 'STABLE',
-        // Thêm thông tin thời gian
         realTime: latestPred ? latestPred.Timestamp : (last?.time ? new Date(last.time).toLocaleTimeString('vi-VN') : '---'),
         predTime: latestPred?.ForecastTime || '---'
       };
     });
 
+    // --- PHẦN PHÓNG ĐIỆN ---
+    const latestPdPred = pdPreds.pop();
+    const pdAiVal = latestPdPred ? parseFloat(latestPdPred.PredictedValue) : null;
+    const pdAiStatus = (pdAiVal !== null && pdAiVal >= -20) ? 'CRITICAL' : (pdAiVal !== null && pdAiVal >= -27) ? 'WARNING' : 'STABLE';
     const statusColors: any = { STABLE: '#10b981', WARNING: '#f59e0b', CRITICAL: '#ef4444' };
-    const lastUpdate = new Date().toLocaleTimeString('vi-VN');
 
-    this.setTabHTML('ai', `
-      <div style="display:grid;grid-template-columns: 1fr 340px; gap: 12px; height: calc(100vh - 170px); overflow:hidden;">
-        <!-- LEFT: Biểu đồ -->
-        <div style="display:flex;flex-direction:column;min-height:0;">
-          <div style="background:#1e293b;border-radius:10px;padding:16px;border:1px solid #334155;flex:1;display:flex;flex-direction:column;min-height:0;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-shrink:0;">
-              <div>
-                <h3 style="margin:0;font-size:1rem;color:#e2e8f0;">📈 Biểu đồ Dự báo Xu hướng AI</h3>
-                <p style="margin:2px 0 0;font-size:0.7rem;color:#8b5cf6;font-weight:700;">🕒 Cập nhật: ${lastUpdate} (5 Phút/Lần)</p>
+    const isFirstLoad = !document.getElementById('an-c-ai-main');
+    if (isFirstLoad) {
+      this.setTabHTML('ai', `
+        <div style="height: calc(100vh - 170px); overflow-y:auto; padding-right:10px; display:flex; flex-direction:column; gap:30px;">
+          
+          <!-- ROW 1: THERMAL AI ANALYSIS -->
+          <div style="display:grid; grid-template-columns: 1fr 500px; gap:12px;">
+            <div style="background:#1e293b; border-radius:10px; padding:16px; border:1px solid #334155;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; font-size:1rem; color:#e2e8f0;">📈 Dự báo Xu hướng Nhiệt độ</h3>
+                <div style="display:flex; gap:10px; font-size:0.65rem;">
+                  <span style="color:#10b981;">● Thực tế</span> <span style="color:#8b5cf6;">--- Dự báo AI</span>
+                </div>
               </div>
-              <div style="display:flex;gap:10px;font-size:0.65rem;">
-                <span style="color:#10b981;">● Thực tế</span>
-                <span style="color:#8b5cf6;">--- Dự báo AI</span>
+              <div style="height:320px; position:relative;"><canvas id="an-c-ai-main"></canvas></div>
+            </div>
+
+            <div style="background:#1e293b; border-radius:10px; padding:16px; border:1px solid #334155;">
+              <div style="font-size:0.85rem; color:#8b5cf6; font-weight:700; margin-bottom:12px;">🤖 THERMAL INSIGHTS</div>
+              <div id="thermal-insights-list" style="display:flex; flex-direction:column; gap:8px;">
+                ${aiPoints.map(p => `
+                  <div class="ai-thermal-card" data-id="${p.id}" style="background:#0f172a; border-radius:10px; padding:20px; border:1px solid #1e293b; transition: all 0.2s hover:border-[#8b5cf6]">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:12px; align-items:center;">
+                      <span style="font-weight:800; color:#e2e8f0; font-size:1.5rem;">${p.label}</span>
+                      <span id="ai-status-${p.id}" style="font-size:0.9rem; font-weight:900; padding:4px 10px; border-radius:6px; background:${statusColors[p.status]}22; color:${statusColors[p.status]}; border: 1px solid ${statusColors[p.status]}44;">${p.status}</span>
+                    </div>
+                    <div style="display:flex; flex-direction:column; gap:8px; font-size:0.9rem;">
+                      <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <span style="color:#94a3b8; font-size:1.1rem;">Thực tế: <b id="ai-real-${p.id}" style="color:#e2e8f0; font-size:2.5rem; margin-left:8px;">${p.real.toFixed(1)}°C</b></span>
+                        <span id="ai-realtime-${p.id}" style="color:#64748b; font-size:0.9rem; background:#1e293b; padding:3px 8px; border-radius:4px;">${p.realTime}</span>
+                      </div>
+                      <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top:12px;">
+                        <span style="color:#a78bfa; font-size:1.1rem;">Dự báo: <b id="ai-pred-${p.id}" style="color:#c084fc; font-size:2.5rem; margin-left:8px;">${p.pred !== null ? p.pred.toFixed(1) + '°C' : '---'}</b></span>
+                        <span id="ai-predtime-${p.id}" style="color:#64748b; font-size:0.9rem; background:#1e293b; padding:3px 8px; border-radius:4px;">${p.predTime}</span>
+                      </div>
+                    </div>
+                  </div>
+                `).join('')}
               </div>
             </div>
-            <div style="flex:1;position:relative;min-height:0;">
-              <canvas id="an-c-ai-main" style="width:100% !important; height:100% !important;"></canvas>
+          </div>
+
+          <div style="border-top: 1px dashed #334155; margin: 10px 0;"></div>
+
+          <!-- ROW 2: PD & ACOUSTIC AI ANALYSIS -->
+          <div style="display:grid; grid-template-columns: 1fr 400px; gap: 12px;">
+            <div style="background:linear-gradient(135deg, #1e293b, #0f172a); border-radius:10px; padding:16px; border:1px solid #1e3a8a;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                <h3 style="margin:0; font-size:1rem; color:#60a5fa;">⚡ Dự báo Phóng điện & Âm thanh AI</h3>
+                <div style="display:flex; gap:10px; font-size:0.65rem;">
+                  <span style="color:#a855f7;">● PLC Actual</span> <span style="color:#60a5fa;">--- AI Prediction</span>
+                </div>
+              </div>
+              <div style="height:280px; position:relative;"><canvas id="an-c-ai-pd"></canvas></div>
+            </div>
+
+            <div style="background:linear-gradient(135deg, #1e293b, #1e3a8a); border-radius:10px; padding:16px; border:1px solid #3b82f6;">
+              <div style="font-size:0.85rem; color:#60a5fa; font-weight:700; margin-bottom:12px;">🤖 PD & ACOUSTIC INSIGHTS</div>
+              <div id="ai-pd-insights-container" style="background:rgba(15,23,42,0.6); padding:18px; border-radius:8px; border:1px solid rgba(59,130,246,0.3); margin-bottom:10px;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+                  <span style="color:#94a3b8; font-size:0.9rem;">Trạng thái:</span>
+                  <span id="ai-pd-status" style="font-weight:800; color:${statusColors[pdAiStatus]}; font-size:1.1rem;">${pdAiVal !== null ? pdAiStatus : 'WAITING'}</span>
+                </div>
+                <div id="ai-pd-update" style="text-align:right; color:#64748b; font-size:0.8rem; margin-bottom:12px;">
+                  Cập nhật: ${latestPdPred?.Timestamp ? latestPdPred.Timestamp.split(' ')[1] : '---'}
+                </div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
+                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px;">
+                    <div style="font-size:0.85rem; color:#64748b;">DỰ BÁO PD</div>
+                    <div id="ai-pd-val" style="font-size:2.5rem; font-weight:900; color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:1rem;">dB</span></div>
+                  </div>
+                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px;">
+                    <div style="font-size:0.85rem; color:#64748b;">TẦN SỐ AI</div>
+                    <div id="ai-pd-freq" style="font-size:2.5rem; font-weight:900; color:#a78bfa;">${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:1rem;">Hz</span></div>
+                  </div>
+                </div>
+                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px; text-align:center; margin-top:12px;">
+                  <div style="font-size:0.85rem; color:#64748b;">CƯỜNG ĐỘ ÂM THANH THỰC TẾ</div>
+                  <div id="ai-pd-audio" style="font-size:2.2rem; font-weight:900; color:#e2e8f0;">${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:1rem;">dB</span></div>
+                </div>
+              </div>
+              <div style="font-size:0.6rem; color:#93c5fd; line-height:1.4; background:rgba(30,64,175,0.3); padding:8px; border-radius:6px;">
+                ℹ️ Hệ thống đang lắng nghe âm thanh từ camera Acoustic Imaging để nhận diện tiếng đánh lửa và phóng điện.
+              </div>
             </div>
           </div>
         </div>
+      `);
+    } else {
+      // LIVE Update: only touch specific elements
+      aiPoints.forEach(p => {
+        const elReal = document.getElementById(`ai-real-${p.id}`);
+        const elPred = document.getElementById(`ai-pred-${p.id}`);
+        const elSt   = document.getElementById(`ai-status-${p.id}`);
+        const elRT   = document.getElementById(`ai-realtime-${p.id}`);
+        const elPT   = document.getElementById(`ai-predtime-${p.id}`);
+        
+        if (elReal) elReal.textContent = `${p.real.toFixed(1)}°C`;
+        if (elPred) elPred.textContent = p.pred !== null ? p.pred.toFixed(1) + '°C' : '---';
+        if (elRT) elRT.textContent = p.realTime;
+        if (elPT) elPT.textContent = p.predTime;
+        if (elSt) {
+           elSt.textContent = p.status;
+           elSt.style.background = `${statusColors[p.status]}22`;
+           elSt.style.color = statusColors[p.status];
+           elSt.style.borderColor = `${statusColors[p.status]}44`;
+        }
+      });
+      // PD Update
+      const pdSt = document.getElementById('ai-pd-status');
+      const pdUp = document.getElementById('ai-pd-update');
+      const pdV  = document.getElementById('ai-pd-val');
+      const pdF  = document.getElementById('ai-pd-freq');
+      const pdA  = document.getElementById('ai-pd-audio');
+      if (pdSt) {
+        pdSt.textContent = pdAiVal !== null ? pdAiStatus : 'WAITING';
+        pdSt.style.color = statusColors[pdAiStatus];
+      }
+      if (pdUp) pdUp.textContent = `Cập nhật: ${latestPdPred?.Timestamp ? latestPdPred.Timestamp.split(' ')[1] : '---'}`;
+      if (pdV) pdV.innerHTML = `${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:1rem;">dB</span>`;
+      if (pdF) pdF.innerHTML = `${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:1rem;">Hz</span>`;
+      if (pdA) pdA.innerHTML = `${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:1rem;">dB</span>`;
+    }
 
-        <!-- RIGHT: Bảng chỉ số chi tiết -->
-        <div style="display:flex;flex-direction:column;gap:12px;min-height:0;overflow-y:auto;padding-right:4px;">
-          <div style="background:#1e293b;border-radius:10px;padding:16px;border:1px solid #334155;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-               <h3 style="margin:0;font-size:0.85rem;color:#8b5cf6;">🤖 AI INSIGHTS</h3>
-               <span style="font-size:0.55rem;color:#64748b;background:#0f172a;padding:2px 6px;border-radius:10px;font-weight:700;">5M CYCLE</span>
-            </div>
-            <div style="display:flex;flex-direction:column;gap:10px;">
-              ${aiPoints.map(p => `
-                <div style="background:#0f172a;border-radius:8px;padding:12px;border:1px solid #1e293b;">
-                  <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
-                    <span style="font-weight:700;color:#e2e8f0;font-size:0.8rem;">Điểm ${p.label}</span>
-                    <span style="font-size:0.6rem;font-weight:800;padding:1px 5px;border-radius:4px;background:${p.pred ? statusColors[p.status] : '#334155'}22;color:${p.pred ? statusColors[p.status] : '#64748b'};">
-                      ${p.pred ? p.status : 'WAITING'}
-                    </span>
-                  </div>
-                  <div style="display:flex;align-items:flex-start;justify-content:space-between;">
-                    <div>
-                      <div style="font-size:0.55rem;color:#64748b;font-weight:700;">HIỆN TẠI</div>
-                      <div style="font-size:1.1rem;font-weight:900;color:#e2e8f0;line-height:1.1;">${p.real.toFixed(1)}°C</div>
-                      <div style="font-size:0.5rem;color:#475569;margin-top:2px;">🕒 ${p.realTime}</div>
-                    </div>
-                    <div style="text-align:right;">
-                      <div style="font-size:0.55rem;color:#8b5cf6;font-weight:700;">AI DỰ BÁO</div>
-                      <div style="font-size:1.1rem;font-weight:900;color:#a78bfa;line-height:1.1;">${p.pred ? p.pred.toFixed(1) + '°C' : '---'}</div>
-                      <div style="font-size:0.5rem;color:#6d28d9;margin-top:2px;">📅 ${p.predTime}</div>
-                    </div>
-                  </div>
-                </div>`).join('')}
-            </div>
-          </div>
-          <div style="background:linear-gradient(135deg, #1e1b4b, #312e81);border-radius:10px;padding:12px;border:1px solid #4338ca;">
-             <div style="font-size:0.7rem;color:#c7d2fe;font-weight:700;margin-bottom:4px;">💡 AI RECOMMENDATION</div>
-             <div style="font-size:0.7rem;color:#e0e7ff;line-height:1.4;">Hệ thống đang hoạt động ổn định.</div>
-          </div>
-        </div>
-      </div>
-    `);
-
+    // --- VẼ BIỂU ĐỒ NHIỆT ĐỘ ---
     const datasets: any[] = [];
     aiPoints.forEach((p, i) => {
       const history = this.camH[p.id] ?? [];
+      const realData = history.map(h => ({ x: new Date(h.time).getTime(), y: h.value }));
+      
+      // Lấy các điểm dự báo từ lịch sử (đã lưu trong DB)
+      const predData = history.filter(h => (h as any).predictedValue).map(h => ({ x: new Date(h.time).getTime(), y: (h as any).predictedValue }));
+      
+      // [NEW] Lấy điểm dự báo tương lai từ AI API (nếu có)
+      const latestFromApi = aiPreds.filter((apiP: any) => apiP.Id === p.id || apiP.PointId === p.id).pop();
+      if (latestFromApi && latestFromApi.ForecastTime) {
+          const fTime = new Date(latestFromApi.ForecastTime).getTime();
+          const fVal = parseFloat(latestFromApi.PredictedValue);
+          if (!isNaN(fTime) && !isNaN(fVal)) {
+              predData.push({ x: fTime, y: fVal });
+          }
+      }
+
       datasets.push({
-        label: `${p.label} (Real)`, data: history.map(h => ({ x: new Date(h.time).getTime(), y: h.value })),
+        label: `${p.label} (Real)`, data: realData,
         borderColor: CAM_COLORS[i], borderWidth: 2, pointRadius: 0, tension: 0.4
       });
       datasets.push({
-        label: `${p.label} (AI)`, data: history.map(h => ({ x: new Date(h.time).getTime(), y: (h as any).predictedValue || h.value })),
-        borderColor: CAM_COLORS[i], borderDash: [5, 5], borderWidth: 1.5, pointRadius: 0, tension: 0.4
+        label: `${p.label} (AI)`, data: predData.sort((a,b) => a.x - b.x),
+        borderColor: CAM_COLORS[i], borderDash: [5, 5], borderWidth: 1.5, pointRadius: 3, tension: 0.4
       });
     });
-
     this.mkChart('an-c-ai-main', {
       type: 'line', data: { datasets },
       options: { 
         ...this.baseOpts(), 
         scales: { 
           x: this.xScaleTime(), 
-          y: { 
-            ...this.yScale(),
-            min: 20, // Cố định mức thấp nhất là 20 độ
-            max: 80, // Cố định mức cao nhất là 80 độ (để biểu đồ không bị trôi)
-            title: { display: true, text: 'Nhiệt độ (°C)', color: '#64748b' }
-          } 
-        } 
+          y: { ...this.yScale(), min: 20 } 
+        },
+        plugins: {
+          tooltip: {
+            callbacks: {
+              label: (ctx: any) => {
+                const isFuture = ctx.parsed.x > Date.now();
+                return `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(1)}°C ${isFuture ? '[DỰ BÁO]' : ''}`;
+              }
+            }
+          }
+        }
       }
-    } as any);
+    });
+
+    // --- VẼ BIỂU ĐỒ PHÓNG ĐIỆN (PD) ---
+    const pdHistory = this.pdH ?? [];
+    const pdRealData = pdHistory.map(h => ({ x: new Date(h.time).getTime(), y: h.value }));
+    const pdPredData = pdHistory.filter(h => (h as any).predictedValue).map(h => ({ x: new Date(h.time).getTime(), y: (h as any).predictedValue }));
+    
+    // Nối điểm dự báo tương lai cho PD
+    if (latestPdPred && latestPdPred.ForecastTime) {
+        const fTime = new Date(latestPdPred.ForecastTime).getTime();
+        const fVal = parseFloat(latestPdPred.PredictedValue);
+        if (!isNaN(fTime) && !isNaN(fVal)) {
+            pdPredData.push({ x: fTime, y: fVal });
+        }
+    }
+
+    this.mkChart('an-c-ai-pd', {
+      type: 'line',
+      data: {
+        datasets: [
+          {
+            label: 'PD Actual (dB)', data: pdRealData,
+            borderColor: '#a855f7', backgroundColor: 'rgba(168,85,247,0.1)', borderWidth: 2, pointRadius: 0, tension: 0.3, fill: true
+          },
+          {
+            label: 'PD AI Prediction', data: pdPredData.sort((a,b) => a.x - b.x),
+            borderColor: '#60a5fa', borderDash: [6, 3], borderWidth: 2, pointRadius: 3, tension: 0.3
+          }
+        ]
+      },
+      options: { ...this.baseOpts(), scales: { x: this.xScaleTime(), y: { ...this.yScale() } } }
+    });
   }
+
 
 
   // ── New Helpers ───────────────────────────────────────────────
@@ -508,81 +646,109 @@ export class AnalyticsPage {
     const now = Date.now();
     this.alerts.forEach(a => {
       const d = Math.floor((now - new Date(a.triggeredAt).getTime()) / 86400000);
-      if (d >= 0 && d < 7) (bins7[6 - d] as number)++;
-    });
-    const dayLabels = Array.from({ length: 7 }, (_, i) => {
-      const d = new Date(now - (6 - i) * 86400000);
-      return d.toLocaleDateString('vi-VN', { weekday: 'short' });
-    });
-
-    const tempMaxVal = Math.max(...tempSensors.map(t => t.val ?? 0));
-
-    // Camera thermal
-    const camVals = CAM_IDS.map(id => sensors.find(s => s.pointId === id)?.value ?? null).filter(v => v !== null) as number[];
-    const camMaxVal = camVals.length ? Math.max(...camVals) : null;
-
-    // Group status pills
-    const plcAnyWarn = tempSensors.some(t => {
-      if (t.val === null) return false;
-      const thr = this.thresholds[t.id] ?? [];
-      const wV = thr.find(x => x.level === 'warning')?.value;
-      return wV !== undefined && t.val >= wV;
-    });
-    const plcStatus = plcAnyWarn ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
-    const plcStatusColor = plcAnyWarn ? '#f59e0b' : '#10b981';
-    const camStatus = camMaxVal !== null && camMaxVal >= 50 ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
-    const camStatusColor = camMaxVal !== null && camMaxVal >= 50 ? '#f59e0b' : '#10b981';
-
-    this.setTabHTML('overview', `
-      <!-- Row 1: Two groups side by side -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <!-- LEFT: Tủ 471 -->
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          ${this.groupHeader('🔵', 'Tủ 471', '#3b82f6', plcStatus, plcStatusColor)}
-          <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
-            ${tempSensors.map(t => `
+      if (d >= 0 &&    const isFirstLoad = !document.getElementById('an-c-overview-trend');
+    if (isFirstLoad) {
+      this.setTabHTML('overview', `
+        <!-- Row 1: Two groups side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <!-- LEFT: Tủ 471 -->
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div id="ov-plc-header">${this.groupHeader('🔵', 'Tủ 471', '#3b82f6', plcStatus, plcStatusColor)}</div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;">
+              ${tempSensors.map(t => `
+                <div style="background:#0f172a;border-radius:8px;padding:10px 12px;border:1px solid #1e293b;">
+                  <div style="font-size:0.62rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Nhiệt ${t.label}</div>
+                  <div id="ov-temp-${t.id}" style="font-size:1.3rem;font-weight:800;color:${this.valColor(t.val, t.id, t.color)};">
+                    ${t.val !== null ? t.val.toFixed(1) : '—'}°C
+                  </div>
+                  <div id="ov-spark-${t.id}" style="margin-top:6px;">${this.sparklineSvg(t.data, t.color, 100, 24)}</div>
+                </div>`).join('')}
               <div style="background:#0f172a;border-radius:8px;padding:10px 12px;border:1px solid #1e293b;">
-                <div style="font-size:0.62rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Nhiệt ${t.label}</div>
-                <div style="font-size:1.3rem;font-weight:800;color:${this.valColor(t.val, t.id, t.color)};">
-                  ${t.val !== null ? t.val.toFixed(1) : '—'}°C
+                <div style="font-size:0.62rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Phóng điện PD</div>
+                <div id="ov-pd-val" style="font-size:1.3rem;font-weight:800;color:${this.valColor(pdVal, PD_ID, '#a855f7')};">
+                  ${pdVal !== null ? pdVal.toFixed(1) : '—'} dB
                 </div>
-                <div style="margin-top:6px;">${this.sparklineSvg(t.data, t.color, 100, 24)}</div>
-              </div>`).join('')}
-            <div style="background:#0f172a;border-radius:8px;padding:10px 12px;border:1px solid #1e293b;">
-              <div style="font-size:0.62rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:4px;">Phóng điện PD</div>
-              <div style="font-size:1.3rem;font-weight:800;color:${this.valColor(pdVal, PD_ID, '#a855f7')};">
-                ${pdVal !== null ? pdVal.toFixed(1) : '—'} dB
+                <div id="ov-pd-spark" style="margin-top:6px;">${this.sparklineSvg(pdData, '#a855f7', 100, 24)}</div>
               </div>
-              <div style="margin-top:6px;">${this.sparklineSvg(pdData, '#a855f7', 100, 24)}</div>
             </div>
           </div>
-        </div>
-        <!-- RIGHT: Camera nhiệt -->
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          ${this.groupHeader('🟠', 'Camera nhiệt', '#f97316', camStatus, camStatusColor)}
-          ${this.camHotspotBar()}
-        </div>
-      </div>
-
-      <!-- Row 2: Trend charts side by side -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-            Xu hướng nhiệt 3 pha (°C) <span style="color:#3b82f6;margin-left:6px;">● Tủ 471</span>
+          <!-- RIGHT: Camera nhiệt -->
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div id="ov-cam-header">${this.groupHeader('🟠', 'Camera nhiệt', '#f97316', camStatus, camStatusColor)}</div>
+            <div id="ov-cam-hotspots">${this.camHotspotBar()}</div>
           </div>
-          <div style="position:relative;height:140px;"><canvas id="an-c-overview-trend"></canvas></div>
         </div>
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Cảnh báo 7 ngày qua</div>
-          <div style="position:relative;height:140px;"><canvas id="an-c-overview-bar"></canvas></div>
-        </div>
-      </div>
 
-      <!-- Row 3: System status boxes -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Chưa xử lý</div>
-          <div style="font-size:2rem;font-weight:800;color:${open > 0 ? '#ef4444' : '#10b981'};">${open}</div>
+        <!-- Row 2: Trend charts side by side -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              Xu hướng nhiệt 3 pha (°C) <span style="color:#3b82f6;margin-left:6px;">● Tủ 471</span>
+            </div>
+            <div style="position:relative;height:140px;"><canvas id="an-c-overview-trend"></canvas></div>
+          </div>
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Cảnh báo 7 ngày qua</div>
+            <div style="position:relative;height:140px;"><canvas id="an-c-overview-bar"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Row 3: System status boxes -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Chưa xử lý</div>
+            <div id="ov-alerts-open" style="font-size:2rem;font-weight:800;color:${open > 0 ? '#ef4444' : '#10b981'};">${open}</div>
+            <div id="ov-alerts-status" style="font-size:0.7rem;color:#64748b;">${open > 0 ? '⚠️ Cần xử lý ngay' : '✅ Bình thường'}</div>
+          </div>
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Đang ACK</div>
+            <div id="ov-alerts-acked" style="font-size:2rem;font-weight:800;color:${acked > 0 ? '#f59e0b' : '#10b981'};">${acked}</div>
+            <div style="font-size:0.7rem;color:#64748b;">Chờ đóng</div>
+          </div>
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Max Temp PLC</div>
+            <div id="ov-temp-max" style="font-size:2rem;font-weight:800;color:${tempMaxVal >= 50 ? '#ef4444' : tempMaxVal >= 40 ? '#f59e0b' : '#10b981'};">${tempMaxVal.toFixed(0)}°C</div>
+            <div style="font-size:0.7rem;color:#64748b;">3 pha hiện tại</div>
+          </div>
+        </div>
+      `);
+    } else {
+      // LIVE Update: only touch specific elements
+      document.getElementById('ov-plc-header').innerHTML = this.groupHeader('🔵', 'Tủ 471', '#3b82f6', plcStatus, plcStatusColor);
+      document.getElementById('ov-cam-header').innerHTML = this.groupHeader('🟠', 'Camera nhiệt', '#f97316', camStatus, camStatusColor);
+      document.getElementById('ov-cam-hotspots').innerHTML = this.camHotspotBar();
+      
+      tempSensors.forEach(t => {
+        const elV = document.getElementById(`ov-temp-${t.id}`);
+        const elS = document.getElementById(`ov-spark-${t.id}`);
+        if (elV) { 
+          elV.textContent = `${t.val !== null ? t.val.toFixed(1) : '—'}°C`; 
+          elV.style.color = this.valColor(t.val, t.id, t.color);
+        }
+        if (elS) elS.innerHTML = this.sparklineSvg(t.data, t.color, 100, 24);
+      });
+      
+      const pdV = document.getElementById('ov-pd-val');
+      const pdS = document.getElementById('ov-pd-spark');
+      if (pdV) {
+        pdV.textContent = `${pdVal !== null ? pdVal.toFixed(1) : '—'} dB`;
+        pdV.style.color = this.valColor(pdVal, PD_ID, '#a855f7');
+      }
+      if (pdS) pdS.innerHTML = this.sparklineSvg(pdData, '#a855f7', 100, 24);
+      
+      const alO = document.getElementById('ov-alerts-open');
+      const alA = document.getElementById('ov-alerts-acked');
+      const alS = document.getElementById('ov-alerts-status');
+      if (alO) { alO.textContent = String(open); alO.style.color = open > 0 ? '#ef4444' : '#10b981'; }
+      if (alA) { alA.textContent = String(acked); alA.style.color = acked > 0 ? '#f59e0b' : '#10b981'; }
+      if (alS) alS.textContent = open > 0 ? '⚠️ Cần xử lý ngay' : '✅ Bình thường';
+      
+      const tMax = document.getElementById('ov-temp-max');
+      if (tMax) {
+        tMax.textContent = `${tempMaxVal.toFixed(0)}°C`;
+        tMax.style.color = tempMaxVal >= 50 ? '#ef4444' : tempMaxVal >= 40 ? '#f59e0b' : '#10b981';
+      }
+    } > 0 ? '#ef4444' : '#10b981'};">${open}</div>
           <div style="font-size:0.7rem;color:#64748b;">${open > 0 ? '⚠️ Cần xử lý ngay' : '✅ Bình thường'}</div>
         </div>
         <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
@@ -694,87 +860,128 @@ export class AnalyticsPage {
     const camStatus2 = camMaxVal2 >= 50 ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
     const camSC2 = camMaxVal2 >= 50 ? '#f59e0b' : '#10b981';
 
-    this.setTabHTML('temp', `
-      <!-- Section: Tủ 471 -->
-      <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-        ${this.groupHeader('🔵', 'Tủ 471 — PLC S7-1200', '#3b82f6', plcStatus, plcSC)}
-        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
-          <!-- Line chart -->
+    const isFirstLoad = !document.getElementById('an-c-temp-line');
+    if (isFirstLoad) {
+      this.setTabHTML('temp', `
+        <!-- Section: Tủ 471 -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div id="temp-plc-header">${this.groupHeader('🔵', 'Tủ 471 — PLC S7-1200', '#3b82f6', plcStatus, plcSC)}</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+            <!-- Line chart -->
+            <div>
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+                Nhiệt độ 3 pha (°C) — ${this.range}
+              </div>
+              <div style="position:relative;height:240px;"><canvas id="an-c-temp-line"></canvas></div>
+            </div>
+            <!-- Stats box -->
+            <div style="min-width:200px;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê</div>
+              <div id="temp-stats-list">
+                ${stats.map(s => `
+                  <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;">
+                    <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;">${s.label}</div>
+                    <div style="font-size:0.7rem;color:#94a3b8;">Min: <b style="color:#e2e8f0;">${s.min}°C</b></div>
+                    <div style="font-size:0.7rem;color:#94a3b8;">Max: <b style="color:#e2e8f0;">${s.max}°C</b></div>
+                    <div style="font-size:0.7rem;color:#94a3b8;">Avg: <b style="color:#e2e8f0;">${s.avg}°C</b></div>
+                    ${s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : ''}
+                    ${s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : ''}
+                    ${s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : ''}
+                  </div>`).join('')}
+              </div>
+            </div>
+          </div>
+          <!-- Heatmap -->
+          <div style="margin-top:14px;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              Heatmap nhiệt độ Pha 3 theo giờ (7 ngày)
+            </div>
+            <div style="overflow-x:auto;">
+              <table style="border-collapse:separate;border-spacing:2px;font-size:0.62rem;">
+                <thead>
+                  <tr>
+                    <td style="padding:2px 8px 2px 0;color:#475569;white-space:nowrap;"></td>
+                    ${Array.from({ length: 24 }, (_, h) => `<td style="text-align:center;width:22px;color:#475569;padding:0;">${h}h</td>`).join('')}
+                  </tr>
+                </thead>
+                <tbody id="temp-heatmap-body">
+                  ${heatmapRows.map(row => `
+                    <tr>
+                      <td style="padding:2px 8px 2px 0;color:#94a3b8;font-weight:600;white-space:nowrap;">${row.label}</td>
+                      ${row.data.map(val => `
+                        <td title="${val !== null ? val.toFixed(1) + '°C' : '—'}"
+                          style="width:22px;height:16px;background:${this.tempCellColor(val, T_IDS[2])};border-radius:2px;opacity:0.85;"></td>
+                      `).join('')}
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:8px;font-size:0.62rem;color:#64748b;">
+              <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;"></span> &lt;45°C</span>
+              <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;"></span> 45–55°C</span>
+              <div id="temp-hm-legend" style="display:flex;gap:12px;">${hmLegend}</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section: Camera nhiệt -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div id="temp-cam-header">${this.groupHeader('🟠', 'Camera nhiệt — 10 điểm đo', '#f97316', camStatus2, camSC2)}</div>
+          <!-- Horizontal bar chart -->
+          <div style="margin-bottom:14px;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              Nhiệt độ hiện tại — sắp xếp cao → thấp
+            </div>
+            <div style="position:relative;height:220px;"><canvas id="an-c-cam-bar"></canvas></div>
+          </div>
+          <!-- Line chart P1-P10 -->
           <div>
             <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-              Nhiệt độ 3 pha (°C) — ${this.range}
+              10 điểm đo theo thời gian (°C) — ${this.range}
             </div>
-            <div style="position:relative;height:240px;"><canvas id="an-c-temp-line"></canvas></div>
-          </div>
-          <!-- Stats box -->
-          <div style="min-width:200px;">
-            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê</div>
-            ${stats.map(s => `
-              <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;">
-                <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;">${s.label}</div>
-                <div style="font-size:0.7rem;color:#94a3b8;">Min: <b style="color:#e2e8f0;">${s.min}°C</b></div>
-                <div style="font-size:0.7rem;color:#94a3b8;">Max: <b style="color:#e2e8f0;">${s.max}°C</b></div>
-                <div style="font-size:0.7rem;color:#94a3b8;">Avg: <b style="color:#e2e8f0;">${s.avg}°C</b></div>
-                ${s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : ''}
-                ${s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : ''}
-                ${s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : ''}
-              </div>`).join('')}
+            <div style="position:relative;height:200px;"><canvas id="an-c-cam-line"></canvas></div>
           </div>
         </div>
-        <!-- Heatmap -->
-        <div style="margin-top:14px;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-            Heatmap nhiệt độ Pha 3 theo giờ (7 ngày)
-          </div>
-          <div style="overflow-x:auto;">
-            <table style="border-collapse:separate;border-spacing:2px;font-size:0.62rem;">
-              <tr>
-                <td style="padding:2px 8px 2px 0;color:#475569;white-space:nowrap;"></td>
-                ${Array.from({ length: 24 }, (_, h) => `<td style="text-align:center;width:22px;color:#475569;padding:0;">${h}h</td>`).join('')}
-              </tr>
-              ${heatmapRows.map(row => `
-                <tr>
-                  <td style="padding:2px 8px 2px 0;color:#94a3b8;font-weight:600;white-space:nowrap;">${row.label}</td>
-                  ${row.data.map(val => `
-                    <td title="${val !== null ? val.toFixed(1) + '°C' : '—'}"
-                      style="width:22px;height:16px;background:${this.tempCellColor(val, T_IDS[2])};border-radius:2px;opacity:0.85;"></td>
-                  `).join('')}
-                </tr>`).join('')}
-            </table>
-          </div>
-          <div style="display:flex;gap:12px;margin-top:8px;font-size:0.62rem;color:#64748b;">
-            <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;"></span> &lt;45°C</span>
-            <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;"></span> 45–55°C</span>
-            ${hmLegend}
-          </div>
-        </div>
-      </div>
 
-      <!-- Section: Camera nhiệt -->
-      <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-        ${this.groupHeader('🟠', 'Camera nhiệt — 10 điểm đo', '#f97316', camStatus2, camSC2)}
-        <!-- Horizontal bar chart -->
-        <div style="margin-bottom:14px;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-            Nhiệt độ hiện tại — sắp xếp cao → thấp
-          </div>
-          <div style="position:relative;height:220px;"><canvas id="an-c-cam-bar"></canvas></div>
+        <!-- Histogram phân phối -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối nhiệt độ (Tủ 471)</div>
+          <div style="position:relative;height:160px;"><canvas id="an-c-temp-hist"></canvas></div>
         </div>
-        <!-- Line chart P1-P10 -->
-        <div>
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-            10 điểm đo theo thời gian (°C) — ${this.range}
-          </div>
-          <div style="position:relative;height:200px;"><canvas id="an-c-cam-line"></canvas></div>
-        </div>
-      </div>
-
-      <!-- Histogram phân phối -->
-      <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-        <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối nhiệt độ (Tủ 471)</div>
-        <div style="position:relative;height:160px;"><canvas id="an-c-temp-hist"></canvas></div>
-      </div>
-    `);
+      `);
+    } else {
+      // LIVE Update
+      const elH = document.getElementById('temp-plc-header');
+      if (elH) elH.innerHTML = this.groupHeader('🔵', 'Tủ 471 — PLC S7-1200', '#3b82f6', plcStatus, plcSC);
+      const elCH = document.getElementById('temp-cam-header');
+      if (elCH) elCH.innerHTML = this.groupHeader('🟠', 'Camera nhiệt — 10 điểm đo', '#f97316', camStatus2, camSC2);
+      const elStats = document.getElementById('temp-stats-list');
+      if (elStats) {
+        elStats.innerHTML = stats.map(s => `
+          <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;">
+            <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;">${s.label}</div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Min: <b style="color:#e2e8f0;">${s.min}°C</b></div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Max: <b style="color:#e2e8f0;">${s.max}°C</b></div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Avg: <b style="color:#e2e8f0;">${s.avg}°C</b></div>
+            ${s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : ''}
+            ${s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : ''}
+            ${s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : ''}
+          </div>`).join('');
+      }
+      const elHM = document.getElementById('temp-heatmap-body');
+      if (elHM) {
+        elHM.innerHTML = heatmapRows.map(row => `
+          <tr>
+            <td style="padding:2px 8px 2px 0;color:#94a3b8;font-weight:600;white-space:nowrap;">${row.label}</td>
+            ${row.data.map(val => `
+              <td title="${val !== null ? val.toFixed(1) + '°C' : '—'}"
+                style="width:22px;height:16px;background:${this.tempCellColor(val, T_IDS[2])};border-radius:2px;opacity:0.85;"></td>
+            `).join('')}
+          </tr>`).join('');
+      }
+      const elLeg = document.getElementById('temp-hm-legend');
+      if (elLeg) elLeg.innerHTML = hmLegend;
+    }
 
     // Line chart với ngưỡng từ Rules
     const now = Date.now();
@@ -876,9 +1083,9 @@ export class AnalyticsPage {
     const pdThr = this.thresholds[PD_ID] ?? [];
     const warnV = pdThr.find(t => t.level === 'warning')?.value;
     const almV = pdThr.find(t => t.level === 'alarm')?.value;
-    const minPD = data.length ? Math.min(...data).toFixed(1) : '—';
     const maxPD = data.length ? Math.max(...data).toFixed(1) : '—';
     const avgPD = data.length ? (data.reduce((s, v) => s + v, 0) / data.length).toFixed(1) : '—';
+    const minPD = data.length ? Math.min(...data).toFixed(1) : '—';
     const overWarn = warnV !== undefined ? data.filter(v => v >= warnV).length : null;
     const overAlm = almV !== undefined ? data.filter(v => v >= almV).length : null;
 
@@ -896,64 +1103,125 @@ export class AnalyticsPage {
       (warnV !== undefined && data.some(v => v >= warnV)) ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
     const pdSC = pdStatus.includes('NGUY') ? '#ef4444' : pdStatus === 'CẢNH BÁO' ? '#f59e0b' : '#10b981';
 
+    // [AI] Lấy dữ liệu dự báo Phóng điện
+    const pdPreds = await fetch(`${window.location.origin}/ai-api/api/pd-predictions`)
+      .then(r => r.json())
+      .catch(() => []);
+    const latestPdPred = pdPreds.pop();
+    const pdAiVal = latestPdPred ? parseFloat(latestPdPred.PredictedValue) : null;
+    const pdAiStatus = (pdAiVal !== null && pdAiVal >= -20) ? 'NGUY HIỂM' : (pdAiVal !== null && pdAiVal >= -27) ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
+    const pdAiColor = pdAiStatus === 'NGUY HIỂM' ? '#ef4444' : pdAiStatus === 'CẢNH BÁO' ? '#f59e0b' : '#10b981';
+
     this.setTabHTML('pd', `
-      <!-- Group header Tủ 471 -->
       <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-        ${this.groupHeader('🔵', 'Tủ 471 — Cảm biến phóng điện', '#3b82f6', pdStatus, pdSC)}
-        <div style="font-size:0.7rem;color:#64748b;margin-bottom:12px;">
-          Sensor: <code style="color:#a855f7;background:#0f172a;padding:1px 6px;border-radius:3px;">phong_dien</code>
-          &nbsp;·&nbsp; Đơn vị: dBmW &nbsp;·&nbsp; Thiết bị: PLC S7-1200
-        </div>
-        <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
-          <div>
-            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
-              Cường độ phóng điện (dB) — ${this.range}
+    const isFirstLoad = !document.getElementById('an-c-pd-line');
+    if (isFirstLoad) {
+      this.setTabHTML('pd', `
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div id="pd-plc-header">${this.groupHeader('🔵', 'Tủ 471 — Cảm biến phóng điện', '#3b82f6', pdStatus, pdSC)}</div>
+          <div style="font-size:0.7rem;color:#64748b;margin-bottom:12px;">
+            Sensor: <code style="color:#a855f7;background:#0f172a;padding:1px 6px;border-radius:3px;">phong_dien</code>
+            &nbsp;·&nbsp; Đơn vị: dBmW &nbsp;·&nbsp; PLC S7-1200
+          </div>
+          
+          <div style="display:grid;grid-template-columns:1fr 220px;gap:12px;">
+            <div>
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+                Cường độ phóng điện (dB) — ${this.range}
+              </div>
+              <div style="position:relative;height:260px;"><canvas id="an-c-pd-line"></canvas></div>
             </div>
-            <div style="position:relative;height:260px;"><canvas id="an-c-pd-line"></canvas></div>
-          </div>
-          <div style="background:#0f172a;border-radius:8px;padding:14px 16px;border:1px solid #1e293b;min-width:180px;">
-            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê PD</div>
-            <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Min</div><div style="font-size:1.1rem;font-weight:700;color:#a855f7;">${minPD} dB</div></div>
-            <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Max</div><div style="font-size:1.1rem;font-weight:700;color:#ef4444;">${maxPD} dB</div></div>
-            <div style="margin-bottom:12px;"><div style="font-size:0.7rem;color:#94a3b8;">Avg</div><div style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">${avgPD} dB</div></div>
-            ${warnV !== undefined ? `
-            <div style="padding:8px;background:rgba(245,158,11,0.1);border-radius:6px;margin-bottom:6px;">
-              <div style="font-size:0.65rem;color:#f59e0b;">Vượt ${warnV}dB (warning)</div>
-              <div style="font-size:1.2rem;font-weight:800;color:#f59e0b;">${overWarn} lần</div>
-            </div>` : ''}
-            ${almV !== undefined ? `
-            <div style="padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;">
-              <div style="font-size:0.65rem;color:#ef4444;">Vượt ${almV}dB (alarm)</div>
-              <div style="font-size:1.2rem;font-weight:800;color:#ef4444;">${overAlm} lần</div>
-            </div>` : ''}
-            ${warnV === undefined && almV === undefined ? `
-            <div style="padding:8px;background:rgba(51,65,85,0.4);border-radius:6px;">
-              <div style="font-size:0.65rem;color:#475569;font-style:italic;">Chưa cài ngưỡng</div>
-            </div>` : ''}
-          </div>
-        </div>
-      </div>
 
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Sự kiện PD/ngày (7 ngày${warnV !== undefined ? `, >${warnV}dB` : ''})</div>
-          <div style="position:relative;height:160px;"><canvas id="an-c-pd-bar"></canvas></div>
+            <!-- THỐNG KÊ KỸ THUẬT -->
+            <div id="pd-stats-panel" style="background:#0f172a;border-radius:8px;padding:14px 16px;border:1px solid #1e293b;min-width:180px;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê PD</div>
+              <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Min</div><div id="pd-min" style="font-size:1.1rem;font-weight:700;color:#a855f7;">${minPD} dB</div></div>
+              <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Max</div><div id="pd-max" style="font-size:1.1rem;font-weight:700;color:#ef4444;">${maxPD} dB</div></div>
+              <div style="margin-bottom:12px;"><div style="font-size:0.7rem;color:#94a3b8;">Avg</div><div id="pd-avg" style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">${avgPD} dB</div></div>
+              <div id="pd-alerts-box">
+                ${warnV !== undefined ? `
+                <div style="padding:8px;background:rgba(245,158,11,0.1);border-radius:6px;margin-bottom:6px;">
+                  <div style="font-size:0.65rem;color:#f59e0b;">Vượt ${warnV}dB (warning)</div>
+                  <div style="font-size:1.2rem;font-weight:800;color:#f59e0b;">${overWarn} lần</div>
+                </div>` : ''}
+                ${almV !== undefined ? `
+                <div style="padding:8px;background:rgba(239,68,68,0.1);border-radius:6px;">
+                  <div style="font-size:0.65rem;color:#ef4444;">Vượt ${almV}dB (alarm)</div>
+                  <div style="font-size:1.2rem;font-weight:800;color:#ef4444;">${overAlm} lần</div>
+                </div>` : ''}
+              </div>
+            </div>
+          </div>
         </div>
-        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối cường độ PD</div>
-          <div style="position:relative;height:160px;"><canvas id="an-c-pd-hist"></canvas></div>
-        </div>
-      </div>
 
-      <!-- Camera notice -->
-      <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:10px;">
-        <div style="font-size:1rem;">🟠</div>
-        <div>
-          <div style="font-size:0.7rem;font-weight:700;color:#f97316;margin-bottom:2px;">Camera nhiệt — Không có cảm biến phóng điện</div>
-          <div style="font-size:0.68rem;color:#475569;">Camera nhiệt chỉ đo nhiệt độ bề mặt (P1–P10). Cảm biến phóng điện chỉ có trên PLC S7-1200 (Tủ 471).</div>
+        <!-- AI PD PROGNOSIS SECTION -->
+        <div style="background:linear-gradient(135deg, #0f172a, #1e3a8a);border-radius:10px;padding:16px;border:1px solid #1e40af;margin-top:12px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+             <div style="display:flex;align-items:center;gap:8px;">
+               <span style="font-size:1.2rem;">🤖</span>
+               <h3 style="margin:0;font-size:0.9rem;color:#60a5fa;letter-spacing:0.5px;">PHÂN TÍCH XU HƯỚNG PHÓNG ĐIỆN (AI)</h3>
+             </div>
+             <span style="font-size:0.6rem;color:#93c5fd;background:rgba(30,64,175,0.5);padding:3px 8px;border-radius:20px;border:1px solid #3b82f6;">PREDICTIVE MAINTENANCE</span>
+          </div>
+          
+          <div style="display:grid;grid-template-columns: 1fr 1fr 1.5fr; gap:20px; align-items:center;">
+            <div style="background:rgba(15,23,42,0.6);padding:12px;border-radius:8px;border:1px solid rgba(59,130,246,0.2);">
+              <div style="font-size:0.6rem;color:#94a3b8;font-weight:700;margin-bottom:4px;">CƯỜNG ĐỘ HIỆN TẠI</div>
+              <div id="pd-ai-cur" style="font-size:1.6rem;font-weight:900;color:#e2e8f0;">${parseFloat(maxPD).toFixed(1)} <span style="font-size:0.8rem;color:#64748b;">dB</span></div>
+              <div id="pd-ai-cur-time" style="font-size:0.55rem;color:#475569;margin-top:4px;">🕒 Ghi nhận: ${new Date().toLocaleTimeString('vi-VN')}</div>
+            </div>
+
+            <div style="background:rgba(30,58,138,0.4);padding:12px;border-radius:8px;border:1px solid #2563eb;">
+              <div style="font-size:0.6rem;color:#93c5fd;font-weight:700;margin-bottom:4px;">AI DỰ BÁO (T+10M)</div>
+              <div id="pd-ai-pred" style="font-size:1.6rem;font-weight:900;color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem;color:#3b82f6;">dB</span></div>
+              <div id="pd-ai-pred-time" style="font-size:0.55rem;color:#3b82f6;margin-top:4px;">📅 Lúc: ${latestPdPred?.ForecastTime || '---'}</div>
+            </div>
+
+            <div style="padding-left:10px; border-left: 2px dashed rgba(59,130,246,0.3);">
+              <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:6px;">ĐÁNH GIÁ NGUY CƠ:</div>
+              <div style="display:flex;align-items:center;gap:10px;">
+                <div id="pd-ai-status-dot" style="width:12px;height:12px;border-radius:50%;background:${pdAiColor};box-shadow:0 0 10px ${pdAiColor};"></div>
+                <div id="pd-ai-status-text" style="font-size:1.1rem;font-weight:800;color:${pdAiColor};">${latestPdPred ? pdAiStatus : 'ĐANG PHÂN TÍCH...'}</div>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
-    `);
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Sự kiện PD/ngày (7 ngày)</div>
+            <div style="position:relative;height:160px;"><canvas id="an-c-pd-bar"></canvas></div>
+          </div>
+          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối cường độ PD</div>
+            <div style="position:relative;height:160px;"><canvas id="an-c-pd-hist"></canvas></div>
+          </div>
+        </div>
+      `);
+    } else {
+      // LIVE Update PD
+      const elH = document.getElementById('pd-plc-header');
+      if (elH) elH.innerHTML = this.groupHeader('🔵', 'Tủ 471 — Cảm biến phóng điện', '#3b82f6', pdStatus, pdSC);
+      const elMin = document.getElementById('pd-min');
+      const elMax = document.getElementById('pd-max');
+      const elAvg = document.getElementById('pd-avg');
+      if (elMin) elMin.textContent = `${minPD} dB`;
+      if (elMax) elMax.textContent = `${maxPD} dB`;
+      if (elAvg) elAvg.textContent = `${avgPD} dB`;
+      
+      const elAiCur = document.getElementById('pd-ai-cur');
+      const elAiCurT = document.getElementById('pd-ai-cur-time');
+      const elAiPred = document.getElementById('pd-ai-pred');
+      const elAiPredT = document.getElementById('pd-ai-pred-time');
+      const elAiStD = document.getElementById('pd-ai-status-dot');
+      const elAiStT = document.getElementById('pd-ai-status-text');
+      if (elAiCur) elAiCur.innerHTML = `${parseFloat(maxPD).toFixed(1)} <span style="font-size:0.8rem;color:#64748b;">dB</span>`;
+      if (elAiCurT) elAiCurT.textContent = `🕒 Ghi nhận: ${new Date().toLocaleTimeString('vi-VN')}`;
+      if (elAiPred) elAiPred.innerHTML = `${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem;color:#3b82f6;">dB</span>`;
+      if (elAiPredT) elAiPredT.textContent = `📅 Lúc: ${latestPdPred?.ForecastTime || '---'}`;
+      if (elAiStD) { elAiStD.style.background = pdAiColor; elAiStD.style.boxShadow = `0 0 10px ${pdAiColor}`; }
+      if (elAiStT) { elAiStT.textContent = latestPdPred ? pdAiStatus : 'ĐANG PHÂN TÍCH...'; elAiStT.style.color = pdAiColor; }
+    }
 
     // Line chart PD
     const nowMs = Date.now();
@@ -1671,15 +1939,30 @@ export class AnalyticsPage {
   }
 
   // ── Helper: chart factory ─────────────────────────────────────
-  private mkChart(id: string, config: object): void {
+  private mkChart(id: string, config: any): void {
     const old = this.charts.get(id);
-    if (old) { old.destroy(); this.charts.delete(id); }
+    if (old) {
+      if (this.live) {
+        // Deep data update to avoid flicker
+        config.data.datasets.forEach((newDs: any, i: number) => {
+          if (old.data.datasets[i]) {
+            old.data.datasets[i].data = newDs.data;
+          }
+        });
+        if (config.data.labels) old.data.labels = config.data.labels;
+        old.update('none');
+      } else {
+        old.data = config.data;
+        old.options = config.options;
+        old.update();
+      }
+      return;
+    }
     const canvas = document.getElementById(id) as HTMLCanvasElement | null;
     if (!canvas) return;
     const chart = new Chart(canvas, config as any);
     const tabId = id.replace('an-c-', '').split('-')[0] as TabId;
     this.charts.set(`an-c-${tabId}-${id}`, chart);
-    // Also store by canvas id for cleanup
     this.charts.set(id, chart);
   }
 
@@ -1833,6 +2116,7 @@ export class AnalyticsPage {
   // ── Destroy ───────────────────────────────────────────────────
   destroy(): void {
     if (this.live) clearInterval(this.live);
+    if (this.aiPoller) clearInterval(this.aiPoller);
     this.charts.forEach(c => c.destroy());
     this.charts.clear();
   }

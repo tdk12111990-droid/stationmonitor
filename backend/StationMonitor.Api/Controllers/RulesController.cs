@@ -14,7 +14,7 @@ namespace StationMonitor.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/rules")]
-// Removed global [Authorize] to allow local AI Engine access to GetAll
+[Authorize]
 public class RulesController : ControllerBase
 {
     private readonly AppDbContext _db;

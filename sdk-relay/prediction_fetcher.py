@@ -4,12 +4,20 @@ import requests
 import json
 import os
 import csv
+from datetime import datetime, timedelta
+
+# Thiết lập múi giờ Việt Nam
+os.environ['TZ'] = 'Asia/Ho_Chi_Minh'
+try:
+    time.tzset()
+except AttributeError:
+    pass
 
 # Cấu hình API Jetson (Đối tác)
 EXTERNAL_PRED_API_URL = os.getenv("EXTERNAL_PRED_API_URL", "http://192.168.10.11:8080/api/prediction")
 API_BASE_URL = os.getenv("API_URL", "http://localhost:5056/api/v1")
-# Chuyển hướng đẩy dữ liệu qua cổng 8080 để khớp với Frontend
-BACKEND_INGEST_URL = os.getenv("BACKEND_INGEST_URL", "http://localhost:8080/api/prediction")
+# Chuyển hướng đẩy dữ liệu qua cổng 8089 để tránh xung đột với Backend
+BACKEND_INGEST_URL = os.getenv("BACKEND_INGEST_URL", "http://localhost:8089/api/prediction")
 DEVICE_GUID = "b5e3622c-eae8-4e96-8ef9-6bfb55bc8d3d"
 RULES_API_URL = f"{API_BASE_URL}/rules"
 EVENTS_API_URL = f"{API_BASE_URL}/events"
@@ -93,18 +101,15 @@ class PredictionFetcher:
                     
                     if prediction:
                         # In toàn bộ JSON ra log
-                        self.debug_log(f"=== [AI SYSTEM] Đã nhận dự báo lúc {ts} ===\n{json.dumps(data, indent=2)}")
+                        self.debug_log(f"=== [AI SYSTEM] Đã nhận dự báo lúc {ts} ===")
                         ingest_payload = []
                         for i in range(1, 7):
-                            pid = f"P{i}" # Đổi từ ID:{i} sang P{i} để khớp với Web
+                            pid = f"P{i}"
                             val = prediction.get(f"ID_{i}_pred")
                             if val is not None:
-                                self.predicted_temps[i] = val # Lưu vào bộ nhớ chung để vẽ
-                                # 2. Kiểm tra cảnh báo sớm
+                                self.predicted_temps[i] = val
                                 status = self._check_and_alert(session, pid, val)
-                                # 3. Lưu vào CSV
                                 self._save_to_csv(ts, pid, val, status)
-                                # 4. Đẩy vào hệ thống (Kèm cả giá trị thực tế nếu có)
                                 real_val = self.live_temps.get(i, 0)
                                 ingest_payload.append({
                                     "DeviceId": self.device_id or "camera_152_thermal",
@@ -114,23 +119,25 @@ class PredictionFetcher:
                                     "Unit": "°C"
                                 })
                         
-                        # 1. Gửi TOÀN BỘ dữ liệu thô sang cổng 8080 (Dành cho giao diện Web)
-                        try:
-                            resp8080 = session.post("http://localhost:8080/api/prediction", json=data, timeout=5)
-                            self.debug_log(f"=== [AI SYSTEM] Đã đẩy sang 8080: {resp8080.status_code} ===")
+                        # Đẩy sang 8089 (Giao diện) và 5056 (Backend)
+                        try: session.post("http://localhost:8089/api/prediction", json=data, timeout=5)
                         except: pass
 
-                        # 2. Gửi dữ liệu chuẩn hóa sang Backend chính 5056 (Dành cho cơ sở dữ liệu)
                         if ingest_payload:
-                            real_guid = "b5e3622c-eae8-4e96-8ef9-6bfb55bc8d3d"
+                            real_guid = "4408b334-b69e-4210-9d70-739762b6f9ea"
                             for item in ingest_payload: item["DeviceId"] = real_guid
-                            try:
-                                resp5056 = session.post("http://localhost:5056/api/v1/measurements/ingest", json=ingest_payload, timeout=5)
-                                self.debug_log(f"=== [AI SYSTEM] Đã đẩy sang 5056: {resp5056.status_code} ===")
+                            try: session.post("http://localhost:5056/api/v1/measurements/ingest", json=ingest_payload, timeout=5)
                             except: pass
                             
             except Exception as e:
                 self.debug_log(f"[PRED_FETCHER] Error: {e}")
 
-            # Đợi 5 phút (300 giây) để Jetson có đủ thời gian xử lý
-            time.sleep(300)
+    def run(self):
+        """Vòng lặp chạy ngầm mỗi 5 phút"""
+        self.debug_log("[AI SYSTEM] Thread started. Interval: 5 minutes.")
+        while not self._stop_event.is_set():
+            self.fetch_once()
+            # Nghỉ 300 giây (5 phút)
+            for _ in range(300):
+                if self._stop_event.is_set(): break
+                time.sleep(1)

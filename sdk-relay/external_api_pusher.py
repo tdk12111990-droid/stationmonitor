@@ -13,13 +13,14 @@ class ExternalApiPusher:
         self.debug_log = debug_logger if debug_logger else print
         self._stop_event = threading.Event()
 
-    def start(self, live_temps, fetcher=None):
+    def start(self, live_temps, fetcher=None, live_pd_ref=None):
         self.debug_log("[EXTERNAL_API] Pusher started. Target: " + EXTERNAL_API_URL)
         session = requests.Session()
         
+        last_ai_send = 0
         while not self._stop_event.is_set():
             try:
-                # 1. Load tọa độ từ file points_local.json
+                # --- PHẦN 1: CHUẨN BỊ DỮ LIỆU ---
                 points_local = {}
                 try:
                     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -27,69 +28,53 @@ class ExternalApiPusher:
                         points_local = json.load(f)
                 except: pass
                 
-                # 2. Thu thập đủ 6 điểm đầu tiên
                 points_list = []
                 for i in range(1, 7):
                     coords = points_local.get(str(i))
                     temp = live_temps.get(i) 
-                    
                     if coords and temp is not None:
-                        # Tính toán mx, my từ tx, ty (tương đối -> pixel 640x512)
                         mx = int(coords.get("tx", 0) * 640)
                         my = int(coords.get("ty", 0) * 512)
-                        
-                        points_list.append({
-                            "id": f"ID_{i}",
-                            "mx": mx,
-                            "my": my,
-                            "temperature": round(temp, 1)
-                        })
+                        points_list.append({"id": f"ID_{i}", "mx": mx, "my": my, "temperature": round(temp, 1)})
                 
-                # 3. Gửi đi nếu có dữ liệu
                 if points_list:
-                    payload = {
-                        "device_id": self.camera_ip,
-                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                        "points": points_list
-                    }
+                    now = time.time()
+                    payload = {"device_id": self.camera_ip, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), "points": points_list}
                     
-                    self.debug_log(f"\n=== CHUẨN BỊ GỬI DỮ LIỆU ===\n{json.dumps(payload, indent=2)}")
-                    
+                    # A. Gửi lên Dashboard (LUÔN GỬI - 2 giây/lần để xem Real-time)
                     try:
-                        # 1. Gửi sang Jetson để lấy dự báo
-                        res = session.post(EXTERNAL_API_URL, json=payload, timeout=30, verify=False)
-                        
-                        # 2. Gửi một bản copy về Local API để ghi vào CSV hiện lên Web
+                        # Gửi về Backend local (cổng 5056)
+                        requests.post("http://localhost:5056/api/v1/measurements/ingest", json=[{
+                            "DeviceId": "4408b334-b69e-4210-9d70-739762b6f9ea",
+                            "PointId": p["id"].replace("ID_", "P"),
+                            "Value": p["temperature"],
+                            "Unit": "°C"
+                        } for p in points_list], timeout=2)
+                    except: pass
+
+                    # B. Gửi sang Jetson AI & Đối tác (CHỈ GỬI 5 PHÚT 1 LẦN)
+                    if now - last_ai_send >= 300: # 300 giây = 5 phút
+                        last_ai_send = now # Cập nhật ngay lập tức để tránh gửi lặp khi lỗi
+                        self.debug_log(f"=== [AI SYSTEM] Đang gửi dữ liệu sang AI (Chu kỳ 5 phút) ===")
                         try:
-                            requests.post("http://localhost:8080/api/prediction", json=payload, timeout=5)
-                        except: pass
-                        
-                        if res.status_code == 200:
-                            self.debug_log(f"=== GỬI THÀNH CÔNG LÚC {payload['timestamp']} ===\nSTATUS: 200")
+                            # Gửi sang AI local (cổng 8089)
+                            requests.post("http://localhost:8089/api/prediction", json={"prediction": payload}, timeout=5)
+                            # Gửi sang AI đối tác (192.168.10.11:8080)
+                            session.post(EXTERNAL_API_URL, json=payload, timeout=30, verify=False)
                             
-                            # QUY TRÌNH MỚI: Gửi xong -> Đợi 30s -> Lấy về ngay
+                            # Sau khi gửi xong, gọi fetcher để lấy kết quả ngay (nếu có)
                             if fetcher:
-                                self.debug_log(f"--- Đợi 30 giây để Jetson xử lý... ---")
-                                time.sleep(30)
-                                fetcher.fetch_once()
-                        else:
-                            self.debug_log(f"=== GỬI THẤT BẠI ===\nSTATUS: {res.status_code}")
-                    except Exception as e:
-                        self.debug_log(f"❌ LỖI KẾT NỐI: {e}")
-                else:
-                    self.debug_log(f"--- [EXTERNAL_API] Bỏ qua mẻ gửi này vì LIVE_TEMPS đang rỗng (Đang đợi Camera gửi nhiệt độ...) ---")
-                        
+                                threading.Timer(30, fetcher.fetch_once).start()
+                        except Exception as e:
+                            self.debug_log(f"[AI SEND ERROR] {e} - Sẽ thử lại sau 5 phút.")
+
+                # --- PHẦN 2: DỮ LIỆU PHÓNG ĐIỆN (ĐÃ TẮT) ---
+                pass
+
             except Exception as e:
                 self.debug_log(f"[EXTERNAL_API] Error: {e}")
             
-            # Nếu stop_event được set (dùng cho test), thoát vòng lặp ngay
             if self._stop_event.is_set(): break
-            
-            # LOGIC NGỦ THÔNG MINH:
-            if points_list:
-                # Nếu vừa gửi xong một mẻ, ngủ 5 phút
-                self.debug_log(f"--- Đã xong chu kỳ. Nghỉ 5 phút... ---")
-                time.sleep(300)
-            else:
-                # Nếu chưa có dữ liệu, chỉ đợi 5 giây rồi thử lại ngay
-                time.sleep(5)
+            time.sleep(2) # Lặp lại mỗi 2 giây
+        
+        self.debug_log("[EXTERNAL_API] Pusher stopped.")

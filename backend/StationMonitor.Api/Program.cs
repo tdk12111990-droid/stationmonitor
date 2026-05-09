@@ -187,7 +187,7 @@ builder.Services.AddReverseProxy()
             new Yarp.ReverseProxy.Configuration.ClusterConfig { 
                 ClusterId = "ai-api-cluster", 
                 Destinations = new Dictionary<string, Yarp.ReverseProxy.Configuration.DestinationConfig> { 
-                    { "destination1", new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = "http://localhost:8080/" } } 
+                    { "destination1", new Yarp.ReverseProxy.Configuration.DestinationConfig { Address = "http://localhost:8089/" } } 
                 } 
             }
         }

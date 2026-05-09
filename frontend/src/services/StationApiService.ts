@@ -58,6 +58,8 @@ export interface Station {
   name: string;
   code: string;
   status: string;
+  location?: string;
+  createdAt?: string;
 }
 
 async function apiMutate(method: string, path: string, body?: object): Promise<any> {
@@ -87,6 +89,18 @@ class StationApiService {
   async getFirstStationId(): Promise<string | null> {
     const stations = await this.getStations();
     return stations[0]?.id ?? null;
+  }
+
+  async createStation(data: { name: string; code?: string; location?: string }): Promise<Station> {
+    return apiMutate('POST', '/stations', data);
+  }
+
+  async updateStation(id: string, data: { name?: string; code?: string; location?: string; status?: string }): Promise<Station> {
+    return apiMutate('PUT', `/stations/${id}`, data);
+  }
+
+  async deleteStation(id: string): Promise<void> {
+    return apiMutate('DELETE', `/stations/${id}`);
   }
 
   // ── Devices ───────────────────────────────────────────────
@@ -172,11 +186,12 @@ class StationApiService {
   }
 
   // ── Alerts ────────────────────────────────────────────────
-  async getAlerts(status?: string, from?: string, to?: string, limit = 200): Promise<AlertItem[]> {
+  async getAlerts(status?: string, from?: string, to?: string, limit = 200, deviceId?: string): Promise<AlertItem[]> {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (from) params.set('from', from);
     if (to) params.set('to', to);
+    if (deviceId) params.set('deviceId', deviceId);
     params.set('limit', String(limit));
     return apiFetch<AlertItem[]>(`/alerts?${params.toString()}`);
   }

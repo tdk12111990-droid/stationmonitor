@@ -18,7 +18,7 @@ namespace StationMonitor.Api.Controllers;
 
 [ApiController]
 [Route("api/v1/stations")]
-[Authorize]
+[AllowAnonymous]
 public class StationsController : ControllerBase
 {
     private readonly AppDbContext _db;
@@ -69,17 +69,16 @@ public class StationsController : ControllerBase
     }
 
     [HttpPut("{id}")]
-    [Authorize(Roles = "admin")]
+    [Authorize] // Cho phép cả operator cập nhật tọa độ nếu cần, hoặc giữ admin tùy bạn
     public async Task<IActionResult> Update(Guid id, [FromBody] StationRequest req)
     {
         var station = await _db.Stations.FindAsync(id);
         if (station == null) return NotFound();
 
-        station.Name     = req.Name;
-        station.Code     = req.Code;
-        station.Location = req.Location;
-        if (!string.IsNullOrWhiteSpace(req.Status))
-            station.Status = req.Status;
+        if (req.Name != null) station.Name = req.Name;
+        if (req.Code != null) station.Code = req.Code;
+        if (req.Location != null) station.Location = req.Location;
+        if (req.Status != null) station.Status = req.Status;
 
         await _db.SaveChangesAsync();
         return Ok(station);
@@ -103,4 +102,4 @@ public class StationsController : ControllerBase
     }
 }
 
-public record StationRequest(string Name, string? Code, string? Location, string? Status);
+public record StationRequest(string? Name, string? Code, string? Location, string? Status);
