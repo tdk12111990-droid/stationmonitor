@@ -488,17 +488,17 @@ export class AnalyticsPage {
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
                   <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px;">
                     <div style="font-size:0.85rem; color:#64748b;">DỰ BÁO PD</div>
-                    <div id="ai-pd-val" style="font-size:2.5rem; font-weight:900; color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:1rem;">dB</span></div>
+                    <div id="ai-pd-val" style="font-size:1.8rem; font-weight:900; color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.9rem;">dB</span></div>
                   </div>
-                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px;">
-                    <div style="font-size:0.85rem; color:#64748b; margin-bottom:8px;">TẦN SỐ AI</div>
-                    <div id="ai-pd-freq" style="font-size:2.5rem; font-weight:900; color:#a78bfa; line-height:1;">${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:1rem;">Hz</span></div>
-                    <div style="font-size:0.55rem; color:#475569; margin-top:14px; letter-spacing:1px;">SPECTRUM ANALYZER</div>
+                  <div style="background:rgba(30,58,138,0.3); padding:10px; border-radius:6px;">
+                    <div style="font-size:0.75rem; color:#64748b; margin-bottom:4px;">TẦN SỐ AI</div>
+                    <div id="ai-pd-freq" style="font-size:1.8rem; font-weight:900; color:#a78bfa; line-height:1;">${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:0.9rem;">Hz</span></div>
+                    <div style="font-size:0.5rem; color:#475569; margin-top:8px; letter-spacing:1px;">SPECTRUM ANALYZER</div>
                   </div>
                 </div>
-                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px; text-align:center; margin-top:12px;">
-                  <div style="font-size:0.85rem; color:#64748b; margin-bottom:8px;">CƯỜNG ĐỘ ÂM THANH THỰC TẾ</div>
-                  <div id="ai-pd-audio" style="font-size:2.2rem; font-weight:900; color:#e2e8f0; line-height:1;">${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:1rem;">dB</span></div>
+                  <div style="background:rgba(30,58,138,0.3); padding:10px; border-radius:6px; text-align:center; margin-top:10px;">
+                  <div style="font-size:0.75rem; color:#64748b; margin-bottom:4px;">CƯỜNG ĐỘ ÂM THANH THỰC TẾ</div>
+                  <div id="ai-pd-audio" style="font-size:1.6rem; font-weight:900; color:#e2e8f0; line-height:1;">${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:0.9rem;">dB</span></div>
                   <!-- AUDIO VU METER -->
                   <div style="width:100%; height:4px; background:#0f172a; border-radius:2px; margin-top:12px; overflow:hidden;">
                      <div id="ai-audio-vu-bar" style="width:10%; height:100%; background:#10b981; transition: width 0.3s ease;"></div>
@@ -529,19 +529,19 @@ export class AnalyticsPage {
               <div style="font-size:0.85rem; color:#8b5cf6; font-weight:700; margin-bottom:12px;">🤖 THERMAL INSIGHTS</div>
               <div id="thermal-insights-list" style="display:flex; flex-direction:column; gap:8px;">
                 ${aiPoints.map(p => `
-                  <div class="ai-thermal-card" data-id="${p.id}" style="background:#0f172a; border-radius:10px; padding:20px; border:1px solid #1e293b; transition: all 0.2s hover:border-[#8b5cf6]">
-                    <div style="display:flex; justify-content:space-between; margin-bottom:12px; align-items:center;">
-                      <span style="font-weight:800; color:#e2e8f0; font-size:1.5rem;">${p.label}</span>
-                      <span id="ai-status-${p.id}" style="font-size:0.9rem; font-weight:900; padding:4px 10px; border-radius:6px; background:${statusColors[p.status]}22; color:${statusColors[p.status]}; border: 1px solid ${statusColors[p.status]}44;">${p.status}</span>
+                  <div class="ai-thermal-card" data-id="${p.id}" style="background:#0f172a; border-radius:8px; padding:12px 16px; border:1px solid #1e293b; transition: all 0.2s hover:border-[#8b5cf6]">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:8px; align-items:center;">
+                      <span style="font-weight:700; color:#e2e8f0; font-size:1.1rem;">${p.label}</span>
+                      <span id="ai-status-${p.id}" style="font-size:0.75rem; font-weight:800; padding:2px 8px; border-radius:4px; background:${statusColors[p.status]}22; color:${statusColors[p.status]}; border: 1px solid ${statusColors[p.status]}44;">${p.status}</span>
                     </div>
-                    <div style="display:flex; flex-direction:column; gap:8px; font-size:0.9rem;">
+                    <div style="display:flex; flex-direction:column; gap:6px; font-size:0.85rem;">
                       <div style="display:flex; justify-content:space-between; align-items:center;">
-                        <span style="color:#94a3b8; font-size:1.1rem;">Thực tế: <b id="ai-real-${p.id}" style="color:#e2e8f0; font-size:2.5rem; margin-left:8px;">${p.real.toFixed(1)}°C</b></span>
-                        <span id="ai-realtime-${p.id}" style="color:#64748b; font-size:0.9rem; background:#1e293b; padding:3px 8px; border-radius:4px;">${p.realTime}</span>
+                        <span style="color:#94a3b8; font-size:0.9rem;">Thực tế: <b id="ai-real-${p.id}" style="color:#e2e8f0; font-size:1.8rem; margin-left:8px;">${p.real.toFixed(1)}°C</b></span>
+                        <span id="ai-realtime-${p.id}" style="color:#64748b; font-size:0.8rem; background:#1e293b; padding:2px 6px; border-radius:4px;">${p.realTime}</span>
                       </div>
-                      <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top:12px;">
-                        <span style="color:#a78bfa; font-size:1.1rem;">Dự báo: <b id="ai-pred-${p.id}" style="color:#c084fc; font-size:2.5rem; margin-left:8px;">${p.pred !== null ? p.pred.toFixed(1) + '°C' : '---'}</b></span>
-                        <span id="ai-predtime-${p.id}" style="color:#64748b; font-size:0.9rem; background:#1e293b; padding:3px 8px; border-radius:4px;">${p.predTime}</span>
+                      <div style="display:flex; justify-content:space-between; align-items:center; border-top: 1px solid #1e293b; padding-top:8px;">
+                        <span style="color:#a78bfa; font-size:0.9rem;">Dự báo: <b id="ai-pred-${p.id}" style="color:#c084fc; font-size:1.8rem; margin-left:8px;">${p.pred !== null ? p.pred.toFixed(1) + '°C' : '---'}</b></span>
+                        <span id="ai-predtime-${p.id}" style="color:#64748b; font-size:0.8rem; background:#1e293b; padding:2px 6px; border-radius:4px;">${p.predTime}</span>
                       </div>
                     </div>
                   </div>
@@ -786,17 +786,17 @@ export class AnalyticsPage {
         <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
           <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
             <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Chưa xử lý</div>
-            <div id="ov-alerts-open" style="font-size:2rem;font-weight:800;color:${open > 0 ? '#ef4444' : '#10b981'};">${open}</div>
+            <div id="ov-alerts-open" style="font-size:1.6rem;font-weight:800;color:${open > 0 ? '#ef4444' : '#10b981'};">${open}</div>
             <div id="ov-alerts-status" style="font-size:0.7rem;color:#64748b;">${open > 0 ? '⚠️ Cần xử lý ngay' : '✅ Bình thường'}</div>
           </div>
           <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
             <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Đang ACK</div>
-            <div id="ov-alerts-acked" style="font-size:2rem;font-weight:800;color:${acked > 0 ? '#f59e0b' : '#10b981'};">${acked}</div>
+            <div id="ov-alerts-acked" style="font-size:1.6rem;font-weight:800;color:${acked > 0 ? '#f59e0b' : '#10b981'};">${acked}</div>
             <div style="font-size:0.7rem;color:#64748b;">Chờ đóng</div>
           </div>
           <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;text-align:center;">
             <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:6px;">Max Temp PLC</div>
-            <div id="ov-temp-max" style="font-size:2rem;font-weight:800;color:${tempMaxVal >= 50 ? '#ef4444' : tempMaxVal >= 40 ? '#f59e0b' : '#10b981'};">${tempMaxVal.toFixed(0)}°C</div>
+            <div id="ov-temp-max" style="font-size:1.6rem;font-weight:800;color:${tempMaxVal >= 50 ? '#ef4444' : tempMaxVal >= 40 ? '#f59e0b' : '#10b981'};">${tempMaxVal.toFixed(0)}°C</div>
             <div style="font-size:0.7rem;color:#64748b;">3 pha hiện tại</div>
           </div>
         </div>

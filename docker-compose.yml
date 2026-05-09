@@ -52,21 +52,21 @@ services:
     volumes:
       - ./data/media:/app/wwwroot/media
 
-  # 5. AI Engine
-  stationmonitor-ai:
-    build:
-      context: ./sdk-relay
-      dockerfile: Dockerfile
-    container_name: stationmonitor-ai
-    restart: always
-    network_mode: host
-    environment:
-      - CAMERA_IP=192.168.10.152
-      - CAMERA_USER=admin
-      - CAMERA_PASSWORD=Demo@2024
-      - API_URL=http://localhost:5056/api/v1
-      - GO2RTC_RTSP_URL=rtsp://localhost:8554
-      - WWWROOT_PATH=/app/data/media
-    volumes:
-      - ./data/media:/app/wwwroot/media
-      - ./sdk-relay:/app
+#  # 5. AI Engine
+#  stationmonitor-ai:
+#    build:
+#      context: ./sdk-relay
+#      dockerfile: Dockerfile
+#    container_name: stationmonitor-ai
+#    restart: always
+#    network_mode: host
+#    environment:
+#      - CAMERA_IP=192.168.10.152
+#      - CAMERA_USER=admin
+#      - CAMERA_PASSWORD=Demo@2024
+#      - API_URL=http://localhost:5056/api/v1
+#      - GO2RTC_RTSP_URL=rtsp://localhost:8554
+#      - WWWROOT_PATH=/app/data/media
+#    volumes:
+#      - ./data/media:/app/wwwroot/media
+#      - ./sdk-relay:/app

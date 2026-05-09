@@ -72,7 +72,7 @@ STREAK_MAP = {}     # { ruleID: consecutive_violation_count }
 LIVE_EVENTS = {}    # { eventId: { "type": str, "detected_at": float, "event_data": dict } }
 
 # Circular Buffer cho Video: Lưu khoảng 10 giây (150 frames ở 15fps)
-FRAME_BUFFER = deque(maxlen=150)
+FRAME_BUFFER = deque(maxlen=300)
 RECORDING_LOCK = threading.Lock()
 
 # ── Unified Event & Acoustic Listener (ISAPI Alert Stream) ──
@@ -180,14 +180,28 @@ class UnifiedStreamListener(threading.Thread):
 
             # Xử lý Sự kiện
             etype = new_packet.get("eventType")
-            if etype and etype != "unknown":
+            if etype == "temperatureDetection":
+                rid_str = new_packet.get("ruleID") or new_packet.get("ruleId")
+                temp_str = new_packet.get("maxTemp")
+                if rid_str and temp_str:
+                    try:
+                        rid = int(rid_str)
+                        temp = float(temp_str)
+                        LIVE_TEMPS[rid] = temp
+                        # Kích hoạt check rule ngay lập tức từ event ISAPI
+                        # Vì đây là event từ camera nên ta có thể coi như là 1 streak đạt chuẩn
+                        RULE_ENGINE.check(rid, temp, None) # None frame sẽ lấy từ buffer sau
+                    except: pass
+
+            if etype and etype != "unknown" and etype != "temperatureDetection":
                 eid = new_packet.get("eventId")
                 if eid:
                     cat = self._categorize(etype, new_packet.get("aiEventType", ""))
                     if cat:
                         LIVE_EVENTS[eid] = {"type": cat, "detected_at": time.time()}
                         log_acoustic(f"[EVENT] Phát hiện: {cat} (ID: {eid})")
-        except: pass
+        except Exception as e:
+            debug_log(f"[UNIFIED_STREAM] Error in process_packet: {e}")
 
     def _categorize(self, etype, ai_type):
         t = (etype + ai_type).lower()
@@ -243,7 +257,7 @@ class RuleEngine:
         self.api_url = api_url
         self.streaks = {}      # { ruleId: count }
         self.cooldowns = {}    # { ruleId: timestamp }
-        self.confirm_needed = 150 # Xác nhận trong 10 giây (15fps * 10s)
+        self.confirm_needed = 15 # Xác nhận sau đúng 10 giây vượt ngưỡng liên tục (15 check * 10 frames = 150 frames)
 
     def check(self, rule_id, temp, frame):
         now = time.time()
@@ -271,6 +285,9 @@ class RuleEngine:
             return
 
         self.streaks[rule_id] = self.streaks.get(rule_id, 0) + 1
+        if self.streaks[rule_id] >= 2: # Chỉ log từ lần vượt ngưỡng thứ 2 để đỡ rác log
+             debug_log(f"[DEBUG] Rule {rule_id} streak: {self.streaks[rule_id]}/{self.confirm_needed} (Temp: {temp}C)")
+
         if self.streaks[rule_id] >= self.confirm_needed:
             self._trigger_alert(rule_id, temp, trigger_type, frame)
             self.cooldowns[rule_id] = now + 300  # 5 phút
@@ -278,44 +295,76 @@ class RuleEngine:
 
     def _trigger_alert(self, rule_id, temp, level, frame):
         debug_log(f"[ALERT] Rule {rule_id} triggered! Temp={temp:.1f}C Level={level}")
-        try:
-            # Gửi alert lên backend (kèm thumbnail = frame hiện tại có overlay)
-            xml_data = (
-                f"<EventNotificationAlert>"
-                f"<ipAddress>{CAMERA_IP}</ipAddress>"
-                f"<dateTime>{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}</dateTime>"
-                f"<eventType>temperatureDetection</eventType>"
-                f"<eventState>active</eventState>"
-                f"<eventDescription>Điểm P{rule_id} vượt ngưỡng {level}: {temp:.1f}°C</eventDescription>"
-                f"<maxTemp>{temp:.2f}</maxTemp>"
-                f"<channelID>2</channelID>"
-                f"</EventNotificationAlert>"
-            )
-            _, img_encoded = cv2.imencode('.jpg', frame)
-            requests.post(
-                f"{self.api_url}/camera-webhook",
-                files={
-                    'event':    (None, xml_data),
-                    'image_hd': ('thumbnail.jpg', img_encoded.tobytes(), 'image/jpeg'),
-                },
-                timeout=5
-            )
-            debug_log(f"[ALERT] P{rule_id} alert posted to backend")
+        
+        def _post_task():
+            try:
+                # Lấy frame từ buffer nếu truyền vào là None (cho ISAPI events)
+                target_frame = frame
+                if target_frame is None:
+                    with RECORDING_LOCK:
+                        if len(FRAME_BUFFER) > 0:
+                            target_frame = FRAME_BUFFER[-1].copy()
+                
+                if target_frame is None:
+                    debug_log(f"[ALERT] No frame available for P{rule_id} — skipping image")
+                    return
 
-            # Quay video 10s trong luồng riêng
-            threading.Thread(
-                target=self._record_video_clip,
-                args=(rule_id, level),
-                daemon=True
-            ).start()
+                # Gửi alert lên backend (kèm thumbnail = frame hiện tại có overlay)
+                xml_data = (
+                    f"<EventNotificationAlert>"
+                    f"<ipAddress>{CAMERA_IP}</ipAddress>"
+                    f"<dateTime>{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}</dateTime>"
+                    f"<eventType>temperatureDetection</eventType>"
+                    f"<eventState>active</eventState>"
+                    f"<eventDescription>Điểm P{rule_id} vượt ngưỡng {level}: {temp:.1f}°C</eventDescription>"
+                    f"<maxTemp>{temp:.2f}</maxTemp>"
+                    f"<channelID>2</channelID>"
+                    f"</EventNotificationAlert>"
+                )
+                # Lưu ảnh vật lý vào media để backend truy xuất
+                media_dir = os.path.join(WWWROOT_DIR, "media")
+                os.makedirs(media_dir, exist_ok=True)
+                img_filename = f"alert_p{rule_id}_{int(time.time())}.jpg"
+                img_path = os.path.join(media_dir, img_filename)
+                
+                _, img_encoded = cv2.imencode('.jpg', target_frame)
+                with open(img_path, "wb") as f:
+                    f.write(img_encoded.tobytes())
 
-        except Exception as e:
-            debug_log(f"[ALERT] Failed: {e}")
+                # Gửi alert lên backend
+                resp = requests.post(
+                    f"{self.api_url}/camera-webhook",
+                    files={
+                        'event':    (None, xml_data),
+                        'image_hd': (img_filename, img_encoded.tobytes(), 'image/jpeg'),
+                    },
+                    timeout=5
+                )
+                
+                alert_id = None
+                if resp.status_code == 200:
+                    try:
+                        alert_id = resp.json().get("id")
+                    except: pass
 
-    def _record_video_clip(self, rule_id, level):
+                debug_log(f"[ALERT] P{rule_id} alert posted. ID: {alert_id}")
+
+                # Quay video 10s trong luồng riêng (Truyền thêm alert_id)
+                threading.Thread(
+                    target=self._record_video_clip,
+                    args=(rule_id, level, alert_id),
+                    daemon=True
+                ).start()
+            except Exception as e:
+                debug_log(f"[ALERT] Failed to post: {e}")
+
+        # Chạy gửi alert trong thread riêng để không block video chính
+        threading.Thread(target=_post_task, daemon=True).start()
+
+    def _record_video_clip(self, rule_id, level, alert_id=None):
         """Quay video 10s: 5s trước + 5s sau sự kiện, có overlay điểm nhiệt"""
         try:
-            debug_log(f"[VIDEO] Recording 10s clip for P{rule_id}...")
+            debug_log(f"[VIDEO] Recording 10s clip for P{rule_id}... (AlertID: {alert_id})")
 
             # Lấy ~5s trước (75 frames tại 15fps)
             with RECORDING_LOCK:
@@ -332,11 +381,16 @@ class RuleEngine:
                 debug_log(f"[VIDEO] FRAME_BUFFER empty — abort")
                 return
 
-            h, w = all_frames[0].shape[:2]
+            # Đường dẫn lưu video (Sửa để lưu vào media của backend)
+            media_dir = os.path.join(WWWROOT_DIR, "media")
+            os.makedirs(media_dir, exist_ok=True)
+            
             ts = int(time.time())
-            tmp_avi = os.path.join(CURRENT_DIR, f"tmp_p{rule_id}_{ts}.avi")
-            out_mp4 = os.path.join(CURRENT_DIR, f"alert_p{rule_id}_{ts}.mp4")
+            filename = f"alert_p{rule_id}_{ts}.mp4"
+            tmp_avi = os.path.join(media_dir, f"tmp_{filename}.avi")
+            out_mp4 = os.path.join(media_dir, filename)
 
+            h, w = all_frames[0].shape[:2]
             fourcc = cv2.VideoWriter_fourcc(*'XVID')
             writer = cv2.VideoWriter(tmp_avi, fourcc, 15.0, (w, h))
             for f in all_frames:
@@ -344,18 +398,33 @@ class RuleEngine:
             writer.release()
 
             debug_log(f"[VIDEO] Compressing {len(all_frames)} frames → {out_mp4}")
-            proc = subprocess.run(
+            subprocess.run(
                 [FFMPEG_BIN, "-y", "-i", tmp_avi,
                  "-c:v", "libx264", "-preset", "ultrafast", "-crf", "28",
                  "-pix_fmt", "yuv420p", "-movflags", "+faststart", out_mp4],
                 capture_output=True, text=True
             )
+            
             if os.path.exists(tmp_avi):
                 os.remove(tmp_avi)
 
-            if proc.returncode != 0:
-                debug_log(f"[VIDEO] FFmpeg error: {proc.stderr[-300:]}")
-                return
+            # --- THÔNG BÁO BACKEND CÓ VIDEO ---
+            if alert_id:
+                video_url = f"/media/{filename}"
+                try:
+                    requests.patch(
+                        f"{self.api_url}/alerts/{alert_id}",
+                        json={"videoUrl": video_url},
+                        timeout=5
+                    )
+                    debug_log(f"[VIDEO] Linked to alert {alert_id}: {video_url}")
+                except Exception as ve:
+                    debug_log(f"[VIDEO] Failed to link video: {ve}")
+            else:
+                debug_log(f"[VIDEO] Saved: {filename} (No AlertID to link)")
+
+        except Exception as e:
+            debug_log(f"[VIDEO] Error: {e}")
 
             if not os.path.exists(out_mp4) or os.path.getsize(out_mp4) == 0:
                 debug_log(f"[VIDEO] Output empty — abort")
@@ -465,7 +534,7 @@ def periodic_status_uploader():
                         if res.status_code == 200:
                             _counter[0] += 1
                             if _counter[0] % 30 == 0:
-                                log_thermal(f"[PUSH] Đã đẩy {len(payload)} điểm nhiệt độ thực tế sang Backend.")
+                                log_thermal(f"[PUSH] Đã đẩy {len(payload)} điểm. Dữ liệu hiện tại: {LIVE_TEMPS}")
                         else:
                             debug_log(f"[INGEST] Failed: {res.status_code} - {res.text}")
                     except Exception as post_e:
@@ -536,8 +605,8 @@ def sync_rules_loop():
                     except Exception as e:
                         continue
 
-                if len(new_rules) > 0 and len(new_rules) != len(ALARM_RULES):
-                    debug_log(f"[SYSTEM] Rules updated: {len(new_rules)} active rules.")
+                if len(new_rules) > 0:
+                    debug_log(f"[SYSTEM] Rules Sync: {len(new_rules)} rules. Data: {new_rules}")
                 ALARM_RULES = new_rules
             else:
                 debug_log(f"[SYSTEM] Rule Sync Failed: HTTP {resp.status_code}")
@@ -596,9 +665,11 @@ class ThermalSDK:
             debug_log(f"[THERMAL] SDK login OK (UserID={self.user_id})")
 
             _cb_count = [0]
+            self.last_sdk_update = time.time()
             def _callback(dwType, pBuffer, dwBufLen, pUserData):
                 if dwType == 2:  # NET_SDK_CALLBACK_TYPE_DATA
                     try:
+                        self.last_sdk_update = time.time()
                         data = ctypes.cast(pBuffer, ctypes.POINTER(NET_DVR_THERMOMETRY_UPLOAD)).contents
                         rid = data.byRuleID
                         temp = data.fMaxTemperature
@@ -634,67 +705,51 @@ class ThermalSDK:
 
             while self.running:
                 time.sleep(1)
+                if time.time() - self.last_sdk_update > 10:
+                    debug_log("[THERMAL] SDK Callback timeout (10s), falling back to ISAPI...")
+                    break
+            
+            self._fallback_isapi()
 
         except Exception as e:
             debug_log(f"[THERMAL] SDK error: {e}, fallback to ISAPI")
             self._fallback_isapi()
 
     def _fallback_isapi(self):
-        """Fallback dùng ISAPI nếu SDK lỗi"""
-        debug_log("[THERMAL] Using ISAPI fallback (limited data)")
-        session = requests.Session()
+        """Dùng ISAPI lấy kết quả đo trực tiếp (Ép làm mới dữ liệu)"""
+        debug_log("[THERMAL] Switching to direct ISAPI Thermometry (High Performance)")
         auth = HTTPDigestAuth(self.user, self.password)
+        last_success = time.time()
+        
         while self.running:
             try:
-                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/jpegPicWithAppendData?format=json"
-                r = session.get(url, auth=auth, timeout=5)
-                if r.status_code != 200:
-                    debug_log(f"[THERMAL] ISAPI failed: {r.status_code} - {r.reason}")
-                
+                # Thêm timestamp để tránh cache của Camera
+                ts = int(time.time() * 1000)
+                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/detectResults?t={ts}"
+                r = requests.get(url, auth=auth, timeout=10)
                 if r.status_code == 200:
-                    import re, struct
-                    raw = r.content
-                    # Parse float32 temperature matrix từ binary data
-                    parts = raw.split(b'--boundary')
-                    for part in parts:
-                        if b'Content-Type: application/octet-stream' in part or len(part) > 100000:
-                            data_start = part.find(b'\r\n\r\n')
-                            if data_start >= 0:
-                                bin_data = part[data_start+4:]
-                                floats = struct.unpack(f'{len(bin_data)//4}f', bin_data[:len(bin_data)//4*4])
-                                arr = np.array(floats)
-                                valid = arr[(arr > -50) & (arr < 2000)]
-                                if len(valid) > 1000:
-                                    # Reshape thermal matrix (384×288 pixels)
-                                    thermal_h, thermal_w = 288, 384
-                                    matrix = arr[:thermal_h * thermal_w].reshape(thermal_h, thermal_w)
+                    import xml.etree.ElementTree as ET
+                    root = ET.fromstring(r.content)
+                    updated = False
+                    for point in root.findall(".//thermometryRes"):
+                        try:
+                            rid = point.findtext("id")
+                            temp = float(point.findtext("maxTemp"))
+                            if rid and -50 < temp < 2000:
+                                LIVE_TEMPS[int(rid)] = temp
+                                updated = True
+                        except: pass
+                    if updated:
+                        last_success = time.time()
+                
+                # Nếu quá 30 giây không lấy được dữ liệu mới -> Thử khởi động lại toàn bộ
+                if time.time() - last_success > 30:
+                    debug_log("[THERMAL] ISAPI data stuck for 30s, reconnecting...")
+                    break 
 
-                                    # Extract temperature ở 10 điểm
-                                    debug_log(f"[THERMAL] Matrix Stats: Min={matrix.min():.1f}, Max={matrix.max():.1f}")
-                                    for pid, coords in POINT_COORDS.items():
-                                        tx = coords.get('tx')
-                                        ty = coords.get('ty')
-                                        if tx is not None and ty is not None:
-                                            px = int(tx * thermal_w)
-                                            py = int(ty * thermal_h)
-                                            px = max(0, min(px, thermal_w - 1))
-                                            py = max(0, min(py, thermal_h - 1))
-                                            temp = float(matrix[py, px])
-                                            # TRÍCH XUẤT TỪ MA TRẬN: Đảm bảo lấy đủ mọi điểm trong points_local
-                                            try:
-                                                temp = float(matrix[py, px])
-                                                if -10 < temp < 150:
-                                                    LIVE_TEMPS[int(pid)] = temp
-                                                else:
-                                                    LIVE_TEMPS[int(pid)] = 0.0
-                                            except:
-                                                LIVE_TEMPS[int(pid)] = 0.0
-
-                                    # Đã lấy xong dữ liệu, không in log mỗi giây để tránh nhiễu
-                                    break
             except Exception as e:
-                pass
-            time.sleep(2)
+                debug_log(f"[THERMAL] ISAPI Error: {e}")
+            time.sleep(2.0)
 
 
 # Luồng EventStreamListener cũ đã được gộp vào UnifiedStreamListener
@@ -741,10 +796,12 @@ class StreamRelay:
 
     def _get_ffmpeg_process(self, w, h):
         cmd = [ FFMPEG_BIN, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
-            '-s', f"{w}x{h}", '-r', '20', '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
-            '-preset', 'ultrafast', '-tune', 'zerolatency', '-g', '40', '-crf', '28', 
-            '-maxrate', '2M', '-bufsize', '1M', '-f', 'rtsp', self.output_url ]
-        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            '-s', f"{w}x{h}", '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
+            '-preset', 'ultrafast', '-tune', 'zerolatency', '-r', '15', '-g', '30', '-crf', '28', 
+            '-threads', '2', '-bufsize', '2M', '-maxrate', '2M', '-f', 'rtsp', self.output_url ]
+        # Ghi log lỗi FFmpeg để debug MSE
+        f_err = open('ffmpeg_error.log', 'a')
+        return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=f_err)
 
     def _draw_points(self, frame, blink):
         global ALARM_RULES, LIVE_TEMPS, POINT_COORDS
@@ -766,35 +823,27 @@ class StreamRelay:
             cv2.line(frame, (x - size, y), (x + size, y), color, 1)
             cv2.line(frame, (x, y - size), (x, y + size), color, 1)
 
-            if temp > 0:
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                font_scale = 0.22 if self.is_thermal else 0.45
-                thickness = 1
-                line1 = f"P{pid}"
-                line2 = f"{temp:.1f}C"
-                tx, ty = x + 4, y - 2
-
-                if not self.is_thermal:
-                    # Ô nền bán trong suốt cho optical
-                    (tw1, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
-                    (tw2, th2), _ = cv2.getTextSize(line2, font, font_scale, thickness)
-                    tw = max(tw1, tw2)
-                    overlay = frame.copy()
-                    pad = 3
-                    cv2.rectangle(overlay, (tx - pad, ty - th1 - pad),
-                                  (tx + tw + pad, ty + th2 + th1 + pad + 2), (20, 20, 20), -1)
-                    cv2.addWeighted(overlay, 0.45, frame, 0.55, 0, frame)
-
-                cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
-                (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
-                cv2.putText(frame, line2, (tx, ty + th1 + 2), font, font_scale, color, thickness, cv2.LINE_AA)
+            # Vẽ text (ID và Nhiệt độ) - PHIÊN BẢN THEO RULE (Xanh/Vàng/Đỏ)
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 0.45 if self.is_thermal else 0.55
+            thickness = 1
+            line1 = f"P{pid}"
+            line2 = f"{temp:.1f}C" if temp > 0 else "---"
+            
+            tx, ty = x + 5, y + 5
+            
+            # Vẽ chữ chính (ID và Nhiệt độ) - Không có viền đen
+            cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
+            
+            (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
+            cv2.putText(frame, line2, (tx, ty + th1 + 5), font, font_scale, color, thickness, cv2.LINE_AA)
 
     def _run(self):
         while self.running:
             cap = cv2.VideoCapture(self.rtsp_url)
             # Thêm timeout cho OpenCV để tránh treo nếu camera lỗi
-            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)
-            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)
+            cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 10000)
+            cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 10000)
             
             if not cap.isOpened():
                 time.sleep(5); continue
@@ -823,10 +872,18 @@ class StreamRelay:
                         self._draw_points(frame, blink > 5)
 
                     if self.is_thermal:
+                        # Log realtime nhiệt độ P1 để kiểm tra độ "nhảy" số (mỗi 5s)
+                        if blink == 0:
+                            p1_temp = LIVE_TEMPS.get(1, 0.0)
+                            debug_log(f"[REALTIME] P1 Temp: {p1_temp:.1f}°C")
+
                         with RECORDING_LOCK:
                             FRAME_BUFFER.append(frame.copy())
-                        for rid, temp_val in list(LIVE_TEMPS.items()):
-                            RULE_ENGINE.check(rid, temp_val, frame)
+                        
+                        # Chỉ check rule mỗi 15 frames (~1 giây) để tiết kiệm CPU và tránh lag video
+                        if blink == 0:
+                            for rid, temp_val in list(LIVE_TEMPS.items()):
+                                RULE_ENGINE.check(rid, temp_val, frame)
 
                     if pipe and pipe.stdin:
                         try: pipe.stdin.write(frame.tobytes())

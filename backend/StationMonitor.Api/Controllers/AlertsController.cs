@@ -54,7 +54,7 @@ public class AlertsController : ControllerBase
         [FromQuery] Guid? deviceId,
         [FromQuery] DateTime? from,
         [FromQuery] DateTime? to,
-        [FromQuery] int limit = 200)
+        [FromQuery] int limit = 10000)
     {
         var q = _db.Alerts.AsQueryable();
 

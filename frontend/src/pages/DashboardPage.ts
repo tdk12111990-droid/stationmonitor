@@ -247,10 +247,6 @@ export class DashboardPage {
                 <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">SỨC KHỎE</div>
                 <div id="tu471-health" style="font-size:0.9rem;font-weight:800;color:#10b981;">--</div>
               </div>
-              <div>
-                <div style="font-size:0.58rem;color:#475569;margin-bottom:1px;">CẢNH BÁO</div>
-                <div id="tu471-alerts" style="font-size:0.9rem;font-weight:800;color:#94a3b8;">--</div>
-              </div>
             </div>
           </div>
 
@@ -462,25 +458,28 @@ export class DashboardPage {
     rect.setAttribute('fill', '#0f172a');
     bg.appendChild(rect);
 
-    if (svgUrl) {
-      const img = document.createElementNS(ns, 'image');
-      // Sửa lỗi ghép nối URL để tránh dấu // thừa
-      const cleanSvgUrl = svgUrl.startsWith('/') ? svgUrl.substring(1) : svgUrl;
-      const cleanApiBase = API_BASE.endsWith('/') ? API_BASE : `${API_BASE}/`;
-      
-      img.setAttribute('href', `${cleanApiBase}${cleanSvgUrl}`);
-      img.setAttribute('x', '0'); img.setAttribute('y', '0');
-      img.setAttribute('width', String(SLD_W)); img.setAttribute('height', String(SLD_H));
-      img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-      img.setAttribute('filter', 'url(#sld-color-filter)');
-      bg.appendChild(img);
-    } else {
-      // Placeholder text
+    const finalSvgUrl = svgUrl || '/assets/default_sld.svg';
+    const img = document.createElementNS(ns, 'image');
+    
+    const cleanSvgUrl = finalSvgUrl.startsWith('/') ? finalSvgUrl.substring(1) : finalSvgUrl;
+    const cleanApiBase = API_BASE.endsWith('/') ? API_BASE : `${API_BASE}/`;
+    const finalHref = finalSvgUrl.startsWith('/assets') ? finalSvgUrl : `${cleanApiBase}${cleanSvgUrl}`;
+
+    img.setAttribute('href', finalHref);
+    img.setAttribute('x', '0'); img.setAttribute('y', '0');
+    img.setAttribute('width', String(SLD_W)); img.setAttribute('height', String(SLD_H));
+    img.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+    img.setAttribute('filter', 'url(#sld-color-filter)');
+    bg.appendChild(img);
+
+    if (!svgUrl) {
+      // Placeholder text khi chưa có sơ đồ thật
       const txt = document.createElementNS(ns, 'text');
-      txt.setAttribute('x', String(SLD_W / 2)); txt.setAttribute('y', String(SLD_H / 2));
-      txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('fill', '#1e293b');
-      txt.setAttribute('font-size', '18'); txt.setAttribute('font-family', 'sans-serif');
-      txt.textContent = 'Chưa có sơ đồ — Bật "Chỉnh sơ đồ" và upload file SVG';
+      txt.setAttribute('x', String(SLD_W / 2)); txt.setAttribute('y', String(SLD_H / 2 + 50));
+      txt.setAttribute('text-anchor', 'middle'); txt.setAttribute('fill', '#334155');
+      txt.setAttribute('font-size', '14'); txt.setAttribute('font-family', 'sans-serif');
+      txt.setAttribute('font-weight', '600');
+      txt.textContent = 'CHƯA CÓ SƠ ĐỒ THỰC TẾ — HÃY UPLOAD FILE .SVG';
       bg.appendChild(txt);
     }
   }
@@ -503,7 +502,7 @@ export class DashboardPage {
 
       const circ = document.createElementNS(ns, 'circle');
       circ.setAttribute('cx', String(p.x)); circ.setAttribute('cy', String(p.y));
-      circ.setAttribute('r', String(p.r));
+      circ.setAttribute('r', String(p.r * 0.7)); // Thu nhỏ 30% so với cấu hình gốc
       circ.setAttribute('fill', color); circ.setAttribute('fill-opacity', '0.88');
       circ.setAttribute('stroke', this.editMode ? '#facc15' : '#fff');
       circ.setAttribute('stroke-width', '1.5');
@@ -516,18 +515,18 @@ export class DashboardPage {
         // animG: chứa CSS animation (sld-floating-badge) — KHÔNG có SVG transform
         const posG = document.createElementNS(ns, 'g');
         posG.classList.add('sld-badge-pos');
-        posG.setAttribute('transform', `translate(${p.x}, ${p.y}) scale(${1 / (this.vs || 1)})`);
+        posG.setAttribute('transform', `translate(${p.x}, ${p.y - 15}) scale(${1 / (this.vs || 1)})`);
 
         const animG = document.createElementNS(ns, 'g');
         animG.classList.add('sld-floating-badge'); // CSS animation ở đây, không có transform attribute
 
         const badgeBg = document.createElementNS(ns, 'rect');
         badgeBg.classList.add('sld-measurement-bg');
-        badgeBg.setAttribute('x', '-47.5');
-        badgeBg.setAttribute('y', '-26');
-        badgeBg.setAttribute('width', '95');
-        badgeBg.setAttribute('height', '18');
-        badgeBg.setAttribute('rx', '9');
+        badgeBg.setAttribute('x', '-30');
+        badgeBg.setAttribute('y', '-10');
+        badgeBg.setAttribute('width', '60');
+        badgeBg.setAttribute('height', '16');
+        badgeBg.setAttribute('rx', '8');
         badgeBg.setAttribute('fill', 'rgba(15, 23, 42, 0.95)');
         badgeBg.setAttribute('stroke', '#facc15');
         badgeBg.setAttribute('stroke-width', '1');
@@ -535,10 +534,10 @@ export class DashboardPage {
 
         const measureTxt = document.createElementNS(ns, 'text');
         measureTxt.setAttribute('x', '0');
-        measureTxt.setAttribute('y', '-14');
+        measureTxt.setAttribute('y', '2');
         measureTxt.setAttribute('text-anchor', 'middle');
         measureTxt.setAttribute('fill', '#facc15');
-        measureTxt.setAttribute('font-size', '10px');
+        measureTxt.setAttribute('font-size', '9px');
         measureTxt.setAttribute('font-weight', '900');
         measureTxt.setAttribute('style', 'pointer-events:none;');
         measureTxt.classList.add('sld-measurement-text');
@@ -551,8 +550,14 @@ export class DashboardPage {
         const sensor = mySensors.length > 0 ? mySensors[0] : null;
         const valStr = sensor ? `${sensor.value.toFixed(1)}${sensor.unit}` : '--';
         const predStr = (sensor && sensor.predictedValue) ? ` (P:${sensor.predictedValue.toFixed(1)})` : '';
+        const fullText = valStr + predStr;
         
-        measureTxt.textContent = valStr + predStr;
+        // Tính toán chiều rộng động: ~7px mỗi ký tự + 15px padding
+        const dynamicW = Math.max(60, (fullText.length * 7) + 15);
+        badgeBg.setAttribute('width', String(dynamicW));
+        badgeBg.setAttribute('x', String(-dynamicW / 2));
+
+        measureTxt.textContent = fullText;
 
         animG.appendChild(badgeBg);
         animG.appendChild(measureTxt);
@@ -644,17 +649,25 @@ export class DashboardPage {
           }
 
           const mTxt = g.querySelector('.sld-measurement-text');
-          if (mTxt) {
+          const mBg = g.querySelector('.sld-measurement-bg');
+          if (mTxt && mBg) {
+              let fullText = '';
               if (isCamera) {
                   const allForDev = this.sensors.filter(s => s.deviceId === item.deviceId);
                   const maxVal = Math.max(...allForDev.map(s => s.value));
                   const maxPred = Math.max(...allForDev.map(s => s.predictedValue || 0));
                   const predStr = maxPred > 0 ? ` (P:${maxPred.toFixed(1)})` : '';
-                  mTxt.textContent = `${maxVal.toFixed(1)}°C${predStr}`;
+                  fullText = `${maxVal.toFixed(1)}°C${predStr}`;
               } else {
                   const predStr = item.predictedValue ? ` (P:${item.predictedValue.toFixed(1)})` : '';
-                  mTxt.textContent = `${item.value.toFixed(1)}${item.unit}${predStr}`;
+                  fullText = `${item.value.toFixed(1)}${item.unit}${predStr}`;
               }
+              mTxt.textContent = fullText;
+              
+              // Cập nhật chiều rộng ô động khi dữ liệu thay đổi
+              const dynamicW = Math.max(60, (fullText.length * 7) + 15);
+              mBg.setAttribute('width', String(dynamicW));
+              mBg.setAttribute('x', String(-dynamicW / 2));
           }
         }
       });

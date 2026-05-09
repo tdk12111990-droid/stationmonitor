@@ -132,14 +132,31 @@ export class AlertsHistoryPage {
       .ah-sort-opt .opt-check { margin-left: auto; opacity: 0; font-weight: 900; }
       .ah-sort-opt.active .opt-check { opacity: 1; }
 
-      /* ── Detail panel nội dung ── */
+      /* ── Detail panel ── */
+      .ah-detail-panel {
+        position: fixed;
+        top: 60px; right: -450px;
+        width: 440px; height: calc(100vh - 60px);
+        background: rgba(15, 23, 42, 0.8);
+        backdrop-filter: blur(20px);
+        border-left: 1px solid var(--admin-border);
+        z-index: 100;
+        transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: -10px 0 30px rgba(0,0,0,0.5);
+        padding: 10px;
+        box-sizing: border-box;
+        display: flex; flex-direction: column;
+      }
+      .ah-detail-panel.open {
+        right: 0;
+      }
       .ah-detail-inner {
-        width: 420px;
-        height: calc(100vh - 170px);
+        flex: 1;
         overflow-y: auto;
         background: var(--admin-card-bg);
         border: 1px solid var(--admin-border);
         border-radius: 12px;
+        display: flex; flex-direction: column;
       }
       .ah-detail-header {
         display:flex; align-items:center; gap:10px;
@@ -187,31 +204,56 @@ export class AlertsHistoryPage {
       }
     </style>
 
-    <div class="list-page" style="max-width:100%">
-      <div class="page-toolbar" style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:12px;">
-        <h2 style="margin:0">⚠️ NHẬT KÝ CẢNH BÁO</h2>
-        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label style="font-size:.65rem;font-weight:800;color:var(--admin-text);opacity:.5;text-transform:uppercase;letter-spacing:.5px">THỜI GIAN</label>
-            <select id="alertTimeRange" class="form-select" style="width:150px">
+    <div class="list-page" style="max-width:100%; padding: 15px;">
+      <div class="admin-page-header" style="margin-bottom: 15px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
+        <div class="admin-page-title" style="margin:0; font-size:1.1rem;">
+          <i class="fas fa-history"></i> Nhật ký cảnh báo
+        </div>
+        <div class="admin-page-actions">
+          <button class="btn-industrial btn-sm" id="btnRefreshAlertsTop" style="padding: 4px 10px; font-size: .75rem;">
+            <i class="fas fa-sync-alt"></i> Làm mới
+          </button>
+        </div>
+      </div>
+
+      <div class="admin-card" style="margin-bottom:12px; padding:10px;">
+        <div class="page-toolbar" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:15px;">
+          <!-- Nhóm Thống kê (Bên trái) - Tự co giãn -->
+          <div style="display:flex; gap:20px; align-items:center; flex: 1; min-width: 300px;">
+            <div style="display:flex; align-items:baseline; gap:8px;">
+              <label style="font-size:.6rem; font-weight:800; opacity:.5; text-transform:uppercase;">Tổng</label>
+              <div id="statTotal" style="font-size:1.1rem; font-weight:700; color:#3b82f6;">0</div>
+            </div>
+            <div style="height:16px; width:1px; background:rgba(255,255,255,0.1);"></div>
+            <div style="display:flex; align-items:baseline; gap:8px;">
+              <label style="font-size:.6rem; font-weight:800; opacity:.5; text-transform:uppercase;">Mở</label>
+              <div id="statOpen" style="font-size:1.1rem; font-weight:700; color:#ef4444;">0</div>
+            </div>
+            <div style="height:16px; width:1px; background:rgba(255,255,255,0.1);"></div>
+            <div style="display:flex; align-items:baseline; gap:8px;">
+              <label style="font-size:.6rem; font-weight:800; opacity:.5; text-transform:uppercase;">Đóng</label>
+              <div id="statClosed" style="font-size:1.1rem; font-weight:700; color:#10b981;">0</div>
+            </div>
+          </div>
+
+          <!-- Nhóm Bộ lọc (Bên phải) - Gọn hơn -->
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end;">
+            <select id="alertTimeRange" class="form-select" style="width:110px; height:28px; font-size:.75rem; padding: 2px 5px;">
               <option value="today">Hôm nay</option>
               <option value="yesterday">Hôm qua</option>
-              <option value="7d" selected>7 ngày qua</option>
-              <option value="30d">30 ngày qua</option>
+              <option value="7d" selected>7 ngày</option>
+              <option value="30d">30 ngày</option>
               <option value="all">Tất cả</option>
             </select>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:4px;">
-            <label style="font-size:.65rem;font-weight:800;color:var(--admin-text);opacity:.5;text-transform:uppercase;letter-spacing:.5px">TRẠNG THÁI</label>
-            <select id="alertFilter" class="form-select" style="width:150px">
+            <select id="alertFilter" class="form-select" style="width:110px; height:28px; font-size:.75rem; padding: 2px 5px;">
               <option value="">Tất cả</option>
-              <option value="open">Chưa xử lý</option>
+              <option value="open">Mở</option>
               <option value="acked">Đang xử lý</option>
-              <option value="closed">Đã đóng</option>
+              <option value="closed">Đóng</option>
             </select>
+            <button id="btnExportAlerts" class="btn-industrial btn-sm" style="height:28px; padding:0 8px; font-size:.7rem;" title="Xuất CSV">⬇ CSV</button>
+            <button id="btnRefreshAlerts" class="btn-industrial btn-primary btn-sm" style="height:28px; padding:0 8px; font-size:.7rem;">↺ Tải lại</button>
           </div>
-          <button id="btnExportAlerts"  class="btn-industrial" title="Xuất CSV">⬇ CSV</button>
-          <button id="btnRefreshAlerts" class="btn-industrial btn-primary">↺ Làm mới</button>
         </div>
       </div>
 
@@ -236,12 +278,9 @@ export class AlertsHistoryPage {
                 <div style="text-align:center;padding:40px;color:#94a3b8">Đang tải...</div>
               </div>
             </div>
-            <div style="padding:7px 14px;border-top:1px solid var(--admin-border);font-size:.75rem;color:var(--admin-text);opacity:.5;display:flex;justify-content:space-between;">
-              <span id="alertCount">0 cảnh báo</span>
-              <span id="alertRangeLabel"></span>
-            </div>
-          </div>
         </div>
+      </div>
+    </div>
 
         <!-- Detail panel -->
         <div class="ah-detail-panel" id="ahDetailPanel">
@@ -419,10 +458,13 @@ export class AlertsHistoryPage {
     if (!tbody) return;
     this.updateSortIndicators();
 
-    const countEl = document.getElementById('alertCount');
-    if (countEl) countEl.textContent = `${this.alerts.length} cảnh báo`;
-    const rangeEl = document.getElementById('alertRangeLabel');
-    if (rangeEl) rangeEl.textContent = this.fromDate ? `${this.fromDate} → ${this.toDate || 'nay'}` : 'Tất cả thời gian';
+    const totalEl = document.getElementById('statTotal');
+    const openEl = document.getElementById('statOpen');
+    const closedEl = document.getElementById('statClosed');
+
+    if (totalEl) totalEl.textContent = String(this.alerts.length);
+    if (openEl) openEl.textContent = String(this.alerts.filter(a => a.status === 'open' || a.status === 'acked').length);
+    if (closedEl) closedEl.textContent = String(this.alerts.filter(a => a.status === 'closed').length);
 
     if (this.alerts.length === 0) {
       tbody.innerHTML = `<div style="text-align:center;color:#94a3b8;padding:40px">Không có cảnh báo trong khoảng thời gian này.</div>`;
@@ -663,6 +705,7 @@ export class AlertsHistoryPage {
 
   private bindEvents(): void {
     document.getElementById('btnRefreshAlerts')?.addEventListener('click', () => this.loadAlerts());
+    document.getElementById('btnRefreshAlertsTop')?.addEventListener('click', () => this.loadAlerts());
     document.getElementById('btnExportAlerts')?.addEventListener('click', () => this.exportCsv());
 
     document.getElementById('alertFilter')?.addEventListener('change', async (e) => {

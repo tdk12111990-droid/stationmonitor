@@ -186,7 +186,7 @@ class StationApiService {
   }
 
   // ── Alerts ────────────────────────────────────────────────
-  async getAlerts(status?: string, from?: string, to?: string, limit = 200, deviceId?: string): Promise<AlertItem[]> {
+  async getAlerts(status?: string, from?: string, to?: string, limit = 10000, deviceId?: string): Promise<AlertItem[]> {
     const params = new URLSearchParams();
     if (status) params.set('status', status);
     if (from) params.set('from', from);
