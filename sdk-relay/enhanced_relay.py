@@ -89,18 +89,17 @@ class UnifiedStreamListener(threading.Thread):
         self.last_update_time = 0
 
     def run(self):
-        log_acoustic("[UNIFIED_STREAM] Khởi động luồng giám sát Sự kiện & Âm thanh...")
-        auth_methods = [self.auth, requests.auth.HTTPBasicAuth(USER, PASSWORD)]
-        auth_idx = 0
+        self.running = True
+        session = requests.Session()
+        session.auth = self.auth # HTTPDigestAuth mặc định
         
         while self.running:
             try:
-                current_auth = auth_methods[auth_idx]
-                log_acoustic(f"[UNIFIED_STREAM] Đang thử kết nối (Auth Type: {type(current_auth).__name__})...")
-                resp = requests.get(self.url, auth=current_auth, stream=True, timeout=(5, None))
+                log_acoustic(f"[UNIFIED_STREAM] Đang kết nối tới {self.url}...")
+                resp = session.get(self.url, stream=True, timeout=(5, None))
                 
                 if resp.status_code == 200:
-                    log_acoustic("[UNIFIED_STREAM] Đã kết nối thành công!")
+                    log_acoustic("[UNIFIED_STREAM] ✅ KẾT NỐI THÀNH CÔNG!")
                     buffer = ""
                     for line in resp.iter_lines():
                         if not self.running: break
@@ -108,10 +107,8 @@ class UnifiedStreamListener(threading.Thread):
                         try:
                             decoded_line = line.decode('utf-8', 'ignore')
                             if decoded_line.strip().startswith('{'):
-                                # Xử lý JSON
                                 self._process_json(decoded_line)
                             else:
-                                # Xử lý XML
                                 if "<EventNotificationAlert" in decoded_line:
                                     buffer = decoded_line
                                 else:
@@ -121,13 +118,14 @@ class UnifiedStreamListener(threading.Thread):
                                     buffer = ""
                         except: pass
                 elif resp.status_code == 401:
-                    log_acoustic(f"[UNIFIED_STREAM] Lỗi 401 với {type(current_auth).__name__}. Đang đổi phương thức...")
-                    auth_idx = (auth_idx + 1) % len(auth_methods)
-                    time.sleep(10)
+                    log_acoustic("[UNIFIED_STREAM] ⚠️ Lỗi 401. Thử đổi sang Basic Auth...")
+                    session.auth = requests.auth.HTTPBasicAuth(USER, PASSWORD)
+                    time.sleep(5)
                 else:
-                    log_acoustic(f"[UNIFIED_STREAM] Lỗi kết nối: {resp.status_code}")
+                    log_acoustic(f"[UNIFIED_STREAM] ❌ Lỗi kết nối: {resp.status_code}")
                     time.sleep(10)
-            except Exception:
+            except Exception as e:
+                log_acoustic(f"[UNIFIED_STREAM] ❌ Lỗi ngoại lệ: {e}")
                 time.sleep(10)
 
     def _process_json(self, json_str):

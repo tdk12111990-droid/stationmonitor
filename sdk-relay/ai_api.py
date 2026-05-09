@@ -98,8 +98,40 @@ def receive_prediction():
 @app.route('/api/pd-data', methods=['POST', 'GET'])
 @app.route('/pd-data', methods=['POST', 'GET'])
 def pd_prediction_api():
-    # Đã vô hiệu hóa triệt để các luồng dữ liệu PD (phóng điện)
-    return jsonify({"success": True, "message": "PD endpoints are disabled"}), 200
+    import sys
+    data = request.json or {}
+    sys.stderr.write(f"\n[DEBUG] RECEIVE PD_PRED: {data}\n")
+    
+    # Hỗ trợ GET params nếu cần
+    if request.method == 'GET':
+        data = request.args.to_dict()
+        
+    if not data:
+        return jsonify({"success": False, "message": "No data"}), 400
+
+    ts = time.strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Lấy các trường dữ liệu
+    pd_id = data.get("Id", "PD_SENSOR")
+    pd_val = data.get("pd_val", 0.0)
+    freq = data.get("frequency", 0.0)
+    s_db = data.get("audioDecibel", 0.0)
+    status = data.get("Status", "OK")
+    forecast_ts = data.get("ForecastTime", ts)
+    
+    save_to_pd_csv(PD_CSV_FILE, ts, pd_id, pd_val, freq, s_db, status, forecast_ts)
+    sys.stderr.write(f"[DEBUG] Saved PD {pd_id}: {pd_val}dB, {freq}Hz, {s_db}dB(Audio)\n")
+    
+    # Ingest vào Backend local (nếu cần xem biểu đồ lịch sử ở phần Phóng điện)
+    try:
+        ingest_payload = [{
+            "DeviceId": DEVICE_GUID, "PointId": "phong_dien",
+            "Value": pd_val, "PredictedValue": pd_val, "Unit": "dB"
+        }]
+        requests.post(INTERNAL_INGEST_URL, json=ingest_payload, timeout=2)
+    except: pass
+    
+    return jsonify({"success": True}), 200
 
 @app.route('/api/ai-predictions', methods=['GET'])
 def get_predictions():

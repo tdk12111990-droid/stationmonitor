@@ -55,7 +55,7 @@ class ExternalApiPusher:
                     # B. Gửi sang Jetson AI & Đối tác (CHỈ GỬI 5 PHÚT 1 LẦN)
                     if now - last_ai_send >= 300: # 300 giây = 5 phút
                         last_ai_send = now # Cập nhật ngay lập tức để tránh gửi lặp khi lỗi
-                        self.debug_log(f"=== [AI SYSTEM] Đang gửi dữ liệu sang AI (Chu kỳ 5 phút) ===")
+                        self.debug_log(f"=== [AI SYSTEM] Đang gửi dữ liệu Nhiệt độ sang AI: {list(payload.values())} ===")
                         try:
                             # Gửi sang AI local (cổng 8089)
                             requests.post("http://localhost:8089/api/prediction", json={"prediction": payload}, timeout=5)
@@ -68,8 +68,23 @@ class ExternalApiPusher:
                         except Exception as e:
                             self.debug_log(f"[AI SEND ERROR] {e} - Sẽ thử lại sau 5 phút.")
 
-                # --- PHẦN 2: DỮ LIỆU PHÓNG ĐIỆN (ĐÃ TẮT) ---
-                pass
+                # --- PHẦN 2: DỮ LIỆU PHÓNG ĐIỆN & ÂM THANH ---
+                if live_pd_ref:
+                    pd_data = live_pd_ref() # Trả về {pd, frequency, sound_db}
+                    if pd_data.get("pd") is not None or pd_data.get("frequency") is not None:
+                        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                        pd_payload = {
+                            "Id": "PD_SENSOR",
+                            "pd_val": round(pd_data.get("pd", 0.0), 1),
+                            "frequency": round(pd_data.get("frequency", 0.0), 0),
+                            "audioDecibel": round(pd_data.get("sound_db", 0.0), 1),
+                            "Status": "OK",
+                            "ForecastTime": ts
+                        }
+                        try:
+                            # Gửi sang AI local (cổng 8089) để hiển thị ở tab Phân tích AI
+                            requests.post("http://localhost:8089/api/pd-prediction", json=pd_payload, timeout=2)
+                        except: pass
 
             except Exception as e:
                 self.debug_log(f"[EXTERNAL_API] Error: {e}")
