@@ -46,11 +46,16 @@
         import './video-stream.js';
         const p = new URLSearchParams(location.search);
         const src = p.get('src') || '';
-        const mode = p.get('mode') || 'webrtc,mse';
-        const go2rtc = p.get('go2rtc') || 'http://localhost:1984';
+        const mode = p.get('mode') || 'mse,webrtc,mjpeg';
+        const go2rtc = p.get('go2rtc') || '/rtc/';
         const el = document.createElement('video-stream');
         el.mode = mode;
-        el.src = new URL('api/ws?src=' + encodeURIComponent(src), go2rtc);
+        
+        let baseUrl = go2rtc;
+        if (baseUrl.startsWith('/')) {
+            baseUrl = window.location.origin + baseUrl;
+        }
+        el.src = new URL('api/ws?src=' + encodeURIComponent(src), baseUrl);
         document.body.appendChild(el);
     </script>
 </body>

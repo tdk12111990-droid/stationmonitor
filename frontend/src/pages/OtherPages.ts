@@ -313,12 +313,12 @@ export class MultisitePage {
   private async loadStations(): Promise<void> {
     try {
       let dbStations = await stationApi.getStations();
-      
+
       // Đảm bảo luôn có các trạm hiển thị trên UI
       const virtualStations = [
         { id: 'virtual-la-1', name: '110kV LONG AN (Trạm 1)', location: JSON.stringify({ lat: 10.63, lng: 106.50, alerts: 3, temp: 42, pd: 0 }), code: 'LA001', status: 'online' },
         { id: 'virtual-la-2', name: '110kV LONG AN (Trạm 2)', location: JSON.stringify({ lat: 10.68, lng: 106.55, alerts: 0, temp: 32, pd: 0 }), code: 'LA002', status: 'online' },
-        { id: 'virtual-tt',  name: '110kV TÂN TRỤ', location: JSON.stringify({ lat: 10.51, lng: 106.52, alerts: 0, temp: 34, pd: 0 }), code: 'TT001', status: 'online' }
+        { id: 'virtual-tt', name: '110kV TÂN TRỤ', location: JSON.stringify({ lat: 10.51, lng: 106.52, alerts: 0, temp: 34, pd: 0 }), code: 'TT001', status: 'online' }
       ];
 
       // Nếu trong DB chưa có các trạm này, ta add tạm vào list để hiện UI
@@ -368,12 +368,12 @@ export class MultisitePage {
     }).join('');
     cards.style.display = 'grid'; // Hiện dãy thẻ phía dưới
     const displayData = data.slice(0, 4); // Lấy tối đa 4 trạm để hiện cards
-    
+
     let cardsHtml = displayData.map(s => {
       const color = s.meta.alerts > 0 ? '#ef4444' : '#10b981';
       const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
       const targetId = s.id.startsWith('virtual') ? (realStation?.id || s.id) : s.id;
-      
+
       return `<div class="multisite-card-light" style="background:rgba(255,255,255,0.95); border-radius:16px; padding:18px; border:1px solid #fff; box-shadow:0 10px 30px rgba(0,0,0,0.05); cursor:pointer; transition: transform 0.2s;" onclick="(window as any).router.navigate('dashboard', { stationId: '${targetId}' })" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
         <div style="font-size:0.6rem; color:#3b82f6; font-weight:900; margin-bottom:4px; letter-spacing:1px;">HỆ THỐNG GIÁM SÁT</div>
         <div style="font-weight:900; font-size:0.9rem; color:#0f172a; margin-bottom:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
@@ -418,14 +418,14 @@ export class MultisitePage {
         iconSize: [12, 12], iconAnchor: [6, 6]
       });
       const marker = L.marker([meta.lat, meta.lng], { icon: markerIcon, draggable: this.isEditMode }).addTo(this.map);
-      
+
       const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
       const targetId = s.id.startsWith('virtual') ? (realStation?.id || s.id) : s.id;
 
       marker.on('dragend', async (e: any) => {
         const { lat, lng } = e.target.getLatLng();
         meta.lat = lat; meta.lng = lng;
-        
+
         // Luôn lưu vào localStorage để ghi nhớ ở frontend
         localStorage.setItem(`station_pos_${s.id}`, JSON.stringify({ lat, lng }));
 
@@ -434,7 +434,7 @@ export class MultisitePage {
             await stationApi.updateStation(s.id, { location: JSON.stringify(meta) });
           } catch (err) { console.error('Save position to server failed', err); }
         }
-        
+
         const idx = this.stations.findIndex(x => x.id === s.id);
         if (idx !== -1 && this.stations[idx]) this.stations[idx].location = JSON.stringify(meta);
       });

@@ -11,47 +11,47 @@ import { GO2RTC_URL, API_BASE_URL } from '@/utils/env';
 type Layout = 'l1' | 'l4' | 'l9';
 
 interface DetectionEvent {
-  id: string;
-  cameraId: string;
-  cameraName: string | null;
-  detectionType: string;
-  detectedAt: string;
-  maxTemp: number | null;
-  affectedZone: string | null;
-  alertId: string | null;
-  metadata: string | null;
+    id: string;
+    cameraId: string;
+    cameraName: string | null;
+    detectionType: string;
+    detectedAt: string;
+    maxTemp: number | null;
+    affectedZone: string | null;
+    alertId: string | null;
+    metadata: string | null;
 }
 
 interface EvtMeta { snapshotUrl?: string; videoUrl?: string; }
 
 const EVT_CFG: Record<string, { label: string; icon: string; color: string }> = {
-  thermal_hotspot: { label: 'Nhiệt bất thường', icon: '🌡️', color: '#ef4444' },
-  fire: { label: 'Cháy', icon: '🔥', color: '#ef4444' },
-  smoke: { label: 'Khói', icon: '💨', color: '#f97316' },
-  intrusion: { label: 'Xâm nhập', icon: '🚨', color: '#f59e0b' },
-  partial_discharge: { label: 'Phóng điện', icon: '⚡', color: '#a855f7' },
-  tampering: { label: 'Che camera', icon: '🎭', color: '#f59e0b' },
-  video_loss: { label: 'Mất tín hiệu', icon: '📵', color: '#64748b' },
-  motion: { label: 'Chuyển động', icon: '👁️', color: '#3b82f6' },
-  storage_error: { label: 'Lỗi lưu trữ', icon: '💾', color: '#f59e0b' },
+    thermal_hotspot: { label: 'Nhiệt bất thường', icon: '🌡️', color: '#ef4444' },
+    fire: { label: 'Cháy', icon: '🔥', color: '#ef4444' },
+    smoke: { label: 'Khói', icon: '💨', color: '#f97316' },
+    intrusion: { label: 'Xâm nhập', icon: '🚨', color: '#f59e0b' },
+    partial_discharge: { label: 'Phóng điện', icon: '⚡', color: '#a855f7' },
+    tampering: { label: 'Che camera', icon: '🎭', color: '#f59e0b' },
+    video_loss: { label: 'Mất tín hiệu', icon: '📵', color: '#64748b' },
+    motion: { label: 'Chuyển động', icon: '👁️', color: '#3b82f6' },
+    storage_error: { label: 'Lỗi lưu trữ', icon: '💾', color: '#f59e0b' },
 };
 
 export class RealtimeMonitorPage {
-  private cameras: CameraDevice[] = [];
-  private detections: DetectionEvent[] = [];
-  private hubConnection: signalR.HubConnection | null = null;
-  private clockInterval?: ReturnType<typeof setInterval>;
-  private currentLayout: Layout = 'l4';
-  private expandedId: string | null = null;
-  private panelCamFilter = '';
-  private panelTypeFilter = '';
-  private panelDateFilter = '';
-  // Cache tọa độ điểm đo từ SignalR (pointId → coords)
-  private _coordCache: Record<string, { tx: number; ty: number; ox: number; oy: number }> = {};
-  // Ngưỡng cảnh báo từ rules (pointId → {preAlarm, alarm})
+    private cameras: CameraDevice[] = [];
+    private detections: DetectionEvent[] = [];
+    private hubConnection: signalR.HubConnection | null = null;
+    private clockInterval?: ReturnType<typeof setInterval>;
+    private currentLayout: Layout = 'l4';
+    private expandedId: string | null = null;
+    private panelCamFilter = '';
+    private panelTypeFilter = '';
+    private panelDateFilter = '';
+    // Cache tọa độ điểm đo từ SignalR (pointId → coords)
+    private _coordCache: Record<string, { tx: number; ty: number; ox: number; oy: number }> = {};
+    // Ngưỡng cảnh báo từ rules (pointId → {preAlarm, alarm})
 
-  render(): string {
-    return `
+    render(): string {
+        return `
     <style>
       #pageContent { padding:0!important; overflow:hidden!important; height:100%!important; }
       .rtm-page { display:flex; flex-direction:column; height:100%; background:#000; overflow:hidden; }
@@ -320,8 +320,8 @@ export class RealtimeMonitorPage {
                 <select class="nvr-ep-fsel" id="nvrEPType">
                   <option value="">Tất cả loại</option>
                   ${Object.entries(EVT_CFG).map(([k, v]) =>
-      `<option value="${k}">${v.icon} ${v.label}</option>`
-    ).join('')}
+            `<option value="${k}">${v.icon} ${v.label}</option>`
+        ).join('')}
                 </select>
                 <input type="date" class="nvr-ep-fdate" id="nvrEPDate" title="Lọc theo ngày">
                 <button class="nvr-ep-rbtn" id="nvrEPRefresh" title="Làm mới">↻</button>
@@ -345,79 +345,79 @@ export class RealtimeMonitorPage {
     
     <!-- Toasts -->
     <div class="nvr-toast-container" id="nvrToastContainer"></div>`;
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // Lifecycle
-  // ════════════════════════════════════════════════════════════
-
-  async mount(): Promise<void> {
-    // Override page-content padding for full-height layout
-    const pc = document.getElementById('pageContent');
-    if (pc) { pc.style.padding = '0'; pc.style.overflow = 'hidden'; pc.style.height = '100%'; }
-
-    try { this.cameras = await stationApi.getCamerasFromFirstStation(); }
-    catch { this.cameras = []; }
-
-    this.renderGrid();
-    this.bindEvents();
-    this.loadDetections();
-    this.connectSignalR();
-    this.syncAlarmStates();
-    this.startClock();
-    this.startPointPolling();
-  }
-
-  destroy(): void {
-    if (this.clockInterval) clearInterval(this.clockInterval);
-    if (this._pollInterval) clearInterval(this._pollInterval);
-    if (this.hubConnection) this.hubConnection.stop();
-    document.removeEventListener('keydown', this._onKey);
-    const pc = document.getElementById('pageContent');
-    if (pc) { pc.style.padding = ''; pc.style.overflow = ''; pc.style.height = ''; }
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // Camera grid
-  // ════════════════════════════════════════════════════════════
-
-  private cellCount(): number {
-    return this.currentLayout === 'l1' ? 1 : this.currentLayout === 'l4' ? 4 : 9;
-  }
-
-  private renderGrid(override?: (CameraDevice | null)[]): void {
-    const grid = document.getElementById('nvrGrid');
-    if (!grid) return;
-
-    // Rebuild camera select
-    const sel = document.getElementById('nvrSel') as HTMLSelectElement | null;
-    if (sel) {
-      const prev = sel.value;
-      sel.innerHTML = `<option value="">Tất cả camera</option>` +
-        this.cameras.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
-      sel.value = prev;
     }
 
-    // Online count
-    const online = this.cameras.filter(c => (c.status as string) === 'online').length;
-    const onlineEl = document.getElementById('nvrOnline');
-    if (onlineEl) {
-      onlineEl.textContent = `${online}/${this.cameras.length}`;
-      onlineEl.style.color = online > 0 ? '#10b981' : '#ef4444';
+    // ════════════════════════════════════════════════════════════
+    // Lifecycle
+    // ════════════════════════════════════════════════════════════
+
+    async mount(): Promise<void> {
+        // Override page-content padding for full-height layout
+        const pc = document.getElementById('pageContent');
+        if (pc) { pc.style.padding = '0'; pc.style.overflow = 'hidden'; pc.style.height = '100%'; }
+
+        try { this.cameras = await stationApi.getCamerasFromFirstStation(); }
+        catch { this.cameras = []; }
+
+        this.renderGrid();
+        this.bindEvents();
+        this.loadDetections();
+        this.connectSignalR();
+        this.syncAlarmStates();
+        this.startClock();
+        this.startPointPolling();
     }
 
-    const src = override ?? this.cameras;
-    let html = '';
-    for (let i = 0; i < this.cellCount(); i++) {
-      html += this.renderCell(src[i] ?? null, i + 1);
+    destroy(): void {
+        if (this.clockInterval) clearInterval(this.clockInterval);
+        if (this._pollInterval) clearInterval(this._pollInterval);
+        if (this.hubConnection) this.hubConnection.stop();
+        document.removeEventListener('keydown', this._onKey);
+        const pc = document.getElementById('pageContent');
+        if (pc) { pc.style.padding = ''; pc.style.overflow = ''; pc.style.height = ''; }
     }
-    grid.innerHTML = html;
-  }
 
-  private renderCell(cam: CameraDevice | null, num: number, fullscreen = false): string {
-    const ch = String(num).padStart(2, '0');
-    if (!cam) {
-      return `
+    // ════════════════════════════════════════════════════════════
+    // Camera grid
+    // ════════════════════════════════════════════════════════════
+
+    private cellCount(): number {
+        return this.currentLayout === 'l1' ? 1 : this.currentLayout === 'l4' ? 4 : 9;
+    }
+
+    private renderGrid(override?: (CameraDevice | null)[]): void {
+        const grid = document.getElementById('nvrGrid');
+        if (!grid) return;
+
+        // Rebuild camera select
+        const sel = document.getElementById('nvrSel') as HTMLSelectElement | null;
+        if (sel) {
+            const prev = sel.value;
+            sel.innerHTML = `<option value="">Tất cả camera</option>` +
+                this.cameras.map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+            sel.value = prev;
+        }
+
+        // Online count
+        const online = this.cameras.filter(c => (c.status as string) === 'online').length;
+        const onlineEl = document.getElementById('nvrOnline');
+        if (onlineEl) {
+            onlineEl.textContent = `${online}/${this.cameras.length}`;
+            onlineEl.style.color = online > 0 ? '#10b981' : '#ef4444';
+        }
+
+        const src = override ?? this.cameras;
+        let html = '';
+        for (let i = 0; i < this.cellCount(); i++) {
+            html += this.renderCell(src[i] ?? null, i + 1);
+        }
+        grid.innerHTML = html;
+    }
+
+    private renderCell(cam: CameraDevice | null, num: number, fullscreen = false): string {
+        const ch = String(num).padStart(2, '0');
+        if (!cam) {
+            return `
       <div class="nvr-cell" data-cam-id="">
         <div class="nvr-nosig">
           <span class="nvr-nosig-ico">📷</span>
@@ -425,13 +425,12 @@ export class RealtimeMonitorPage {
         </div>
         <div class="nvr-ch">CH${ch}</div>
       </div>`;
-    }
+        }
 
-    const cfg = (cam as any).config ?? {};
-    const go2rtcId: string = cfg.go2rtc_id ?? '';
-    if (!go2rtcId) {
-      // go2rtc_id chưa được cấu hình — hiện no signal
-      return `
+        const cfg = (cam as any).config ?? {};
+        const go2rtcId: string = cfg.go2rtc_id ?? '';
+        if (!go2rtcId) {
+            return `
       <div class="nvr-cell" data-cam-id="${cam.id}">
         <div class="nvr-nosig">
           <span class="nvr-nosig-ico">⚙️</span>
@@ -439,23 +438,17 @@ export class RealtimeMonitorPage {
         </div>
         <div class="nvr-ch">CH${ch} · ${cam.name}</div>
       </div>`;
-    }
-    // Grid dùng _sub (nếu có cấu hình), nếu không thì fallback về luồng thường.
-    const subId: string = cfg.go2rtc_sub_id ?? go2rtcId;
-    const mainId: string = cfg.go2rtc_main_id ?? go2rtcId;
-    let activeId = fullscreen ? mainId : subId;
-    
-    // Tauri Linux optimization: Force MJPEG fallback to avoid WebRTC lag
-    const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
-    if (isTauri && activeId.includes('camera_152')) {
-        activeId += '_mjpeg';
-    }
+        }
+        
+        const subId: string = cfg.go2rtc_sub_id ?? go2rtcId;
+        const mainId: string = cfg.go2rtc_main_id ?? go2rtcId;
+        let activeId = fullscreen ? mainId : subId;
 
-    const status: string = (cam.status as string) ?? 'unknown';
+        const status: string = (cam.status as string) ?? 'unknown';
 
-    const streamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=webrtc,mse,mjpeg&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
+        const streamUrl = `/camera-stream.html?src=${encodeURIComponent(activeId)}&mode=mse,webrtc,mjpeg&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
 
-    return `
+        return `
     <div class="nvr-cell" data-cam-id="${cam.id}" data-go2rtc="${go2rtcId}"
          data-sub="${subId}" data-main="${mainId}" data-cam-name="${cam.name}">
       <iframe src="${streamUrl}" id="nvr-frame-${cam.id}" allow="autoplay; camera; microphone"></iframe>
@@ -475,93 +468,93 @@ export class RealtimeMonitorPage {
         </div>
       </div>
     </div>`;
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // Events panel
-  // ════════════════════════════════════════════════════════════
-
-  private async loadDetections(): Promise<void> {
-    const list = document.getElementById('nvrEPList');
-    if (list) list.innerHTML = `<div class="nvr-ep-loading">Đang tải...</div>`;
-    try {
-      const params = new URLSearchParams({ limit: '40' });
-      if (this.panelCamFilter) params.set('deviceId', this.panelCamFilter);
-      
-      let from: string | undefined;
-      let to: string | undefined;
-      if (this.panelDateFilter) {
-        from = new Date(this.panelDateFilter).toISOString();
-        to = new Date(this.panelDateFilter + 'T23:59:59').toISOString();
-        params.set('from', from);
-        params.set('to', to);
-      }
-
-      // Lấy đồng thời cả Detections và Alerts
-      const [dets, alerts] = await Promise.all([
-        stationApi.getDetections(params.toString()),
-        stationApi.getAlerts(undefined, from, to, 40, this.panelCamFilter || undefined)
-      ]);
-
-      // Chuyển Alerts thành định dạng DetectionEvent để hiển thị chung
-      const mappedAlerts: DetectionEvent[] = alerts.map((a: any) => ({
-        id: a.id,
-        cameraId: a.deviceId,
-        cameraName: null,
-        detectionType: a.source === 'camera' ? 'thermal_hotspot' : 'alert',
-        detectedAt: a.triggeredAt,
-        maxTemp: a.value,
-        affectedZone: null,
-        alertId: a.id,
-        metadata: JSON.stringify({ snapshotUrl: a.thumbnailUrl || a.imageUrl, description: a.message })
-      }));
-
-      // Gộp và sắp xếp theo thời gian mới nhất
-      const combined = [...dets, ...mappedAlerts];
-      combined.sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime());
-      
-      this.detections = combined.slice(0, 80);
-    } catch (err) {
-      console.error("Load events error:", err);
-      this.detections = [];
     }
-    this.renderDetections();
-  }
 
-  private renderDetections(): void {
-    const list = document.getElementById('nvrEPList');
-    const cnt = document.getElementById('nvrEPCnt');
-    if (!list) return;
+    // ════════════════════════════════════════════════════════════
+    // Events panel
+    // ════════════════════════════════════════════════════════════
 
-    if (cnt) cnt.textContent = String(this.detections.length);
+    private async loadDetections(): Promise<void> {
+        const list = document.getElementById('nvrEPList');
+        if (list) list.innerHTML = `<div class="nvr-ep-loading">Đang tải...</div>`;
+        try {
+            const params = new URLSearchParams({ limit: '40' });
+            if (this.panelCamFilter) params.set('deviceId', this.panelCamFilter);
 
-    if (!this.detections.length) {
-      list.innerHTML = `<div class="nvr-ep-empty">Chưa có sự kiện nào</div>`;
-      return;
+            let from: string | undefined;
+            let to: string | undefined;
+            if (this.panelDateFilter) {
+                from = new Date(this.panelDateFilter).toISOString();
+                to = new Date(this.panelDateFilter + 'T23:59:59').toISOString();
+                params.set('from', from);
+                params.set('to', to);
+            }
+
+            // Lấy đồng thời cả Detections và Alerts
+            const [dets, alerts] = await Promise.all([
+                stationApi.getDetections(params.toString()),
+                stationApi.getAlerts(undefined, from, to, 40, this.panelCamFilter || undefined)
+            ]);
+
+            // Chuyển Alerts thành định dạng DetectionEvent để hiển thị chung
+            const mappedAlerts: DetectionEvent[] = alerts.map((a: any) => ({
+                id: a.id,
+                cameraId: a.deviceId,
+                cameraName: null,
+                detectionType: a.source === 'camera' ? 'thermal_hotspot' : 'alert',
+                detectedAt: a.triggeredAt,
+                maxTemp: a.value,
+                affectedZone: null,
+                alertId: a.id,
+                metadata: JSON.stringify({ snapshotUrl: a.thumbnailUrl || a.imageUrl, description: a.message })
+            }));
+
+            // Gộp và sắp xếp theo thời gian mới nhất
+            const combined = [...dets, ...mappedAlerts];
+            combined.sort((a, b) => new Date(b.detectedAt).getTime() - new Date(a.detectedAt).getTime());
+
+            this.detections = combined.slice(0, 80);
+        } catch (err) {
+            console.error("Load events error:", err);
+            this.detections = [];
+        }
+        this.renderDetections();
     }
-    list.innerHTML = this.detections.map(e => this.evtCardHtml(e, false)).join('');
-  }
 
-  private evtCardHtml(e: DetectionEvent, isNew: boolean): string {
-    const cfg = EVT_CFG[e.detectionType] ?? { label: e.detectionType, icon: '📷', color: '#64748b' };
-    const meta: EvtMeta = (() => {
-      try { return e.metadata ? JSON.parse(e.metadata) : {}; } catch { return {}; }
-    })();
-    const snap = meta.snapshotUrl ? `${API_BASE_URL}${meta.snapshotUrl}` : '';
-    const time = new Date(e.detectedAt).toLocaleString('vi-VN', {
-      hour: '2-digit', minute: '2-digit', second: '2-digit',
-      day: '2-digit', month: '2-digit',
-    });
-    const camName = e.cameraName ?? 'Camera';
+    private renderDetections(): void {
+        const list = document.getElementById('nvrEPList');
+        const cnt = document.getElementById('nvrEPCnt');
+        if (!list) return;
 
-    const vidUrl = meta.videoUrl ? `${API_BASE_URL}${meta.videoUrl}` : '';
+        if (cnt) cnt.textContent = String(this.detections.length);
 
-    return `
+        if (!this.detections.length) {
+            list.innerHTML = `<div class="nvr-ep-empty">Chưa có sự kiện nào</div>`;
+            return;
+        }
+        list.innerHTML = this.detections.map(e => this.evtCardHtml(e, false)).join('');
+    }
+
+    private evtCardHtml(e: DetectionEvent, isNew: boolean): string {
+        const cfg = EVT_CFG[e.detectionType] ?? { label: e.detectionType, icon: '📷', color: '#64748b' };
+        const meta: EvtMeta = (() => {
+            try { return e.metadata ? JSON.parse(e.metadata) : {}; } catch { return {}; }
+        })();
+        const snap = meta.snapshotUrl ? `${API_BASE_URL}${meta.snapshotUrl}` : '';
+        const time = new Date(e.detectedAt).toLocaleString('vi-VN', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+            day: '2-digit', month: '2-digit',
+        });
+        const camName = e.cameraName ?? 'Camera';
+
+        const vidUrl = meta.videoUrl ? `${API_BASE_URL}${meta.videoUrl}` : '';
+
+        return `
     <div class="nvr-evt${isNew ? ' new' : ''}" data-snap="${snap}" data-video="${vidUrl}" title="${cfg.label} — ${camName}">
       <div class="nvr-evt-thumb">
         ${snap
-        ? `<img src="${snap}" alt="" loading="lazy" onerror="this.parentElement.textContent='${cfg.icon}'">`
-        : cfg.icon}
+                ? `<img src="${snap}" alt="" loading="lazy" onerror="this.parentElement.textContent='${cfg.icon}'">`
+                : cfg.icon}
         ${vidUrl ? `<div style="position:absolute;bottom:2px;right:2px;background:rgba(0,0,0,0.6);border-radius:2px;padding:1px 3px;font-size:8px;">📹</div>` : ''}
       </div>
       <div class="nvr-evt-body">
@@ -571,317 +564,313 @@ export class RealtimeMonitorPage {
         <span class="nvr-evt-time">${time}</span>
       </div>
     </div>`;
-  }
-
-  private prependDetection(evt: DetectionEvent): void {
-    if (this.panelCamFilter && evt.cameraId !== this.panelCamFilter) return;
-    if (this.panelTypeFilter && evt.detectionType !== this.panelTypeFilter) return;
-
-    this.detections.unshift(evt);
-    const cnt = document.getElementById('nvrEPCnt');
-    const list = document.getElementById('nvrEPList');
-    if (!list) return;
-
-    if (cnt) cnt.textContent = String(this.detections.length);
-    list.querySelector('.nvr-ep-empty')?.remove();
-
-    const div = document.createElement('div');
-    div.innerHTML = this.evtCardHtml(evt, true);
-    const card = div.firstElementChild as HTMLElement;
-
-    // Gán dataset cho thẻ vừa tạo để lightbox có thể đọc
-    try {
-      const m: any = JSON.parse(evt.metadata ?? '{}');
-      if (m.snapshotUrl) card.dataset.snap = `${API_BASE_URL}${m.snapshotUrl}`;
-      if (m.videoUrl) card.dataset.video = `${API_BASE_URL}${m.videoUrl}`;
-    } catch { }
-
-    list.insertBefore(card, list.firstChild);
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // Expand / collapse camera
-  // ════════════════════════════════════════════════════════════
-
-  private toggleExpand(cell: HTMLElement, camId: string, camName: string): void {
-    if (this.expandedId === camId) {
-      this.collapseExpanded();
-    } else {
-      if (this.expandedId) this.collapseExpanded();
-
-      this.expandedId = camId;
-      cell.classList.add('expanded');
-      document.getElementById('nvrGrid')
-        ?.querySelectorAll<HTMLElement>('.nvr-cell:not(.expanded)')
-        .forEach(c => { c.style.display = 'none'; });
-
-      // Switch to main (high-res) stream for fullscreen
-      let mainId = cell.dataset.main ?? cell.dataset.go2rtc ?? '';
-      const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
-      if (isTauri && mainId.includes('camera_152') && !mainId.endsWith('_mjpeg')) {
-        mainId += '_mjpeg';
-      }
-
-      const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
-      if (iframe && mainId) {
-        iframe.src = `${GO2RTC_URL}stream.html?src=${encodeURIComponent(mainId)}&mode=webrtc,mse,mjpeg&controls=0`;
-      }
-
-      // Toolbar: show back + camera name
-      document.getElementById('nvrBackBtn')?.classList.add('visible');
-      const fsCam = document.getElementById('nvrFsCam');
-      if (fsCam) { fsCam.textContent = camName; fsCam.style.display = 'block'; }
-
-      // Panel: filter to this camera
-      this.setPanelCamFilter(camId, camName);
-    }
-  }
-
-  private collapseExpanded(): void {
-    const grid = document.getElementById('nvrGrid');
-    const expanded = grid?.querySelector<HTMLElement>('.nvr-cell.expanded');
-
-    // Switch back to sub-stream
-    if (expanded) {
-      const camId = expanded.dataset.camId ?? '';
-      let subId = expanded.dataset.sub ?? expanded.dataset.go2rtc ?? '';
-      const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
-      if (isTauri && subId.includes('camera_152') && !subId.endsWith('_mjpeg')) {
-        subId += '_mjpeg';
-      }
-
-      const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
-      if (iframe && subId) {
-        iframe.src = `${GO2RTC_URL}stream.html?src=${encodeURIComponent(subId)}&mode=webrtc,mse,mjpeg&controls=0`;
-      }
-      expanded.classList.remove('expanded');
     }
 
-    grid?.querySelectorAll<HTMLElement>('.nvr-cell').forEach(c => { c.style.display = ''; });
-    this.expandedId = null;
+    private prependDetection(evt: DetectionEvent): void {
+        if (this.panelCamFilter && evt.cameraId !== this.panelCamFilter) return;
+        if (this.panelTypeFilter && evt.detectionType !== this.panelTypeFilter) return;
 
-    // Toolbar: hide back
-    document.getElementById('nvrBackBtn')?.classList.remove('visible');
-    const fsCam = document.getElementById('nvrFsCam');
-    if (fsCam) { fsCam.textContent = ''; fsCam.style.display = 'none'; }
+        this.detections.unshift(evt);
+        const cnt = document.getElementById('nvrEPCnt');
+        const list = document.getElementById('nvrEPList');
+        if (!list) return;
 
-    // Panel: show all cameras
-    this.setPanelCamFilter('', '');
-  }
+        if (cnt) cnt.textContent = String(this.detections.length);
+        list.querySelector('.nvr-ep-empty')?.remove();
 
-  private setPanelCamFilter(camId: string, camName: string): void {
-    this.panelCamFilter = camId;
-    const title = document.getElementById('nvrEPTitle');
-    if (title) title.textContent = camId ? camName : 'SỰ KIỆN CAM';
-    this.loadDetections();
-  }
+        const div = document.createElement('div');
+        div.innerHTML = this.evtCardHtml(evt, true);
+        const card = div.firstElementChild as HTMLElement;
 
-  // ════════════════════════════════════════════════════════════
-  // Event bindings
-  // ════════════════════════════════════════════════════════════
+        // Gán dataset cho thẻ vừa tạo để lightbox có thể đọc
+        try {
+            const m: any = JSON.parse(evt.metadata ?? '{}');
+            if (m.snapshotUrl) card.dataset.snap = `${API_BASE_URL}${m.snapshotUrl}`;
+            if (m.videoUrl) card.dataset.video = `${API_BASE_URL}${m.videoUrl}`;
+        } catch { }
 
-  private bindEvents(): void {
-    // Layout switcher
-    document.querySelectorAll<HTMLElement>('.nvr-lb').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const layout = btn.dataset.layout as Layout | undefined;
-        if (!layout || layout === this.currentLayout) return;
-        document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
+        list.insertBefore(card, list.firstChild);
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // Expand / collapse camera
+    // ════════════════════════════════════════════════════════════
+
+    private toggleExpand(cell: HTMLElement, camId: string, camName: string): void {
+        if (this.expandedId === camId) {
+            this.collapseExpanded();
+        } else {
+            if (this.expandedId) this.collapseExpanded();
+
+            this.expandedId = camId;
+            cell.classList.add('expanded');
+            document.getElementById('nvrGrid')
+                ?.querySelectorAll<HTMLElement>('.nvr-cell:not(.expanded)')
+                .forEach(c => { c.style.display = 'none'; });
+
+            // Switch to main (high-res) stream for fullscreen
+            let mainId = cell.dataset.main ?? cell.dataset.go2rtc ?? '';
+            // Ép sử dụng camera-stream.html để có Overlay của AI Relay
+            const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
+            if (iframe && mainId) {
+                iframe.src = `/camera-stream.html?src=${encodeURIComponent(mainId)}&mode=mse,webrtc&go2rtc=${encodeURIComponent(GO2RTC_URL)}`;
+            }
+
+            // Toolbar: show back + camera name
+            document.getElementById('nvrBackBtn')?.classList.add('visible');
+            const fsCam = document.getElementById('nvrFsCam');
+            if (fsCam) { fsCam.textContent = camName; fsCam.style.display = 'block'; }
+
+            // Panel: filter to this camera
+            this.setPanelCamFilter(camId, camName);
+        }
+    }
+
+    private collapseExpanded(): void {
+        const grid = document.getElementById('nvrGrid');
+        const expanded = grid?.querySelector<HTMLElement>('.nvr-cell.expanded');
+
+        // Switch back to sub-stream
+        if (expanded) {
+            const camId = expanded.dataset.camId ?? '';
+            let subId = expanded.dataset.sub ?? expanded.dataset.go2rtc ?? '';
+            const isTauri = (window as any).__TAURI_INTERNALS__ || (window as any).__TAURI__;
+            if (isTauri && subId.includes('camera_152') && !subId.endsWith('_mjpeg')) {
+                subId += '_mjpeg';
+            }
+
+            const iframe = document.getElementById(`nvr-frame-${camId}`) as HTMLIFrameElement | null;
+            if (iframe && subId) {
+                iframe.src = `${GO2RTC_URL}stream.html?src=${encodeURIComponent(subId)}&mode=webrtc,mse,mjpeg&controls=0`;
+            }
+            expanded.classList.remove('expanded');
+        }
+
+        grid?.querySelectorAll<HTMLElement>('.nvr-cell').forEach(c => { c.style.display = ''; });
+        this.expandedId = null;
+
+        // Toolbar: hide back
+        document.getElementById('nvrBackBtn')?.classList.remove('visible');
+        const fsCam = document.getElementById('nvrFsCam');
+        if (fsCam) { fsCam.textContent = ''; fsCam.style.display = 'none'; }
+
+        // Panel: show all cameras
+        this.setPanelCamFilter('', '');
+    }
+
+    private setPanelCamFilter(camId: string, camName: string): void {
+        this.panelCamFilter = camId;
+        const title = document.getElementById('nvrEPTitle');
+        if (title) title.textContent = camId ? camName : 'SỰ KIỆN CAM';
+        this.loadDetections();
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // Event bindings
+    // ════════════════════════════════════════════════════════════
+
+    private bindEvents(): void {
+        // Layout switcher
+        document.querySelectorAll<HTMLElement>('.nvr-lb').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const layout = btn.dataset.layout as Layout | undefined;
+                if (!layout || layout === this.currentLayout) return;
+                document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.currentLayout = layout;
+                document.getElementById('nvrGrid')!.className = `nvr-grid ${layout}`;
+                this.collapseExpanded();
+                this.renderGrid();
+            });
+        });
+
+        // Camera select → 1×1 for that cam
+        document.getElementById('nvrSel')?.addEventListener('change', (e) => {
+            const camId = (e.target as HTMLSelectElement).value;
+            if (camId) {
+                const cam = this.cameras.find(c => c.id === camId) ?? null;
+                this.setLayout('l1');
+                this.renderGrid(cam ? [cam] : [null]);
+            } else {
+                this.setLayout('l4');
+                this.renderGrid();
+            }
+        });
+
+        // Back button
+        document.getElementById('nvrBackBtn')?.addEventListener('click', () => this.collapseExpanded());
+
+        // Grid delegation
+        const grid = document.getElementById('nvrGrid');
+        if (grid) {
+            // Double-click cell → expand
+            grid.addEventListener('dblclick', (e) => {
+                const cell = (e.target as HTMLElement).closest<HTMLElement>('.nvr-cell');
+                if (!cell?.dataset.camId) return;
+                this.toggleExpand(cell, cell.dataset.camId, cell.dataset.camName ?? '');
+            });
+
+            grid.addEventListener('click', (e) => {
+                // Button: fullscreen
+                const btnFull = (e.target as HTMLElement).closest<HTMLElement>('.btn-full');
+                if (btnFull) {
+                    const cell = btnFull.closest<HTMLElement>('.nvr-cell')!;
+                    this.toggleExpand(cell, btnFull.dataset.id!, btnFull.dataset.name ?? '');
+                    return;
+                }
+                // Button: snapshot
+                const btnSnap = (e.target as HTMLElement).closest<HTMLElement>('.btn-snap');
+                if (btnSnap && btnSnap.dataset.src) {
+                    const url = `${GO2RTC_URL}/api/frame.jpeg?src=${encodeURIComponent(btnSnap.dataset.src)}`;
+                    Object.assign(document.createElement('a'), { href: url, download: `snap_${Date.now()}.jpg`, target: '_blank' }).click();
+                }
+            });
+        }
+
+        // Panel toggle (collapse/expand)
+        document.getElementById('nvrEPTab')?.addEventListener('click', () => {
+            document.getElementById('nvrEP')?.classList.toggle('collapsed');
+        });
+
+        // Panel filters
+        document.getElementById('nvrEPType')?.addEventListener('change', (e) => {
+            this.panelTypeFilter = (e.target as HTMLSelectElement).value;
+            this.loadDetections();
+        });
+        document.getElementById('nvrEPDate')?.addEventListener('change', (e) => {
+            this.panelDateFilter = (e.target as HTMLInputElement).value;
+            this.loadDetections();
+        });
+        document.getElementById('nvrEPRefresh')?.addEventListener('click', () => {
+            (document.getElementById('nvrEPDate') as HTMLInputElement).value = '';
+            this.panelDateFilter = '';
+            this.panelTypeFilter = '';
+            (document.getElementById('nvrEPType') as HTMLSelectElement).value = '';
+            this.loadDetections();
+        });
+
+        // Events list: click → lightbox
+        document.getElementById('nvrEPList')?.addEventListener('click', (e) => {
+            const card = (e.target as HTMLElement).closest<HTMLElement>('.nvr-evt');
+            if (!card) return;
+            const snap = card.dataset.snap;
+            const video = card.dataset.video;
+            if (video) this.openLightbox(video, true);
+            else if (snap) this.openLightbox(snap, false);
+        });
+
+        // Lightbox
+        document.getElementById('nvrLBClose')?.addEventListener('click', () => this.closeLightbox());
+        document.getElementById('nvrLB')?.addEventListener('click', (e) => {
+            if ((e.target as HTMLElement).id === 'nvrLB') this.closeLightbox();
+        });
+
+        document.addEventListener('keydown', this._onKey);
+    }
+
+    private openLightbox(url: string, isVideo: boolean): void {
+        if (!url) return;
+        const content = document.getElementById('nvrLBContent')!;
+        if (isVideo) {
+            content.innerHTML = `<video src="${url}" controls autoplay loop style="max-height:85vh"></video>`;
+        } else {
+            content.innerHTML = `<img src="${url}" alt="snapshot" style="max-height:85vh">`;
+        }
+        document.getElementById('nvrLB')!.classList.add('open');
+    }
+
+    private closeLightbox(): void {
+        const content = document.getElementById('nvrLBContent');
+        if (content) content.innerHTML = ''; // Stop video
+        document.getElementById('nvrLB')!.classList.remove('open');
+    }
+
+    private _onKey = (e: KeyboardEvent): void => {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('nvrLB')?.classList.contains('open')) { this.closeLightbox(); return; }
+        if (this.expandedId) this.collapseExpanded();
+    };
+
+    private setLayout(layout: Layout): void {
         this.currentLayout = layout;
-        document.getElementById('nvrGrid')!.className = `nvr-grid ${layout}`;
-        this.collapseExpanded();
-        this.renderGrid();
-      });
-    });
-
-    // Camera select → 1×1 for that cam
-    document.getElementById('nvrSel')?.addEventListener('change', (e) => {
-      const camId = (e.target as HTMLSelectElement).value;
-      if (camId) {
-        const cam = this.cameras.find(c => c.id === camId) ?? null;
-        this.setLayout('l1');
-        this.renderGrid(cam ? [cam] : [null]);
-      } else {
-        this.setLayout('l4');
-        this.renderGrid();
-      }
-    });
-
-    // Back button
-    document.getElementById('nvrBackBtn')?.addEventListener('click', () => this.collapseExpanded());
-
-    // Grid delegation
-    const grid = document.getElementById('nvrGrid');
-    if (grid) {
-      // Double-click cell → expand
-      grid.addEventListener('dblclick', (e) => {
-        const cell = (e.target as HTMLElement).closest<HTMLElement>('.nvr-cell');
-        if (!cell?.dataset.camId) return;
-        this.toggleExpand(cell, cell.dataset.camId, cell.dataset.camName ?? '');
-      });
-
-      grid.addEventListener('click', (e) => {
-        // Button: fullscreen
-        const btnFull = (e.target as HTMLElement).closest<HTMLElement>('.btn-full');
-        if (btnFull) {
-          const cell = btnFull.closest<HTMLElement>('.nvr-cell')!;
-          this.toggleExpand(cell, btnFull.dataset.id!, btnFull.dataset.name ?? '');
-          return;
-        }
-        // Button: snapshot
-        const btnSnap = (e.target as HTMLElement).closest<HTMLElement>('.btn-snap');
-        if (btnSnap && btnSnap.dataset.src) {
-          const url = `${GO2RTC_URL}/api/frame.jpeg?src=${encodeURIComponent(btnSnap.dataset.src)}`;
-          Object.assign(document.createElement('a'), { href: url, download: `snap_${Date.now()}.jpg`, target: '_blank' }).click();
-        }
-      });
+        document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
+        document.querySelector(`[data-layout="${layout}"]`)?.classList.add('active');
+        const g = document.getElementById('nvrGrid');
+        if (g) g.className = `nvr-grid ${layout}`;
     }
 
-    // Panel toggle (collapse/expand)
-    document.getElementById('nvrEPTab')?.addEventListener('click', () => {
-      document.getElementById('nvrEP')?.classList.toggle('collapsed');
-    });
+    // ════════════════════════════════════════════════════════════
+    // SignalR
+    // ════════════════════════════════════════════════════════════
 
-    // Panel filters
-    document.getElementById('nvrEPType')?.addEventListener('change', (e) => {
-      this.panelTypeFilter = (e.target as HTMLSelectElement).value;
-      this.loadDetections();
-    });
-    document.getElementById('nvrEPDate')?.addEventListener('change', (e) => {
-      this.panelDateFilter = (e.target as HTMLInputElement).value;
-      this.loadDetections();
-    });
-    document.getElementById('nvrEPRefresh')?.addEventListener('click', () => {
-      (document.getElementById('nvrEPDate') as HTMLInputElement).value = '';
-      this.panelDateFilter = '';
-      this.panelTypeFilter = '';
-      (document.getElementById('nvrEPType') as HTMLSelectElement).value = '';
-      this.loadDetections();
-    });
+    private connectSignalR(): void {
+        const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
+        if (!token) return;
 
-    // Events list: click → lightbox
-    document.getElementById('nvrEPList')?.addEventListener('click', (e) => {
-      const card = (e.target as HTMLElement).closest<HTMLElement>('.nvr-evt');
-      if (!card) return;
-      const snap = card.dataset.snap;
-      const video = card.dataset.video;
-      if (video) this.openLightbox(video, true);
-      else if (snap) this.openLightbox(snap, false);
-    });
+        this.hubConnection = new signalR.HubConnectionBuilder()
+            .withUrl(`${API_BASE_URL}/ws/realtime`, { accessTokenFactory: () => token! })
+            .withAutomaticReconnect()
+            .build();
 
-    // Lightbox
-    document.getElementById('nvrLBClose')?.addEventListener('click', () => this.closeLightbox());
-    document.getElementById('nvrLB')?.addEventListener('click', (e) => {
-      if ((e.target as HTMLElement).id === 'nvrLB') this.closeLightbox();
-    });
+        this.hubConnection.on('DeviceStatus', (data: { deviceId: string; status: string }) => {
+            const cam = this.cameras.find(c => c.id === data.deviceId);
+            if (cam) (cam as any).status = data.status;
+            const dot = document.getElementById(`nvr-dot-${data.deviceId}`);
+            if (dot) dot.className = `nvr-dot ${data.status}`;
+            const online = this.cameras.filter(c => (c.status as string) === 'online').length;
+            const el = document.getElementById('nvrOnline');
+            if (el) { el.textContent = `${online}/${this.cameras.length}`; el.style.color = online > 0 ? '#10b981' : '#ef4444'; }
+        });
 
-    document.addEventListener('keydown', this._onKey);
-  }
+        // Live sensor values + dots
+        this.hubConnection.on('SensorUpdate', (readings: any[]) => {
+            // Cache coordinates để polling cũng dùng được
+            readings.forEach((r: any) => {
+                if (r.pointId && r.tx != null) {
+                    this._coordCache[r.pointId] = { tx: r.tx, ty: r.ty, ox: r.ox, oy: r.oy };
+                }
+            });
+            this.drawPoints(readings);
+        });
 
-  private openLightbox(url: string, isVideo: boolean): void {
-    if (!url) return;
-    const content = document.getElementById('nvrLBContent')!;
-    if (isVideo) {
-      content.innerHTML = `<video src="${url}" controls autoplay loop style="max-height:85vh"></video>`;
-    } else {
-      content.innerHTML = `<img src="${url}" alt="snapshot" style="max-height:85vh">`;
+        // New camera event -> prepend to panel
+        this.hubConnection.on('CameraEvent', (evt: DetectionEvent) => {
+            this.prependDetection(evt);
+        });
+
+        // Integrated Alert System (Pulsing + Toast)
+        this.hubConnection.on('AlertNew', (alert: any) => {
+            // 1. Show Toast
+            this.showAlarmToast(alert);
+
+            // 2. Pulse camera cell
+            if (alert.deviceId && alert.level === 'alarm') {
+                const cell = document.querySelector(`.nvr-cell[data-cam-id="${alert.deviceId}"]`);
+                if (cell) cell.classList.add('alarm-triggered');
+            }
+
+            // 3. Refresh sidebar detections to get the alert context
+            this.loadDetections();
+        });
+
+        this.hubConnection.on('AlertUpdated', (data: any) => {
+            // If alert closed, remove pulsing
+            if (data.status === 'closed' && data.deviceId) {
+                const cells = document.querySelectorAll(`.nvr-cell[data-cam-id="${data.deviceId}"]`);
+                cells.forEach(c => c.classList.remove('alarm-triggered'));
+            }
+        });
+
+        this.hubConnection.start().catch(() => { });
     }
-    document.getElementById('nvrLB')!.classList.add('open');
-  }
 
-  private closeLightbox(): void {
-    const content = document.getElementById('nvrLBContent');
-    if (content) content.innerHTML = ''; // Stop video
-    document.getElementById('nvrLB')!.classList.remove('open');
-  }
+    private showAlarmToast(alert: any): void {
+        const container = document.getElementById('nvrToastContainer');
+        if (!container) return;
 
-  private _onKey = (e: KeyboardEvent): void => {
-    if (e.key !== 'Escape') return;
-    if (document.getElementById('nvrLB')?.classList.contains('open')) { this.closeLightbox(); return; }
-    if (this.expandedId) this.collapseExpanded();
-  };
-
-  private setLayout(layout: Layout): void {
-    this.currentLayout = layout;
-    document.querySelectorAll('.nvr-lb').forEach(b => b.classList.remove('active'));
-    document.querySelector(`[data-layout="${layout}"]`)?.classList.add('active');
-    const g = document.getElementById('nvrGrid');
-    if (g) g.className = `nvr-grid ${layout}`;
-  }
-
-  // ════════════════════════════════════════════════════════════
-  // SignalR
-  // ════════════════════════════════════════════════════════════
-
-  private connectSignalR(): void {
-    const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
-    if (!token) return;
-
-    this.hubConnection = new signalR.HubConnectionBuilder()
-      .withUrl(`${API_BASE_URL}/ws/realtime`, { accessTokenFactory: () => token! })
-      .withAutomaticReconnect()
-      .build();
-
-    this.hubConnection.on('DeviceStatus', (data: { deviceId: string; status: string }) => {
-      const cam = this.cameras.find(c => c.id === data.deviceId);
-      if (cam) (cam as any).status = data.status;
-      const dot = document.getElementById(`nvr-dot-${data.deviceId}`);
-      if (dot) dot.className = `nvr-dot ${data.status}`;
-      const online = this.cameras.filter(c => (c.status as string) === 'online').length;
-      const el = document.getElementById('nvrOnline');
-      if (el) { el.textContent = `${online}/${this.cameras.length}`; el.style.color = online > 0 ? '#10b981' : '#ef4444'; }
-    });
-
-    // Live sensor values + dots
-    this.hubConnection.on('SensorUpdate', (readings: any[]) => {
-      // Cache coordinates để polling cũng dùng được
-      readings.forEach((r: any) => {
-        if (r.pointId && r.tx != null) {
-          this._coordCache[r.pointId] = { tx: r.tx, ty: r.ty, ox: r.ox, oy: r.oy };
-        }
-      });
-      this.drawPoints(readings);
-    });
-
-    // New camera event -> prepend to panel
-    this.hubConnection.on('CameraEvent', (evt: DetectionEvent) => {
-      this.prependDetection(evt);
-    });
-
-    // Integrated Alert System (Pulsing + Toast)
-    this.hubConnection.on('AlertNew', (alert: any) => {
-      // 1. Show Toast
-      this.showAlarmToast(alert);
-
-      // 2. Pulse camera cell
-      if (alert.deviceId && alert.level === 'alarm') {
-        const cell = document.querySelector(`.nvr-cell[data-cam-id="${alert.deviceId}"]`);
-        if (cell) cell.classList.add('alarm-triggered');
-      }
-
-      // 3. Refresh sidebar detections to get the alert context
-      this.loadDetections();
-    });
-
-    this.hubConnection.on('AlertUpdated', (data: any) => {
-      // If alert closed, remove pulsing
-      if (data.status === 'closed' && data.deviceId) {
-        const cells = document.querySelectorAll(`.nvr-cell[data-cam-id="${data.deviceId}"]`);
-        cells.forEach(c => c.classList.remove('alarm-triggered'));
-      }
-    });
-
-    this.hubConnection.start().catch(() => { });
-  }
-
-  private showAlarmToast(alert: any): void {
-    const container = document.getElementById('nvrToastContainer');
-    if (!container) return;
-
-    const toast = document.createElement('div');
-    toast.className = 'nvr-alert-toast';
-    toast.innerHTML = `
+        const toast = document.createElement('div');
+        toast.className = 'nvr-alert-toast';
+        toast.innerHTML = `
       <div style="font-size:1.5rem">🚨</div>
       <div style="flex:1">
         <div style="font-size:0.7rem;opacity:0.8">${alert.level.toUpperCase()}</div>
@@ -890,105 +879,105 @@ export class RealtimeMonitorPage {
       <div style="font-size:0.8rem">✕</div>
     `;
 
-    toast.onclick = () => {
-      toast.remove();
-      // If there's an alert ID, we could navigate, but in RTM we just acknowledge locally
-    };
+        toast.onclick = () => {
+            toast.remove();
+            // If there's an alert ID, we could navigate, but in RTM we just acknowledge locally
+        };
 
-    container.appendChild(toast);
+        container.appendChild(toast);
 
-    // Play sound if possible (Browser policy might block initial)
-    try {
-      const audio = new Audio('/assets/sounds/alarm_beep.mp3');
-      audio.play();
-    } catch { }
+        // Play sound if possible (Browser policy might block initial)
+        try {
+            const audio = new Audio('/assets/sounds/alarm_beep.mp3');
+            audio.play();
+        } catch { }
 
-    setTimeout(() => toast.remove(), 8000);
-  }
-
-  private drawPoints(readings: any[]): void {
-    const camGroups: Record<string, any[]> = {};
-    readings.forEach(r => {
-      const did = r.deviceId as string;
-      if (!camGroups[did]) camGroups[did] = [];
-      camGroups[did].push(r);
-    });
-
-    // Canvas overlay đã được thay bằng OpenCV burn-in trong relay
-    void camGroups;
-  }
-
-  private _pollInterval?: ReturnType<typeof setInterval>;
-
-  private startPointPolling(): void {
-    const poll = async () => {
-      try {
-        const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
-        if (!token) return;
-        const res = await fetch(`${API_BASE_URL}/api/v1/points`, {
-          headers: { Authorization: `Bearer ${token}` }
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length) {
-            const enriched = data.map((r: any) => {
-              const pid = r.PointId ?? r.pointId ?? '';
-              const cached = this._coordCache[pid] as { tx?: number; ty?: number; ox?: number; oy?: number } | undefined ?? {};
-              // Ưu tiên cache từ SignalR, fallback sang API
-              const tx = cached.tx ?? (r.X ? (r.X / 100) : undefined);
-              const ty = cached.ty ?? (r.Y ? (r.Y / 100) : undefined);
-              const ox = cached.ox ?? tx;
-              const oy = cached.oy ?? ty;
-              return {
-                deviceId: r.DeviceId ?? r.deviceId,
-                pointId: pid,
-                value: r.Value ?? r.value ?? 0,
-                tx, ty, ox, oy,
-              };
-            });
-            this.drawPoints(enriched);
-          }
-        }
-      } catch { /* ignore */ }
-    };
-    poll();
-    this._pollInterval = setInterval(poll, 3000);
-  }
-
-  /**
-   * Đồng bộ trạng thái viền nháy cho các camera có cảnh báo đang mở
-   */
-  private async syncAlarmStates(): Promise<void> {
-    try {
-      // Lấy danh sách alert từ service
-      const alerts = await stationApi.getAlerts();
-      const openAlerts = alerts.filter(a => a.status === 'open' && a.level === 'alarm');
-      openAlerts.forEach(a => {
-        if (a.deviceId) {
-          const cell = document.querySelector(`.nvr-cell[data-cam-id="${a.deviceId}"]`);
-          if (cell) cell.classList.add('alarm-triggered');
-        }
-      });
-    } catch (err) {
-      console.warn('[SyncAlarmStates] Error:', err);
+        setTimeout(() => toast.remove(), 8000);
     }
-  }
 
-  // ════════════════════════════════════════════════════════════
-  // Clock
-  // ════════════════════════════════════════════════════════════
+    private drawPoints(readings: any[]): void {
+        const camGroups: Record<string, any[]> = {};
+        readings.forEach(r => {
+            const did = r.deviceId as string;
+            if (!camGroups[did]) camGroups[did] = [];
+            camGroups[did].push(r);
+        });
 
-  private startClock(): void {
-    const tick = (): void => {
-      const now = new Date().toLocaleTimeString('vi-VN', { hour12: false });
-      const clockEl = document.getElementById('nvrClock');
-      if (clockEl) clockEl.textContent = now;
-      this.cameras.forEach(c => {
-        const el = document.getElementById(`nvr-ts-${c.id}`);
-        if (el) el.textContent = now;
-      });
-    };
-    tick();
-    this.clockInterval = setInterval(tick, 1000);
-  }
+        // Canvas overlay đã được thay bằng OpenCV burn-in trong relay
+        void camGroups;
+    }
+
+    private _pollInterval?: ReturnType<typeof setInterval>;
+
+    private startPointPolling(): void {
+        const poll = async () => {
+            try {
+                const token = localStorage.getItem('station_token') ?? localStorage.getItem('station_jwt');
+                if (!token) return;
+                const res = await fetch(`${API_BASE_URL}/api/v1/points`, {
+                    headers: { Authorization: `Bearer ${token}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (Array.isArray(data) && data.length) {
+                        const enriched = data.map((r: any) => {
+                            const pid = r.PointId ?? r.pointId ?? '';
+                            const cached = this._coordCache[pid] as { tx?: number; ty?: number; ox?: number; oy?: number } | undefined ?? {};
+                            // Ưu tiên cache từ SignalR, fallback sang API
+                            const tx = cached.tx ?? (r.X ? (r.X / 100) : undefined);
+                            const ty = cached.ty ?? (r.Y ? (r.Y / 100) : undefined);
+                            const ox = cached.ox ?? tx;
+                            const oy = cached.oy ?? ty;
+                            return {
+                                deviceId: r.DeviceId ?? r.deviceId,
+                                pointId: pid,
+                                value: r.Value ?? r.value ?? 0,
+                                tx, ty, ox, oy,
+                            };
+                        });
+                        this.drawPoints(enriched);
+                    }
+                }
+            } catch { /* ignore */ }
+        };
+        poll();
+        this._pollInterval = setInterval(poll, 3000);
+    }
+
+    /**
+     * Đồng bộ trạng thái viền nháy cho các camera có cảnh báo đang mở
+     */
+    private async syncAlarmStates(): Promise<void> {
+        try {
+            // Lấy danh sách alert từ service
+            const alerts = await stationApi.getAlerts();
+            const openAlerts = alerts.filter(a => a.status === 'open' && a.level === 'alarm');
+            openAlerts.forEach(a => {
+                if (a.deviceId) {
+                    const cell = document.querySelector(`.nvr-cell[data-cam-id="${a.deviceId}"]`);
+                    if (cell) cell.classList.add('alarm-triggered');
+                }
+            });
+        } catch (err) {
+            console.warn('[SyncAlarmStates] Error:', err);
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════
+    // Clock
+    // ════════════════════════════════════════════════════════════
+
+    private startClock(): void {
+        const tick = (): void => {
+            const now = new Date().toLocaleTimeString('vi-VN', { hour12: false });
+            const clockEl = document.getElementById('nvrClock');
+            if (clockEl) clockEl.textContent = now;
+            this.cameras.forEach(c => {
+                const el = document.getElementById(`nvr-ts-${c.id}`);
+                if (el) el.textContent = now;
+            });
+        };
+        tick();
+        this.clockInterval = setInterval(tick, 1000);
+    }
 }

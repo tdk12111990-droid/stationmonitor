@@ -682,6 +682,7 @@ class StreamRelay:
     def _draw_points(self, frame, blink):
         global ALARM_RULES, LIVE_TEMPS, POINT_COORDS
         h, w = frame.shape[:2]
+
         for pid, coords in POINT_COORDS.items():
             kx, ky = (coords.get('tx'), coords.get('ty')) if self.is_thermal else (coords.get('ox'), coords.get('oy'))
             if kx is None or ky is None: continue
@@ -691,32 +692,41 @@ class StreamRelay:
             rule = ALARM_RULES.get(rule_id, {})
             pre, alarm = rule.get("pre_alarm"), rule.get("alarm")
 
-            color = (0, 255, 0)  # Green = bình thường
+            # Màu sắc và cấu hình vẽ
+            if self.is_thermal:
+                font_scale = 0.25 # Tăng nhẹ theo yêu cầu
+                size = 2
+                thickness = 1
+                color = (0, 255, 0) # Chuyển về Xanh lá
+            else:
+                font_scale = 0.4
+                size = 8
+                thickness = 1
+                color = (0, 255, 0) # Green cho Optical
+
+            # Logic đổi màu theo ngưỡng cảnh báo (Dòng này phải nằm SAU để ghi đè màu mặc định)
             if alarm and temp >= alarm: color = (0, 0, 255) if blink else (255, 255, 255)
             elif pre and temp >= pre: color = (0, 255, 255)
 
-            size = 6 if self.is_thermal else 10
             cv2.line(frame, (x - size, y), (x + size, y), color, 1)
             cv2.line(frame, (x, y - size), (x, y + size), color, 1)
 
-            # Vẽ text (ID và Nhiệt độ) - PHIÊN BẢN THEO RULE (Xanh/Vàng/Đỏ)
+            # Vẽ text (ID và Nhiệt độ)
             font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.45 if self.is_thermal else 0.55
-            thickness = 1
             line1 = f"P{pid}"
             line2 = f"{temp:.1f}C" if temp > 0 else "---"
             
-            tx, ty = x + 8, y + 8
+            # Tọa độ chữ (sát điểm đo)
+            tx, ty = x + size + 1, y + 1
             
-            # 1. Vẽ viền đen (Outline) để dễ nhìn trên mọi nền
-            cv2.putText(frame, line1, (tx, ty), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
-            
-            (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
-            cv2.putText(frame, line2, (tx, ty + th1 + 5), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+            # 1. Vẽ viền đen (Outline) mỏng nhất
+            cv2.putText(frame, line1, (tx, ty), font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
+            (_, h1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
+            cv2.putText(frame, line2, (tx, ty + h1 + 2), font, font_scale, (0, 0, 0), thickness + 1, cv2.LINE_AA)
 
-            # 2. Vẽ chữ chính (ID và Nhiệt độ)
+            # 2. Vẽ chữ chính
             cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
-            cv2.putText(frame, line2, (tx, ty + th1 + 5), font, font_scale, color, thickness, cv2.LINE_AA)
+            cv2.putText(frame, line2, (tx, ty + h1 + 2), font, font_scale, color, thickness, cv2.LINE_AA)
 
     def _run(self):
         while self.running:
