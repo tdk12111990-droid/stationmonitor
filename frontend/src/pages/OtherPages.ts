@@ -313,32 +313,35 @@ export class MultisitePage {
   private async loadStations(): Promise<void> {
     try {
       let dbStations = await stationApi.getStations();
-
-      /* 
-      // Định nghĩa 3 trạm chuẩn
-      const required = [
-        { name: '110kV TÂN AN', lat: 10.54, lng: 106.41, alerts: 0, temp: 36 },
-        { name: '110kV LONG AN', lat: 10.63, lng: 106.50, alerts: 3, temp: 42 },
-        { name: '110kV TÂN TRỤ', lat: 10.51, lng: 106.52, alerts: 0, temp: 34 }
+      
+      // Đảm bảo luôn có các trạm hiển thị trên UI
+      const virtualStations = [
+        { id: 'virtual-la-1', name: '110kV LONG AN (Trạm 1)', location: JSON.stringify({ lat: 10.63, lng: 106.50, alerts: 3, temp: 42, pd: 0 }), code: 'LA001', status: 'online' },
+        { id: 'virtual-la-2', name: '110kV LONG AN (Trạm 2)', location: JSON.stringify({ lat: 10.68, lng: 106.55, alerts: 0, temp: 32, pd: 0 }), code: 'LA002', status: 'online' },
+        { id: 'virtual-tt',  name: '110kV TÂN TRỤ', location: JSON.stringify({ lat: 10.51, lng: 106.52, alerts: 0, temp: 34, pd: 0 }), code: 'TT001', status: 'online' }
       ];
 
-      let changed = false;
-      for (const req of required) {
-        if (!dbStations.some(s => s.name === req.name)) {
-          console.log(`Missing ${req.name}, seeding...`);
-          await stationApi.createStation({ 
-            name: req.name, 
-            location: JSON.stringify({ lat: req.lat, lng: req.lng, alerts: req.alerts, temp: req.temp, pd: 0 }),
-            code: 'LA-' + Math.random().toString(36).substr(2, 5)
-          });
-          changed = true;
+      // Nếu trong DB chưa có các trạm này, ta add tạm vào list để hiện UI
+      virtualStations.forEach(vs => {
+        if (!dbStations.some(s => s.name === vs.name)) {
+          dbStations.push(vs as any);
         }
-      }
+      });
 
-      if (changed) dbStations = await stationApi.getStations();
-      */
+      // Ghi đè tọa độ từ localStorage nếu người dùng đã từng kéo thả
+      this.stations = dbStations.map(s => {
+        const savedLoc = localStorage.getItem(`station_pos_${s.id}`);
+        if (savedLoc) {
+          try {
+            const pos = JSON.parse(savedLoc);
+            const meta = this.parseLoc(s.location);
+            meta.lat = pos.lat; meta.lng = pos.lng;
+            return { ...s, location: JSON.stringify(meta) };
+          } catch { return s; }
+        }
+        return s;
+      });
 
-      this.stations = dbStations;
       this.renderUI();
       this.renderMarkers();
     } catch (e) { console.error(e); }
@@ -363,17 +366,39 @@ export class MultisitePage {
         <div style="font-size:0.65rem; font-weight:900; color:${color};">${s.meta.alerts}</div>
       </div>`;
     }).join('');
-    cards.innerHTML = data.slice(0, 3).map(s => {
+    cards.style.display = 'grid'; // Hiện dãy thẻ phía dưới
+    const displayData = data.slice(0, 4); // Lấy tối đa 4 trạm để hiện cards
+    
+    let cardsHtml = displayData.map(s => {
       const color = s.meta.alerts > 0 ? '#ef4444' : '#10b981';
-      return `<div class="multisite-card-light" style="background:rgba(255,255,255,0.95); border-radius:16px; padding:18px; border:1px solid #fff; box-shadow:0 10px 30px rgba(0,0,0,0.05); cursor:pointer;" onclick="(window as any).router.navigate('dashboard', { stationId: '${s.id}' })">
-        <div style="font-size:0.6rem; color:#3b82f6; font-weight:900; margin-bottom:4px;">LỰA CHỌN TRẠM</div>
-        <div style="font-weight:900; font-size:0.85rem; color:#0f172a; margin-bottom:12px;">${s.name}</div>
+      const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
+      const targetId = s.id.startsWith('virtual') ? (realStation?.id || s.id) : s.id;
+      
+      return `<div class="multisite-card-light" style="background:rgba(255,255,255,0.95); border-radius:16px; padding:18px; border:1px solid #fff; box-shadow:0 10px 30px rgba(0,0,0,0.05); cursor:pointer; transition: transform 0.2s;" onclick="(window as any).router.navigate('dashboard', { stationId: '${targetId}' })" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
+        <div style="font-size:0.6rem; color:#3b82f6; font-weight:900; margin-bottom:4px; letter-spacing:1px;">HỆ THỐNG GIÁM SÁT</div>
+        <div style="font-weight:900; font-size:0.9rem; color:#0f172a; margin-bottom:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
         <div style="display:flex; gap:10px;">
-          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:8px;"><div style="font-size:0.55rem; color:#94a3b8;">NHIỆT ĐỘ</div><div style="font-size:1rem; font-weight:900;">${s.meta.temp}°C</div></div>
-          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:8px;"><div style="font-size:0.55rem; color:#94a3b8;">CẢNH BÁO</div><div style="font-size:1rem; font-weight:900; color:${color};">${s.meta.alerts}</div></div>
+          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:10px; border:1px solid #f1f5f9;">
+            <div style="font-size:0.55rem; color:#94a3b8; font-weight:700;">NHIỆT ĐỘ</div>
+            <div style="font-size:1.1rem; font-weight:900; color:#1e293b;">${s.meta.temp}°C</div>
+          </div>
+          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:10px; border:1px solid #f1f5f9;">
+            <div style="font-size:0.55rem; color:#94a3b8; font-weight:700;">CẢNH BÁO</div>
+            <div style="font-size:1.1rem; font-weight:900; color:${color};">${s.meta.alerts}</div>
+          </div>
         </div>
       </div>`;
     }).join('');
+
+    // Thêm ô "THÊM TRẠM MỚI" ở cuối (chỉ là UI)
+    cardsHtml += `
+      <div style="background:rgba(255,255,255,0.4); border-radius:16px; padding:18px; border:2px dashed rgba(255,255,255,0.8); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; gap:10px; opacity:0.7; transition:all 0.2s;" onmouseover="this.style.opacity='1';this.style.background='rgba(255,255,255,0.6)'" onmouseout="this.style.opacity='0.7';this.style.background='rgba(255,255,255,0.4)'">
+        <div style="width:40px; height:40px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:#64748b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">+</div>
+        <div style="font-size:0.75rem; font-weight:900; color:#475569; letter-spacing:1px;">THÊM TRẠM MỚI</div>
+      </div>
+    `;
+
+    cards.innerHTML = cardsHtml;
   }
 
   private renderMarkers(): void {
@@ -393,17 +418,28 @@ export class MultisitePage {
         iconSize: [12, 12], iconAnchor: [6, 6]
       });
       const marker = L.marker([meta.lat, meta.lng], { icon: markerIcon, draggable: this.isEditMode }).addTo(this.map);
+      
+      const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
+      const targetId = s.id.startsWith('virtual') ? (realStation?.id || s.id) : s.id;
+
       marker.on('dragend', async (e: any) => {
         const { lat, lng } = e.target.getLatLng();
         meta.lat = lat; meta.lng = lng;
-        try {
-          await stationApi.updateStation(s.id, { location: JSON.stringify(meta) });
-          const idx = this.stations.findIndex(x => x.id === s.id);
-          if (idx !== -1 && this.stations[idx]) this.stations[idx].location = JSON.stringify(meta);
-          console.log("Position saved to DB:", lat, lng);
-        } catch (err) { console.error('Save position failed', err); }
+        
+        // Luôn lưu vào localStorage để ghi nhớ ở frontend
+        localStorage.setItem(`station_pos_${s.id}`, JSON.stringify({ lat, lng }));
+
+        if (!s.id.startsWith('virtual')) {
+          try {
+            await stationApi.updateStation(s.id, { location: JSON.stringify(meta) });
+          } catch (err) { console.error('Save position to server failed', err); }
+        }
+        
+        const idx = this.stations.findIndex(x => x.id === s.id);
+        if (idx !== -1 && this.stations[idx]) this.stations[idx].location = JSON.stringify(meta);
       });
-      marker.on('click', () => { if (!this.isEditMode) (window as any).router.navigate('dashboard', { stationId: s.id }); });
+
+      marker.on('click', () => { if (!this.isEditMode) (window as any).router.navigate('dashboard', { stationId: targetId }); });
       this.markers.push(marker);
     });
   }

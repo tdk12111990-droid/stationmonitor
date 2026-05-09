@@ -29,7 +29,7 @@ class ExternalApiPusher:
                 except: pass
                 
                 points_list = []
-                for i in range(1, 7):
+                for i in range(1, 11):
                     coords = points_local.get(str(i))
                     temp = live_temps.get(i) 
                     if coords and temp is not None:
@@ -39,11 +39,9 @@ class ExternalApiPusher:
                 
                 if points_list:
                     now = time.time()
-                    payload = {"device_id": self.camera_ip, "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), "points": points_list}
                     
-                    # A. Gửi lên Dashboard (LUÔN GỬI - 2 giây/lần để xem Real-time)
+                    # A. Gửi lên Dashboard (LUÔN GỬI - Đủ 10 điểm nếu có)
                     try:
-                        # Gửi về Backend local (cổng 5056)
                         requests.post("http://localhost:5056/api/v1/measurements/ingest", json=[{
                             "DeviceId": "4408b334-b69e-4210-9d70-739762b6f9ea",
                             "PointId": p["id"].replace("ID_", "P"),
@@ -52,21 +50,25 @@ class ExternalApiPusher:
                         } for p in points_list], timeout=2)
                     except: pass
 
-                    # B. Gửi sang Jetson AI & Đối tác (CHỈ GỬI 5 PHÚT 1 LẦN)
-                    if now - last_ai_send >= 300: # 300 giây = 5 phút
-                        last_ai_send = now # Cập nhật ngay lập tức để tránh gửi lặp khi lỗi
-                        self.debug_log(f"=== [AI SYSTEM] Đang gửi dữ liệu Nhiệt độ sang AI: {list(payload.values())} ===")
+                    # B. Gửi sang Jetson AI & Đối tác (CHỈ 6 ĐIỂM - 5 PHÚT 1 LẦN)
+                    if now - last_ai_send >= 300: 
+                        last_ai_send = now
+                        # Lọc lấy tối đa 6 điểm cho AI
+                        ai_points = [p for p in points_list if int(p["id"].split("_")[1]) <= 6]
+                        ai_payload = {
+                            "device_id": self.camera_ip, 
+                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"), 
+                            "points": ai_points
+                        }
+                        
+                        self.debug_log(f"=== [AI SYSTEM] Gửi 6 điểm sang AI: {[p['id'] for p in ai_points]} ===")
                         try:
-                            # Gửi sang AI local (cổng 8089)
-                            requests.post("http://localhost:8089/api/prediction", json={"prediction": payload}, timeout=5)
-                            # Gửi sang AI đối tác (192.168.10.11:8080)
-                            session.post(EXTERNAL_API_URL, json=payload, timeout=30, verify=False)
-                            
-                            # Sau khi gửi xong, gọi fetcher để lấy kết quả ngay (nếu có)
+                            requests.post("http://localhost:8089/api/prediction", json={"prediction": ai_payload}, timeout=5)
+                            session.post(EXTERNAL_API_URL, json=ai_payload, timeout=30, verify=False)
                             if fetcher:
                                 threading.Timer(30, fetcher.fetch_once).start()
                         except Exception as e:
-                            self.debug_log(f"[AI SEND ERROR] {e} - Sẽ thử lại sau 5 phút.")
+                            self.debug_log(f"[AI SEND ERROR] {e}")
 
                 # --- PHẦN 2: DỮ LIỆU PHÓNG ĐIỆN & ÂM THANH ---
                 if live_pd_ref:

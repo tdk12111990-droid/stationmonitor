@@ -615,170 +615,46 @@ def sync_rules_loop():
         time.sleep(5)
 
 class ThermalSDK:
-    """Lấy nhiệt độ 10 điểm đo realtime qua SDK (thay thế ISAPI)"""
+    """Lấy nhiệt độ 10 điểm đo realtime qua JSON ISAPI (Ưu tiên)"""
     def __init__(self, camera_ip, user, password):
         self.camera_ip = camera_ip
         self.user = user
         self.password = password
         self.running = False
-        self.sdk = None
-        self.user_id = -1
-        self.handle = -1
-        self._callback_ref = None
 
     def start(self):
         self.running = True
         threading.Thread(target=self._run, daemon=True).start()
-        log_thermal("[THERMAL] SDK Thermal Monitor Starting...")
+        debug_log("[THERMAL] JSON Thermal Monitor Starting...")
 
     def _run(self):
-        try:
-            # Thêm trực tiếp thư mục core vào path để tránh xung đột tên 'core'
-            core_path = os.path.join(SDK_DIR, "core")
-            if core_path not in sys.path:
-                sys.path.insert(0, core_path)
-            
-            try:
-                import hcnet_sdk
-            except ImportError as ie:
-                debug_log(f"[THERMAL] Direct import failed, trying absolute: {ie}")
-                sys.path.insert(0, SDK_DIR)
-                from core import hcnet_sdk
-
-            HCNetSDK = hcnet_sdk.HCNetSDK
-            NET_DVR_THERMOMETRY_COND = hcnet_sdk.NET_DVR_THERMOMETRY_COND
-            NET_DVR_THERMOMETRY_UPLOAD = hcnet_sdk.NET_DVR_THERMOMETRY_UPLOAD
-            RemoteConfigCallback = hcnet_sdk.RemoteConfigCallback
-
-            self.sdk = HCNetSDK(SDK_DIR)
-            if not self.sdk.init():
-                debug_log("[THERMAL] SDK init failed, fallback to ISAPI")
-                self._fallback_isapi()
-                return
-
-            self.user_id, _ = self.sdk.login(self.camera_ip, 8000, self.user, self.password)
-            if self.user_id < 0:
-                debug_log(f"[THERMAL] SDK login failed, fallback to ISAPI")
-                self._fallback_isapi()
-                return
-
-            debug_log(f"[THERMAL] SDK login OK (UserID={self.user_id})")
-
-            _cb_count = [0]
-            self.last_sdk_update = time.time()
-            def _callback(dwType, pBuffer, dwBufLen, pUserData):
-                if dwType == 2:  # NET_SDK_CALLBACK_TYPE_DATA
-                    try:
-                        self.last_sdk_update = time.time()
-                        data = ctypes.cast(pBuffer, ctypes.POINTER(NET_DVR_THERMOMETRY_UPLOAD)).contents
-                        rid = data.byRuleID
-                        temp = data.fMaxTemperature
-                        if 1 <= rid <= 20 and -50 < temp < 2000:
-                            LIVE_TEMPS[rid] = temp
-                            _cb_count[0] += 1
-                            if _cb_count[0] % 20 == 1:
-                                debug_log(f"[THERMAL] Received data: RuleID={rid}, Temp={temp:.1f}°C")
-                    except Exception as e:
-                        debug_log(f"[THERMAL] Callback error: {e}")
-
-            self._callback_ref = RemoteConfigCallback(_callback)
-
-            cond = NET_DVR_THERMOMETRY_COND()
-            cond.dwSize = ctypes.sizeof(NET_DVR_THERMOMETRY_COND)
-            cond.dwChannel = 2
-
-            self.handle = self.sdk.hcnetsdk.NET_DVR_StartRemoteConfig(
-                self.user_id,
-                3629,  # NET_DVR_GET_REALTIME_THERMOMETRY
-                ctypes.byref(cond),
-                ctypes.sizeof(cond),
-                self._callback_ref,
-                None
-            )
-
-            if self.handle < 0:
-                debug_log(f"[THERMAL] SDK StartRemoteConfig failed, fallback to ISAPI")
-                self._fallback_isapi()
-                return
-
-            debug_log("[THERMAL] SDK Thermal Monitor running (realtime callback)")
-
-            while self.running:
-                time.sleep(1)
-                if time.time() - self.last_sdk_update > 10:
-                    debug_log("[THERMAL] SDK Callback timeout (10s), falling back to ISAPI...")
-                    break
-            
-            self._fallback_isapi()
-
-        except Exception as e:
-            debug_log(f"[THERMAL] SDK error: {e}, fallback to ISAPI")
-            self._fallback_isapi()
-
-    def _fallback_isapi(self):
-        """Dùng ISAPI lấy kết quả đo trực tiếp (Ép làm mới dữ liệu)"""
-        debug_log("[THERMAL] Switching to direct ISAPI Thermometry (High Performance)")
-        auth = HTTPDigestAuth(self.user, self.password)
-        last_success = time.time()
-        
+        debug_log("[THERMAL] Starting High-Performance JSON Polling Loop (10 points)...")
         while self.running:
             try:
-                # Thêm timestamp để tránh cache của Camera
-                ts = int(time.time() * 1000)
-                url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/detectResults?t={ts}"
-                r = requests.get(url, auth=auth, timeout=10)
-                if r.status_code == 200:
-                    import xml.etree.ElementTree as ET
-                    root = ET.fromstring(r.content)
-                    updated = False
-                    for point in root.findall(".//thermometryRes"):
-                        try:
-                            rid = point.findtext("id")
-                            temp = float(point.findtext("maxTemp"))
-                            if rid and -50 < temp < 2000:
-                                LIVE_TEMPS[int(rid)] = temp
-                                updated = True
-                        except: pass
-                    if updated:
-                        last_success = time.time()
-                
-                # Nếu quá 30 giây không lấy được dữ liệu mới -> Thử khởi động lại toàn bộ
-                if time.time() - last_success > 30:
-                    debug_log("[THERMAL] ISAPI data stuck for 30s, reconnecting...")
-                    break 
-
+                self._fallback_isapi()
+                p1_temp = LIVE_TEMPS.get(1, 0)
+                if p1_temp > 0:
+                    debug_log(f"[REALTIME] P1 Temp: {p1_temp:.1f}C (Total: {len(LIVE_TEMPS)} pts)")
             except Exception as e:
-                debug_log(f"[THERMAL] ISAPI Error: {e}")
-            time.sleep(2.0)
+                debug_log(f"[THERMAL] Loop Error: {e}")
+            time.sleep(2)
 
-
-# Luồng EventStreamListener cũ đã được gộp vào UnifiedStreamListener
+    def _fallback_isapi(self):
+        auth = HTTPDigestAuth(self.user, self.password)
         try:
-            event_xml = event_xml.strip()
-            if not event_xml.startswith("<"): return
-            root = ET.fromstring(event_xml)
-            etype = root.findtext(".//eventType", "unknown")
-            eid = root.findtext(".//eventId", "")
-            if eid:
-                cat = self._categorize_event(etype, root.findtext(".//aiEventType", ""), root.findtext(".//eventState", ""))
-                if cat:
-                    LIVE_EVENTS[eid] = {"type": cat, "detected_at": time.time()}
-                    if root.findtext(".//eventState", "") == "active":
-                        self._report_event_to_backend(eid, cat)
-        except: pass
-
-    def _categorize_event(self, etype, ai_type, state):
-        etype, ai_type = etype.lower(), ai_type.lower()
-        if "fire" in etype or "fire" in ai_type: return "fire"
-        if "smoke" in etype or "smoke" in ai_type: return "smoke"
-        if "motion" in etype: return "motion"
-        return None
-
-    def _report_event_to_backend(self, eid, cat):
-        try:
-            payload = {"eventType": cat, "eventId": eid, "severity": "critical" if cat in ["fire","smoke"] else "warning", "cameraIp": self.camera_ip}
-            self.session.post(f"{API_URL}/alerts", json=payload, timeout=5)
-        except: pass
+            ts = int(time.time() * 1000)
+            url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/1/rulesTemperatureInfo?format=json&t={ts}"
+            r = requests.get(url, auth=auth, timeout=5)
+            if r.status_code == 200:
+                data = r.json()
+                info_list = data.get("ThermometryRulesTemperatureInfoList", {}).get("ThermometryRulesTemperatureInfo", [])
+                for item in info_list:
+                    rid = item.get("id")
+                    temp = item.get("maxTemperature")
+                    if rid is not None and temp is not None:
+                        LIVE_TEMPS[int(rid)] = float(temp)
+        except Exception as e:
+            pass
 
 class StreamRelay:
     """Handle RTSP streaming with CV2-burned drawings and FFmpeg push"""
@@ -830,12 +706,16 @@ class StreamRelay:
             line1 = f"P{pid}"
             line2 = f"{temp:.1f}C" if temp > 0 else "---"
             
-            tx, ty = x + 5, y + 5
+            tx, ty = x + 8, y + 8
             
-            # Vẽ chữ chính (ID và Nhiệt độ) - Không có viền đen
-            cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
+            # 1. Vẽ viền đen (Outline) để dễ nhìn trên mọi nền
+            cv2.putText(frame, line1, (tx, ty), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
             
             (_, th1), _ = cv2.getTextSize(line1, font, font_scale, thickness)
+            cv2.putText(frame, line2, (tx, ty + th1 + 5), font, font_scale, (0, 0, 0), thickness + 2, cv2.LINE_AA)
+
+            # 2. Vẽ chữ chính (ID và Nhiệt độ)
+            cv2.putText(frame, line1, (tx, ty), font, font_scale, color, thickness, cv2.LINE_AA)
             cv2.putText(frame, line2, (tx, ty + th1 + 5), font, font_scale, color, thickness, cv2.LINE_AA)
 
     def _run(self):
