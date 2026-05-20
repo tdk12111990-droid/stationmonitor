@@ -52,6 +52,7 @@ services:
     volumes:
       - ./data/media:/app/wwwroot/media
       - ./data:/app/data
+      - ./sdk-relay:/app/sdk-relay
 
 #  # 5. AI Engine
 #  stationmonitor-ai:

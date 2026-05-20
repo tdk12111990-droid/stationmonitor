@@ -7,6 +7,9 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify(pkg.version),
   },
+  build: {
+    assetsDir: 'assets4'
+  },
   plugins: [
     VitePWA({
       registerType: 'autoUpdate',
@@ -51,6 +54,16 @@ export default defineConfig({
       '/ws': {
         target: 'http://localhost:5056',
         ws: true,
+      },
+      '/rtc': {
+        target: 'http://localhost:1984',
+        ws: true,
+        rewrite: (path) => path.replace(/^\/rtc/, ''),
+      },
+      '/api': {
+        target: 'http://localhost:5056',
+        changeOrigin: true,
+        secure: false,
       }
     }
   }

@@ -106,10 +106,8 @@ public class RuleEvaluationWorker : BackgroundService
         if (rules.Count == 0) return;
 
         var latestReadings = await db.SensorReadings
-            .FromSqlRaw(@"
-                SELECT DISTINCT ON (""PointId"") *
-                FROM ""SensorReadings""
-                ORDER BY ""PointId"", ""Time"" DESC")
+            .GroupBy(r => r.PointId)
+            .Select(g => g.OrderByDescending(x => x.Time).First())
             .ToDictionaryAsync(r => r.PointId, r => r, ct);
 
         foreach (var rule in rules)

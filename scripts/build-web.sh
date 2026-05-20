@@ -23,13 +23,19 @@ if [ ! -d "dist" ]; then
 fi
 
 echo
-echo "[2/3] Clearing old wwwroot..."
-# Clear existing files (except .gitkeep if it exists)
-rm -rf ../backend/StationMonitor.Api/wwwroot/*
+echo "[2/3] Clearing old static frontend assets..."
+rm -rf ../backend/StationMonitor.Api/wwwroot/index.html
+rm -rf ../backend/StationMonitor.Api/wwwroot/assets4
+rm -rf ../backend/StationMonitor.Api/wwwroot/sw.js
+rm -rf ../backend/StationMonitor.Api/wwwroot/manifest.webmanifest
 
 echo
 echo "[3/3] Deploying to wwwroot..."
-cp -r dist/* ../backend/StationMonitor.Api/wwwroot/
+cp -r dist/index.html ../backend/StationMonitor.Api/wwwroot/
+cp -r dist/assets4 ../backend/StationMonitor.Api/wwwroot/
+cp -r dist/sw.js ../backend/StationMonitor.Api/wwwroot/
+cp -r dist/workbox-*.js ../backend/StationMonitor.Api/wwwroot/
+cp -r dist/manifest.webmanifest ../backend/StationMonitor.Api/wwwroot/
 
 echo
 echo "════════════════════════════════════════════════════════"

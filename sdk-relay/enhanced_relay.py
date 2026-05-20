@@ -655,6 +655,7 @@ class ThermalSDK:
         while self.running:
             try:
                 self._fallback_isapi()
+                self._fallback_matrix()
                 p1_temp = LIVE_TEMPS.get(1, 0)
                 if p1_temp > 0:
                     debug_log(f"[REALTIME] P1 Temp: {p1_temp:.1f}C (Total: {len(LIVE_TEMPS)} pts)")
@@ -679,6 +680,64 @@ class ThermalSDK:
         except Exception as e:
             pass
 
+    def _fallback_matrix(self):
+        global LIVE_TEMPS, POINT_COORDS
+        auth = HTTPDigestAuth(self.user, self.password)
+        try:
+            url = f"http://{self.camera_ip}/ISAPI/Thermal/channels/2/thermometry/jpegPicWithAppendData?format=json"
+            r = requests.get(url, auth=auth, timeout=4)
+            if r.status_code == 200:
+                boundary = b'--boundary'
+                ctype = r.headers.get('Content-Type', '')
+                if 'boundary=' in ctype:
+                    b_str = ctype.split('boundary=')[-1].strip()
+                    boundary = b'--' + b_str.encode('utf-8')
+                
+                parts = r.content.split(boundary)
+                json_part = None
+                p2p_part = None
+                
+                for part in parts:
+                    if b'Content-Type: application/json' in part:
+                        header_end = part.find(b'\r\n\r\n')
+                        if header_end != -1:
+                            try:
+                                content_str = part[header_end+4:].decode('utf-8', errors='ignore').strip()
+                                if content_str.endswith('--'):
+                                    content_str = content_str[:-2].strip()
+                                json_part = json.loads(content_str)
+                            except: pass
+                    elif b'Content-Type: application/octet-stream' in part:
+                        header_end = part.find(b'\r\n\r\n')
+                        if header_end != -1:
+                            p2p_part = part[header_end+4:]
+                
+                if json_part and p2p_part:
+                    meta = json_part.get('JpegPictureWithAppendData', {})
+                    w = meta.get('jpegPicWidth')
+                    h = meta.get('jpegPicHeight')
+                    p2p_len = meta.get('p2pDataLen', len(p2p_part))
+                    
+                    if w and h:
+                        matrix = np.frombuffer(p2p_part[:p2p_len], dtype=np.float32)
+                        if len(matrix) >= w * h:
+                            matrix = matrix[:w*h].reshape(h, w)
+                            for pid, coords in list(POINT_COORDS.items()):
+                                try:
+                                    rid = int(pid)
+                                    if rid >= 11 or rid not in LIVE_TEMPS:
+                                        tx, ty = coords.get('tx'), coords.get('ty')
+                                        if tx is not None and ty is not None:
+                                            px = int(tx * w)
+                                            py = int(ty * h)
+                                            px = max(0, min(w - 1, px))
+                                            py = max(0, min(h - 1, py))
+                                            LIVE_TEMPS[rid] = float(matrix[py, px])
+                                except Exception:
+                                    pass
+        except Exception:
+            pass
+
 class StreamRelay:
     """Handle RTSP streaming with CV2-burned drawings and FFmpeg push"""
     def __init__(self, name, rtsp_url, output_id, is_thermal=False, draw_points=True):
@@ -697,7 +756,7 @@ class StreamRelay:
         cmd = [ FFMPEG_BIN, '-y', '-f', 'rawvideo', '-vcodec', 'rawvideo', '-pix_fmt', 'bgr24',
             '-s', f"{w}x{h}", '-i', '-', '-c:v', 'libx264', '-pix_fmt', 'yuv420p',
             '-preset', 'ultrafast', '-tune', 'zerolatency', '-r', '15', '-g', '30', '-crf', '28', 
-            '-threads', '2', '-bufsize', '2M', '-maxrate', '2M', '-f', 'rtsp', self.output_url ]
+            '-threads', '2', '-bufsize', '2M', '-maxrate', '2M', '-rtsp_transport', 'tcp', '-f', 'rtsp', self.output_url ]
         # Ghi log lỗi FFmpeg để debug MSE
         f_err = open('ffmpeg_error.log', 'a')
         return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=f_err)
@@ -717,12 +776,12 @@ class StreamRelay:
 
             # Màu sắc và cấu hình vẽ
             if self.is_thermal:
-                font_scale = 0.25 # Tăng nhẹ theo yêu cầu
-                size = 2
+                font_scale = 0.6 # Tăng lên để viền đen không ăn mất chữ
+                size = 6
                 thickness = 1
                 color = (0, 255, 0) # Chuyển về Xanh lá
             else:
-                font_scale = 0.4
+                font_scale = 0.6
                 size = 8
                 thickness = 1
                 color = (0, 255, 0) # Green cho Optical

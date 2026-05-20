@@ -29,13 +29,16 @@ class ExternalApiPusher:
                 except: pass
                 
                 points_list = []
-                for i in range(1, 11):
-                    coords = points_local.get(str(i))
-                    temp = live_temps.get(i) 
+                for pid_str, coords in points_local.items():
+                    try:
+                        pid = int(pid_str)
+                    except ValueError:
+                        continue
+                    temp = live_temps.get(pid)
                     if coords and temp is not None:
                         mx = int(coords.get("tx", 0) * 640)
                         my = int(coords.get("ty", 0) * 512)
-                        points_list.append({"id": f"ID_{i}", "mx": mx, "my": my, "temperature": round(temp, 1)})
+                        points_list.append({"id": f"ID_{pid}", "mx": mx, "my": my, "temperature": round(temp, 1)})
                 
                 if points_list:
                     now = time.time()

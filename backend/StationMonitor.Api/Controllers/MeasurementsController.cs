@@ -52,57 +52,59 @@ public class MeasurementsController : ControllerBase
     [HttpGet("points")]
     public async Task<IActionResult> GetLatestPoints([FromQuery] Guid? stationId)
     {
-        // Lấy data 10 phút gần nhất, rồi DISTINCT ON lấy mới nhất của mỗi (device, point)
-        var sql = stationId.HasValue
-            ? $"""
-               SELECT DISTINCT ON ("DeviceId", "PointId")
-                 sr."DeviceId", sr."PointId", sr."Value", sr."Unit", sr."Quality", sr."Time",
-                 sp."X" as sld_x, sp."Y" as sld_y
-               FROM "SensorReadings" sr
-               LEFT JOIN "SldPoints" sp ON sr."PointId" = sp."PointId"
-               WHERE sr."StationId" = '{stationId}'
-                 AND sr."Time" > NOW() - INTERVAL '10 minutes'
-               ORDER BY sr."DeviceId", sr."PointId", sr."Time" DESC
-               """
-            : """
-              SELECT DISTINCT ON ("DeviceId", "PointId")
-                sr."DeviceId", sr."PointId", sr."Value", sr."Unit", sr."Quality", sr."Time",
-                sp."X" as sld_x, sp."Y" as sld_y
-              FROM "SensorReadings" sr
-              LEFT JOIN "SldPoints" sp ON sr."PointId" = sp."PointId"
-              WHERE sr."Time" > NOW() - INTERVAL '10 minutes'
-              ORDER BY sr."DeviceId", sr."PointId", sr."Time" DESC
-              """;
-
-        // Dùng connection riêng (không share với EF Core) để tránh timeout khi relay đang ingest
-        var connStr = _db.Database.GetConnectionString();
-        await using var conn = new Npgsql.NpgsqlConnection(connStr);
-        await conn.OpenAsync();
-        await using var cmd = new Npgsql.NpgsqlCommand(sql, conn);
-        cmd.CommandTimeout = 10;
-        await using var reader = await cmd.ExecuteReaderAsync();
-
-        var result = new List<object>();
-        while (await reader.ReadAsync())
+        try
         {
-            var sldX = reader.IsDBNull(6) ? (double?)null : reader.GetDouble(6);
-            var sldY = reader.IsDBNull(7) ? (double?)null : reader.GetDouble(7);
-
-            // camelCase để match TypeScript SensorPoint interface
-            result.Add(new
+            var limitTime = DateTime.UtcNow.AddMinutes(-10);
+            var query = _db.SensorReadings.AsNoTracking();
+            if (stationId.HasValue)
             {
-                deviceId = reader.GetGuid(0),
-                pointId  = reader.GetString(1),
-                value    = reader.IsDBNull(2) ? 0.0 : reader.GetDouble(2),
-                unit     = reader.IsDBNull(3) ? "°C" : reader.GetString(3),
-                quality  = reader.IsDBNull(4) ? 0 : (int)reader.GetInt16(4),
-                time     = reader.GetDateTime(5),
-                x        = sldX,
-                y        = sldY
-            });
-        }
+                query = query.Where(r => r.StationId == stationId.Value);
+            }
 
-        return Ok(result);
+            var readings = await query
+                .Where(r => r.Time > limitTime)
+                .ToListAsync();
+
+            // Fallback: nếu không có data trong 10 phút qua, lấy dữ liệu lịch sử mới nhất (tối đa 1000 bản ghi)
+            if (!readings.Any())
+            {
+                readings = await query
+                    .OrderByDescending(r => r.Time)
+                    .Take(1000)
+                    .ToListAsync();
+            }
+
+            var latestReadings = readings
+                .GroupBy(r => new { r.DeviceId, r.PointId })
+                .Select(g => g.OrderByDescending(r => r.Time).First())
+                .ToList();
+
+            var sldPoints = await _db.SldPoints.AsNoTracking().ToListAsync();
+
+            var result = latestReadings.Select(r =>
+            {
+                var sp = sldPoints.FirstOrDefault(p => p.PointId == r.PointId && p.DeviceId == r.DeviceId)
+                      ?? sldPoints.FirstOrDefault(p => p.PointId == r.PointId);
+                return new
+                {
+                    deviceId = r.DeviceId,
+                    pointId  = r.PointId,
+                    value    = r.Value ?? 0.0,
+                    unit     = r.Unit ?? "°C",
+                    quality  = (int)r.Quality,
+                    time     = r.Time,
+                    x        = sp?.X,
+                    y        = sp?.Y
+                };
+            }).ToList();
+
+            return Ok(result);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[GetLatestPoints] Error: {ex.Message}");
+            return StatusCode(500, ex.Message);
+        }
     }
 
     /// <summary>
