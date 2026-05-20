@@ -29,9 +29,10 @@ export class ThermalPointsPage {
 .tp-toolbar { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
 .tp-toolbar h2 { font-size: 1.1rem; font-weight: 800; color: #e2e8f0; margin: 0; flex: 1; }
 .tp-card { background: #0d1117; border: 1px solid #1e293b; border-radius: 10px; overflow: hidden; }
+.tp-table-wrap { max-height: 60vh; overflow-y: auto; }
 .tp-table { width: 100%; border-collapse: collapse; }
-.tp-table th { background: #0b0f18; color: #475569; font-size: 11px; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 1px; padding: 10px 14px; text-align: left; }
+.tp-table th { position: sticky; top: 0; z-index: 10; background: #0b0f18; color: #475569; font-size: 11px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 1px; padding: 10px 14px; text-align: left; box-shadow: 0 1px 0 #1e293b; }
 .tp-table td { padding: 10px 14px; border-top: 1px solid #1e293b; color: #cbd5e1; font-size: 13px; }
 .tp-table tr:hover td { background: rgba(59,130,246,.04); }
 .tp-badge { background: rgba(59,130,246,.15); color: #60a5fa; border-radius: 6px;
@@ -91,20 +92,22 @@ export class ThermalPointsPage {
   </div>
 
   <div class="tp-card">
-    <table class="tp-table">
-      <thead>
-        <tr>
-          <th>ID</th>
-          <th>Tên điểm</th>
-          <th>Tọa độ Ảnh Nhiệt (tx, ty)</th>
-          <th>Tọa độ Ảnh Quang (ox, oy)</th>
-          <th>Hành động</th>
-        </tr>
-      </thead>
-      <tbody id="tpTableBody">
-        <tr><td colspan="5" class="tp-empty">⏳ Đang tải...</td></tr>
-      </tbody>
-    </table>
+    <div class="tp-table-wrap">
+      <table class="tp-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Tên điểm</th>
+            <th>Tọa độ Ảnh Nhiệt (tx, ty)</th>
+            <th>Tọa độ Ảnh Quang (ox, oy)</th>
+            <th>Hành động</th>
+          </tr>
+        </thead>
+        <tbody id="tpTableBody">
+          <tr><td colspan="5" class="tp-empty">⏳ Đang tải...</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 
@@ -300,9 +303,21 @@ export class ThermalPointsPage {
             if (this.pickerMode === 'thermal') {
                 (document.getElementById('tpTx') as HTMLInputElement).value = x.toFixed(4);
                 (document.getElementById('tpTy') as HTMLInputElement).value = y.toFixed(4);
+                
+                // Đồng bộ sang ox/oy nếu ox/oy đang trống
+                const oxEl = document.getElementById('tpOx') as HTMLInputElement;
+                const oyEl = document.getElementById('tpOy') as HTMLInputElement;
+                if (!oxEl.value) oxEl.value = x.toFixed(4);
+                if (!oyEl.value) oyEl.value = y.toFixed(4);
             } else {
                 (document.getElementById('tpOx') as HTMLInputElement).value = x.toFixed(4);
                 (document.getElementById('tpOy') as HTMLInputElement).value = y.toFixed(4);
+
+                // Đồng bộ sang tx/ty nếu tx/ty đang trống
+                const txEl = document.getElementById('tpTx') as HTMLInputElement;
+                const tyEl = document.getElementById('tpTy') as HTMLInputElement;
+                if (!txEl.value) txEl.value = x.toFixed(4);
+                if (!tyEl.value) tyEl.value = y.toFixed(4);
             }
         });
 
@@ -331,18 +346,26 @@ export class ThermalPointsPage {
     private async savePoint(): Promise<void> {
         const id = (document.getElementById('tpId') as HTMLInputElement).value.trim();
         const name = (document.getElementById('tpName') as HTMLInputElement).value.trim();
-        const tx = parseFloat((document.getElementById('tpTx') as HTMLInputElement).value);
-        const ty = parseFloat((document.getElementById('tpTy') as HTMLInputElement).value);
-        const ox = parseFloat((document.getElementById('tpOx') as HTMLInputElement).value);
-        const oy = parseFloat((document.getElementById('tpOy') as HTMLInputElement).value);
+        let tx = parseFloat((document.getElementById('tpTx') as HTMLInputElement).value);
+        let ty = parseFloat((document.getElementById('tpTy') as HTMLInputElement).value);
+        let ox = parseFloat((document.getElementById('tpOx') as HTMLInputElement).value);
+        let oy = parseFloat((document.getElementById('tpOy') as HTMLInputElement).value);
 
         if (!id) { this.toast('Vui lòng nhập ID điểm', 'error'); return; }
-        if (isNaN(tx) || isNaN(ty)) { this.toast('Vui lòng chọn tọa độ ảnh nhiệt', 'error'); return; }
+
+        // Fallback chéo cho nhau nếu người dùng chỉ chấm 1 bên
+        if (isNaN(tx) && !isNaN(ox)) tx = ox;
+        if (isNaN(ty) && !isNaN(oy)) ty = oy;
+        if (isNaN(ox) && !isNaN(tx)) ox = tx;
+        if (isNaN(oy) && !isNaN(ty)) oy = ty;
+
+        if (isNaN(tx) || isNaN(ty)) { 
+            this.toast('Vui lòng click vào ảnh để chọn tọa độ', 'error'); 
+            return; 
+        }
 
         const body: any = {
-            tx, ty,
-            ox: isNaN(ox) ? tx : ox,
-            oy: isNaN(oy) ? ty : oy,
+            tx, ty, ox, oy,
             name: name || `P${id}`,
         };
 
