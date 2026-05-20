@@ -244,6 +244,29 @@ def load_points_config():
 
 POINT_COORDS = load_points_config()
 
+# ── Auto-reload khi Backend gửi lệnh reload qua file flag ──
+def watch_reload_flag():
+    """Kiểm tra file .reload_points mỗi 2 giây. Nếu có → reload POINT_COORDS."""
+    global POINT_COORDS
+    flag_path = os.path.join(CURRENT_DIR, ".reload_points")
+    last_mtime = 0
+    while True:
+        try:
+            if os.path.exists(flag_path):
+                mtime = os.path.getmtime(flag_path)
+                if mtime != last_mtime:
+                    last_mtime = mtime
+                    new_coords = load_points_config()
+                    POINT_COORDS = new_coords
+                    debug_log(f"[SYSTEM] 🔄 POINT_COORDS reloaded: {len(new_coords)} points")
+        except Exception as e:
+            debug_log(f"[SYSTEM] Reload watch error: {e}")
+        time.sleep(2)
+
+threading.Thread(target=watch_reload_flag, daemon=True).start()
+
+
+
 # ── Global state ──
 SNAPSHOT_EVENT = threading.Event()
 SNAPSHOT_TRIGGER_INFO = {"rule_id": 0, "temp": 0.0, "type": "alarm"}
@@ -546,19 +569,13 @@ def periodic_status_uploader():
 threading.Thread(target=periodic_status_uploader, daemon=True).start()
 
 def _extract_camera_rule_id(point_str: str):
-    """Map point string → camera rule ID"""
+    """Map point string -> camera rule ID (P1..P10)"""
     if not point_str:
         return None
-    s = point_str.strip()
-    if s.upper().startswith('P') and s[1:].isdigit():
+    s = point_str.strip().upper()
+    # Chỉ chấp nhận P1, P2, ..., P10
+    if s.startswith('P') and s[1:].isdigit():
         return int(s[1:])
-    if 'nhiet_do_pha_' in s:
-        digits = s.split('nhiet_do_pha_')[-1].split('_')[0]
-        if digits.isdigit():
-            return int(digits)
-    digits = ''.join(filter(str.isdigit, s))
-    if digits:
-        return int(digits)
     return None
 
 def sync_rules_loop():
@@ -576,6 +593,12 @@ def sync_rules_loop():
                     try:
                         if not r.get('enabled', True):
                             continue
+                        
+                        # Chỉ lấy rule của đúng thiết bị Thermal Camera
+                        rid_dev = r.get('deviceId')
+                        if THERMAL_DEVICE_ID and rid_dev and rid_dev != THERMAL_DEVICE_ID:
+                            continue
+
                         cond_str = r.get('condition', '{}')
                         cond = json.loads(cond_str) if isinstance(cond_str, str) else cond_str
                         point_str = cond.get('point', '')
@@ -602,7 +625,7 @@ def sync_rules_loop():
                                 "alarm": alarm_val,
                                 "name": r.get('name', f"P{rid}")
                             }
-                    except Exception as e:
+                    except Exception:
                         continue
 
                 if len(new_rules) > 0:

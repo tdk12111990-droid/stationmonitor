@@ -72,8 +72,8 @@ fi
 
 echo "📤 Deploy to backend wwwroot (preserving media & reports)..."
 cd "$SCRIPT_DIR/backend/StationMonitor.Api/wwwroot"
-# Xóa tất cả TRỪ thư mục media, reports và các file sơ đồ .svg
-find . -maxdepth 1 ! -name 'media' ! -name 'reports' ! -name '*.svg' ! -name '.' -exec rm -rf {} +
+# Xóa tất cả TRỪ thư mục media, reports, sld và các file sơ đồ .svg
+find . -maxdepth 1 ! -name 'media' ! -name 'reports' ! -name 'sld' ! -name '*.svg' ! -name '.' -exec rm -rf {} +
 cp -r "$SCRIPT_DIR/frontend/dist"/* ./
 
 echo "✅ Frontend built & deployed"
@@ -81,7 +81,9 @@ echo ""
 
 # [2] Kill old processes
 echo "[2/6] Cleaning up old processes..."
-pkill -f "dotnet run" || true
+fuser -k 5056/tcp || true
+pkill -9 -f "StationMonitor.Api" || true
+pkill -9 -f "dotnet" || true
 pkill -f "cloudflared tunnel" || true
 pkill -f "ai_api.py" || true
 pkill -f "enhanced_relay.py" || true

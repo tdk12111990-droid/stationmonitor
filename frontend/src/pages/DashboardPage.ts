@@ -344,14 +344,8 @@ export class DashboardPage {
 
   async mount(): Promise<void> {
     console.log('[Dashboard] Mounting page...');
-    // Load station ID
-    try {
-        this.stationId = await stationApi.getFirstStationId() ?? '';
-        console.log('[Dashboard] Station ID loaded:', this.stationId);
-    } catch (e) {
-        console.error('[Dashboard] Failed to get station ID:', e);
-    }
-
+    
+    // Khởi tạo UI trước
     this.initPanZoom();
     this.initCollapse();
     this.initColorPicker();
@@ -362,8 +356,27 @@ export class DashboardPage {
     this.bindNavEvents();
     this.connectSignalR();
 
+    // Load station ID với cơ chế retry
+    let retryCount = 0;
+    while (!this.stationId && retryCount < 3) {
+      try {
+          this.stationId = await stationApi.getFirstStationId() ?? '';
+          if (this.stationId) break;
+      } catch (e) {
+          console.warn(`[Dashboard] Lấy Station ID lần ${retryCount + 1} thất bại...`);
+      }
+      retryCount++;
+      if (!this.stationId) await new Promise(r => setTimeout(r, 1000));
+    }
+
+    if (!this.stationId) {
+      console.error('[Dashboard] Không thể lấy Station ID sau 3 lần thử.');
+      const statusSld = document.getElementById('statusSld');
+      if (statusSld) statusSld.innerHTML = '<span style="color:#ef4444;">⚠ Lỗi: Không xác định được trạm</span>';
+    }
+
     // Load data
-    console.log('[Dashboard] Loading SLD data...');
+    console.log('[Dashboard] Loading SLD data for:', this.stationId);
     await this.loadSld();
     await this.refreshKpi();
     await this.refreshAlerts();
@@ -402,34 +415,33 @@ export class DashboardPage {
 
   // ── SLD load ────────────────────────────────────────────────
   private async loadSld(): Promise<void> {
-    if (!this.stationId) return;
+    if (!this.stationId) {
+      console.warn('[SLD] Không có Station ID để tải sơ đồ.');
+      return;
+    }
     try {
+      console.log('[SLD] Đang tải dữ liệu từ API cho trạm:', this.stationId);
       const data = await stationApi.getSld(this.stationId);
-      // sldFileId tracked server-side only
-      // viewRotation is stored locally to avoid DB schema dependency crashes
+      
       const localVr = localStorage.getItem(`sld_vr_${this.stationId}`);
       this.vr = localVr ? parseInt(localVr) : 0;
       this.sldPoints = data.points;
       this.unpinnedDevices = data.unpinned;
 
       // Render SVG background
+      console.log('[SLD] SVG URL nhận được:', data.svgUrl);
       this.renderSvgBackground(data.svgUrl);
 
       // Render dots
       this.renderSldPoints(data.points);
-
-      // Render drawer
       this.renderDrawer();
 
       // Status bar
       const statusEl = document.getElementById('statusSld');
       if (statusEl) {
-        const dot = statusEl.querySelector('span')!;
         if (data.svgUrl) {
-          dot.style.background = '#10b981';
           statusEl.innerHTML = `<span style="width:6px;height:6px;background:#10b981;border-radius:50%;display:inline-block;"></span> SLD: v${data.version}`;
         } else {
-          dot.style.background = '#f59e0b';
           statusEl.innerHTML = `<span style="width:6px;height:6px;background:#f59e0b;border-radius:50%;display:inline-block;"></span> SLD: Chưa upload sơ đồ`;
         }
       }
@@ -442,7 +454,9 @@ export class DashboardPage {
         if (titleEl) titleEl.textContent = `⛣ ${station.name.toUpperCase()}`;
       }
     } catch (e) {
-      console.error('[SLD] Load lỗi:', e);
+      console.error('[SLD] Lỗi khi tải dữ liệu sơ đồ:', e);
+      const statusEl = document.getElementById('statusSld');
+      if (statusEl) statusEl.innerHTML = '<span style="color:#ef4444;">⚠ Lỗi kết nối sơ đồ</span>';
     }
   }
 

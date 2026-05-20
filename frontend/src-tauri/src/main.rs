@@ -60,6 +60,21 @@ struct YoloState {
     child: Mutex<Option<Child>>,
 }
 
+#[derive(Default)]
+struct BackendState {
+    child: Mutex<Option<Child>>,
+}
+
+#[derive(Default)]
+struct Go2RtcState {
+    child: Mutex<Option<Child>>,
+}
+
+#[derive(Default)]
+struct PythonRelayState {
+    children: Mutex<Vec<Child>>,
+}
+
 /// In-memory cache for keychain secrets. Populated once at startup to avoid
 /// repeated macOS Keychain prompts (each `Entry::get_password()` triggers one).
 struct SecretsCache {
@@ -753,6 +768,153 @@ fn start_local_api(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn start_backend(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<BackendState>();
+    let mut slot = state.child.lock().map_err(|_| "Failed to lock Backend state")?;
+    if slot.is_some() {
+        return Ok(());
+    }
+
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let backend_exe = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .join("backend/StationMonitor.Api/bin/Debug/net8.0/StationMonitor.Api.exe")
+    } else {
+        resource_dir.join("resources/backend/StationMonitor.Api.exe")
+    };
+
+    if !backend_exe.exists() {
+        return Err(format!("Backend executable missing at {}", backend_exe.display()));
+    }
+
+    let mut cmd = Command::new(&backend_exe);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    
+    cmd.current_dir(backend_exe.parent().unwrap());
+
+    let child = cmd.spawn().map_err(|e| format!("Failed to start Backend: {e}"))?;
+    append_desktop_log(app, "INFO", &format!("Backend started pid={}", child.id()));
+    *slot = Some(child);
+    Ok(())
+}
+
+fn start_go2rtc(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<Go2RtcState>();
+    let mut slot = state.child.lock().map_err(|_| "Failed to lock Go2Rtc state")?;
+    if slot.is_some() {
+        return Ok(());
+    }
+
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let go2rtc_exe = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .join("media-server/go2rtc.exe")
+    } else {
+        resource_dir.join("resources/media-server/go2rtc.exe")
+    };
+
+    if !go2rtc_exe.exists() {
+        return Err(format!("go2rtc executable missing at {}", go2rtc_exe.display()));
+    }
+
+    let mut cmd = Command::new(&go2rtc_exe);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    
+    cmd.arg("-config").arg("go2rtc.yaml");
+    cmd.current_dir(go2rtc_exe.parent().unwrap());
+
+    let child = cmd.spawn().map_err(|e| format!("Failed to start go2rtc: {e}"))?;
+    append_desktop_log(app, "INFO", &format!("go2rtc started pid={}", child.id()));
+    *slot = Some(child);
+    Ok(())
+}
+
+fn stop_backend(app: &AppHandle) {
+    if let Ok(state) = app.try_state::<BackendState>().ok_or(()) {
+        if let Ok(mut slot) = state.child.lock() {
+            if let Some(mut child) = slot.take() {
+                let _ = child.kill();
+                append_desktop_log(app, "INFO", "Backend stopped");
+            }
+        }
+    }
+}
+
+fn stop_go2rtc(app: &AppHandle) {
+    if let Ok(state) = app.try_state::<Go2RtcState>().ok_or(()) {
+        if let Ok(mut slot) = state.child.lock() {
+            if let Some(mut child) = slot.take() {
+                let _ = child.kill();
+                append_desktop_log(app, "INFO", "go2rtc stopped");
+            }
+        }
+    }
+}
+
+fn start_python_relay(app: &AppHandle) -> Result<(), String> {
+    let state = app.state::<PythonRelayState>();
+    let mut children = state.children.lock().map_err(|_| "Failed to lock Python Relay state")?;
+    if !children.is_empty() {
+        return Ok(());
+    }
+
+    let resource_dir = app.path().resource_dir().map_err(|e| e.to_string())?;
+    let relay_dir = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent().unwrap()
+            .join("sdk-relay")
+    } else {
+        resource_dir.join("resources/sdk-relay")
+    };
+
+    let python_bin = if cfg!(windows) { "python" } else { "python3" };
+
+    // Start enhanced_relay.py
+    let relay_script = relay_dir.join("enhanced_relay.py");
+    if relay_script.exists() {
+        let mut cmd = Command::new(python_bin);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.arg(&relay_script);
+        cmd.current_dir(&relay_dir);
+        if let Ok(child) = cmd.spawn() {
+            append_desktop_log(app, "INFO", &format!("Python Enhanced Relay started pid={}", child.id()));
+            children.push(child);
+        }
+    }
+
+    // Start main.py (notifications)
+    let notif_script = relay_dir.join("notifications/main.py");
+    if notif_script.exists() {
+        let mut cmd = Command::new(python_bin);
+        #[cfg(windows)]
+        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+        cmd.arg(&notif_script);
+        cmd.current_dir(notif_script.parent().unwrap());
+        if let Ok(child) = cmd.spawn() {
+            append_desktop_log(app, "INFO", &format!("Python Notifications started pid={}", child.id()));
+            children.push(child);
+        }
+    }
+
+    Ok(())
+}
+
+fn stop_python_relay(app: &AppHandle) {
+    if let Ok(state) = app.try_state::<PythonRelayState>().ok_or(()) {
+        if let Ok(mut children) = state.children.lock() {
+            for mut child in children.drain(..) {
+                let _ = child.kill();
+            }
+            append_desktop_log(app, "INFO", "Python Relays stopped");
+        }
+    }
+}
+
 fn stop_local_api(app: &AppHandle) {
     if let Ok(state) = app.try_state::<LocalApiState>().ok_or(()) {
         if let Ok(mut slot) = state.child.lock() {
@@ -828,6 +990,9 @@ fn main() {
         .menu(build_app_menu)
         .on_menu_event(handle_menu_event)
         .manage(LocalApiState::default())
+        .manage(BackendState::default())
+        .manage(Go2RtcState::default())
+        .manage(PythonRelayState::default())
         .manage(SecretsCache::load_from_keychain())
         .invoke_handler(tauri::generate_handler![
             list_supported_secret_keys,
@@ -857,7 +1022,30 @@ fn main() {
                     "ERROR",
                     &format!("local API sidecar failed to start: {err}"),
                 );
-                eprintln!("[tauri] local API sidecar failed to start: {err}");
+            }
+
+            if let Err(err) = start_backend(&app.handle()) {
+                append_desktop_log(
+                    &app.handle(),
+                    "ERROR",
+                    &format!("Backend failed to start: {err}"),
+                );
+            }
+
+            if let Err(err) = start_go2rtc(&app.handle()) {
+                append_desktop_log(
+                    &app.handle(),
+                    "ERROR",
+                    &format!("go2rtc failed to start: {err}"),
+                );
+            }
+
+            if let Err(err) = start_python_relay(&app.handle()) {
+                append_desktop_log(
+                    &app.handle(),
+                    "ERROR",
+                    &format!("Python Relay failed to start: {err}"),
+                );
             }
 
             Ok(())
@@ -899,6 +1087,9 @@ fn main() {
                 }
                 RunEvent::ExitRequested { .. } | RunEvent::Exit => {
                     stop_local_api(app);
+                    stop_backend(app);
+                    stop_go2rtc(app);
+                    stop_python_relay(app);
                 }
                 _ => {}
             }

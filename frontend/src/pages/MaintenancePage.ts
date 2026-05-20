@@ -59,6 +59,7 @@ export class MaintenancePage {
     <div id="mt-root" style="
       background:#0f172a;min-height:calc(100vh - 64px);
       padding:20px 24px;color:#e2e8f0;font-family:inherit;
+      overflow-y:auto;
     ">
       <!-- HEADER -->
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">

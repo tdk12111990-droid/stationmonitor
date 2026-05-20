@@ -132,4 +132,5 @@ export type PageId =
     | 'audit-log'
     | 'maintenance'
     | 'multisite'
-    | 'rule-engine';
+    | 'rule-engine'
+    | 'thermal-points';

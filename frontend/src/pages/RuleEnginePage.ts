@@ -364,7 +364,7 @@ export class RuleEnginePage {
         else if (actions.level === 'hybrid') groupWarning++;
       }
 
-      const isExpanded = this.expandedSets.has(groupName) || groupName === 'Các điểm đo của cam nhiệt';
+      const isExpanded = this.expandedSets.has(groupName);
 
       const rowsHtml = groupRules.map(r => renderRow(r)).join('');
 

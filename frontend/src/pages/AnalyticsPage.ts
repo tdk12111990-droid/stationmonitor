@@ -63,31 +63,44 @@ export class AnalyticsPage {
     return `
     <div id="an-root" style="display:flex;flex-direction:column;height:calc(100vh - 64px);background:#0f172a;overflow:hidden;">
 
-      <!-- TABBAR -->
+      <!-- ROW 1: TABS -->
+      <div style="display:flex;align-items:center;background:#0f172a;border-bottom:1px solid #1e293b;flex-shrink:0;padding:0 16px;gap:2px;overflow-x:auto;">
+        ${TABS.map((t, i) => `
+          <button class="an-tab${i === 0 ? ' an-tab-active' : ''}" data-tab="${t.id}"
+            style="display:flex;align-items:center;gap:6px;padding:10px 16px;background:${i === 0 ? '#1e293b' : 'transparent'};
+            border:none;border-radius:8px 8px 0 0;
+            color:${i === 0 ? '#f1f5f9' : '#64748b'};font-size:0.75rem;font-weight:${i === 0 ? '700' : '500'};
+            cursor:pointer;white-space:nowrap;transition:all .15s;flex-shrink:0;">
+            <span style="font-size:0.85rem;">${t.icon}</span>${t.label}
+          </button>`).join('')}
+      </div>
+
+      <!-- ROW 2: CONTROLS -->
       <div style="display:flex;align-items:center;justify-content:space-between;
-        padding:0 16px;background:#0f172a;border-bottom:1px solid #1e293b;flex-shrink:0;">
-        <div style="display:flex;overflow-x:auto;">
-          ${TABS.map((t, i) => `
-            <button class="an-tab${i === 0 ? ' an-tab-active' : ''}" data-tab="${t.id}"
-              style="padding:11px 14px;background:none;border:none;
-              border-bottom:2px solid ${i === 0 ? '#2563eb' : 'transparent'};
-              color:${i === 0 ? '#e2e8f0' : '#64748b'};font-size:0.76rem;font-weight:600;
-              cursor:pointer;white-space:nowrap;transition:all .15s;">
-              ${t.icon} ${t.label}
-            </button>`).join('')}
+        padding:6px 16px;background:#0a1120;border-bottom:1px solid #1e293b;flex-shrink:0;">
+        <!-- Range buttons -->
+        <div style="display:flex;align-items:center;gap:4px;">
+          <span style="font-size:0.65rem;color:#475569;font-weight:600;margin-right:4px;">Khoảng thời gian:</span>
+          <div style="display:flex;background:#1e293b;border-radius:6px;padding:2px;gap:2px;">
+            ${(['1H', '6H', '1D', '1W', '1M'] as TimeRange[]).map(r => `
+              <button class="an-range${r === '1D' ? ' an-range-active' : ''}" data-range="${r}"
+                style="padding:3px 10px;background:${r === '1D' ? '#2563eb' : 'transparent'};
+                border:none;border-radius:4px;
+                color:${r === '1D' ? '#fff' : '#64748b'};font-size:0.68rem;font-weight:600;cursor:pointer;transition:all .15s;">${r}</button>
+            `).join('')}
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;padding-left:12px;">
-          ${(['1H', '6H', '1D', '1W', '1M'] as TimeRange[]).map(r => `
-            <button class="an-range${r === '1D' ? ' an-range-active' : ''}" data-range="${r}"
-              style="padding:3px 9px;background:${r === '1D' ? '#1e3a5f' : 'none'};
-              border:1px solid ${r === '1D' ? '#2563eb' : '#334155'};border-radius:4px;
-              color:${r === '1D' ? '#60a5fa' : '#64748b'};font-size:0.7rem;font-weight:600;cursor:pointer;">${r}</button>
-          `).join('')}
-          <button id="btnExportHistory" title="Xuất lịch sử CSV"
-            style="padding:3px 9px;background:none;border:1px solid #334155;border-radius:4px;
-            color:#64748b;font-size:0.7rem;font-weight:600;cursor:pointer;">⬇ CSV</button>
-          <div style="display:flex;align-items:center;gap:6px;margin-left:8px;">
-            <span style="font-size:0.68rem;color:#64748b;font-weight:700;">LIVE</span>
+        <!-- Right controls -->
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button id="btnExportHistory"
+            style="display:flex;align-items:center;gap:5px;padding:4px 12px;
+            background:#1e293b;border:1px solid #334155;border-radius:6px;
+            color:#94a3b8;font-size:0.68rem;font-weight:600;cursor:pointer;">
+            ⬇ Xuất CSV
+          </button>
+          <div style="width:1px;height:16px;background:#1e293b;"></div>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <span style="font-size:0.68rem;color:#475569;font-weight:600;">LIVE</span>
             <div id="an-live-wrap" style="position:relative;width:34px;height:18px;cursor:pointer;">
               <input type="checkbox" id="an-live" style="opacity:0;position:absolute;width:0;height:0;">
               <div id="an-live-track" style="position:absolute;inset:0;background:#1e293b;border-radius:9px;
@@ -95,16 +108,16 @@ export class AnalyticsPage {
               <div id="an-live-thumb" style="position:absolute;top:2px;left:2px;width:12px;height:12px;
                 background:#475569;border-radius:50%;transition:.2s;"></div>
             </div>
-            <span id="an-live-dot" style="font-size:0.68rem;color:#334155;">●</span>
+            <span id="an-live-dot" style="font-size:0.7rem;color:#334155;">●</span>
           </div>
         </div>
       </div>
 
-      <!-- TAB PANELS (lazy populated) -->
+      <!-- TAB PANELS -->
       <div style="flex:1;overflow:hidden;position:relative;">
         ${TABS.map((t, i) => `
           <div id="an-tab-${t.id}" style="display:${i === 0 ? 'flex' : 'none'};
-            flex-direction:column;height:100%;overflow-y:auto;padding:16px;gap:16px;">
+            flex-direction:column;height:100%;overflow-y:auto;padding:16px;gap:14px;">
             <div style="color:#475569;font-size:0.8rem;padding:40px;text-align:center;">Đang tải…</div>
           </div>`).join('')}
       </div>
@@ -238,14 +251,12 @@ export class AnalyticsPage {
       btn.addEventListener('click', () => {
         this.range = btn.dataset['range'] as TimeRange;
         document.querySelectorAll('.an-range').forEach(b => {
-          (b as HTMLElement).style.background = 'none';
-          (b as HTMLElement).style.borderColor = '#334155';
+          (b as HTMLElement).style.background = 'transparent';
           (b as HTMLElement).style.color = '#64748b';
           b.classList.remove('an-range-active');
         });
-        btn.style.background = '#1e3a5f';
-        btn.style.borderColor = '#2563eb';
-        btn.style.color = '#60a5fa';
+        btn.style.background = '#2563eb';
+        btn.style.color = '#fff';
         btn.classList.add('an-range-active');
         // Invalidate history-dependent tabs
         (['temp', 'pd', 'correlation', 'ai'] as TabId[]).forEach(t => this.tabReady.delete(t));
@@ -297,8 +308,9 @@ export class AnalyticsPage {
       const btn = document.querySelector<HTMLElement>(`.an-tab[data-tab="${t.id}"]`)!;
       const active = t.id === id;
       panel.style.display = active ? 'flex' : 'none';
-      btn.style.borderBottomColor = active ? '#2563eb' : 'transparent';
-      btn.style.color = active ? '#e2e8f0' : '#64748b';
+      btn.style.background = active ? '#1e293b' : 'transparent';
+      btn.style.color = active ? '#f1f5f9' : '#64748b';
+      btn.style.fontWeight = active ? '700' : '500';
     });
     await this.initTab(id);
   }
@@ -908,14 +920,14 @@ export class AnalyticsPage {
     const hmWarnV = thr3.find((t: Threshold) => t.level === 'warning')?.value;
     const hmAlmV = thr3.find((t: Threshold) => t.level === 'alarm')?.value;
     const hmLegend = hmWarnV !== undefined && hmAlmV !== undefined
-      ? `< span > <span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;" > </span> ≥${hmWarnV}°C (warning)</span >
-      <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;" > </span> ≥${hmAlmV}°C (alarm)</span > `
+      ? `<span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;"></span> ≥${hmWarnV}°C (warning)</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;"></span> ≥${hmAlmV}°C (alarm)</span>`
       : hmWarnV !== undefined
-        ? `< span > <span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;" > </span> ≥${hmWarnV}°C (warning)</span > `
+        ? `<span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;"></span> ≥${hmWarnV}°C (warning)</span>`
         : hmAlmV !== undefined
-          ? `< span > <span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;" > </span> ≥${hmAlmV}°C (alarm)</span > `
-          : `< span > <span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;" > </span> 55–65°C</span >
-      <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;" > </span> &gt;65°C</span > `;
+          ? `<span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;"></span> ≥${hmAlmV}°C (alarm)</span>`
+          : `<span><span style="display:inline-block;width:10px;height:10px;background:#f59e0b;border-radius:2px;"></span> 55–65°C</span>
+      <span><span style="display:inline-block;width:10px;height:10px;background:#ef4444;border-radius:2px;"></span> &gt;65°C</span>`;
 
     // Camera sorted for bar
     const camSorted = CAM_IDS.map((id, i) => ({
@@ -941,23 +953,22 @@ export class AnalyticsPage {
     const isFirstLoad = !document.getElementById('an-c-temp-line');
     if (isFirstLoad) {
       this.setTabHTML('temp', `
-        < !--Section: Tủ 471 -- >
-          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-            <div id="temp-plc-header" > ${ this.groupHeader('🔵', 'Tủ 471 — PLC S7-1200', '#3b82f6', plcStatus, plcSC) } </div>
-              < div style = "display:grid;grid-template-columns:1fr auto;gap:12px;" >
-                <!--Line chart-- >
-                  <div>
-                  <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" >
-                    Nhiệt độ 3 pha(°C) — ${ this.range }
-    </div>
-      < div style = "position:relative;height:240px;" > <canvas id="an-c-temp-line" > </canvas></div >
-        </div>
-        < !--Stats box-- >
-          <div style="min-width:200px;" >
-            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;" > Thống kê </div>
-              < div id = "temp-stats-list" >
-                ${
-                  stats.map(s => `
+        <!-- Section: Tủ 471 -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div id="temp-plc-header">${this.groupHeader('🔵', 'Tủ 471 — PLC S7-1200', '#3b82f6', plcStatus, plcSC)}</div>
+          <div style="display:grid;grid-template-columns:1fr auto;gap:12px;">
+            <!-- Line chart -->
+            <div>
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+                Nhiệt độ 3 pha (°C) — ${this.range}
+              </div>
+              <div style="position:relative;height:240px;"><canvas id="an-c-temp-line"></canvas></div>
+            </div>
+            <!-- Stats box -->
+            <div style="min-width:200px;">
+              <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê</div>
+              <div id="temp-stats-list">
+                ${stats.map(s => `
                   <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;">
                     <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;">${s.label}</div>
                     <div style="font-size:0.7rem;color:#94a3b8;">Min: <b style="color:#e2e8f0;">${s.min}°C</b></div>
@@ -966,71 +977,68 @@ export class AnalyticsPage {
                     ${s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : ''}
                     ${s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : ''}
                     ${s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : ''}
-                  </div>`).join('')
-    }
-    </div>
-      </div>
-      </div>
-      < !--Heatmap -->
-        <div style="margin-top:14px;" >
-          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" >
-            Heatmap nhiệt độ Pha 3 theo giờ(7 ngày)
+                  </div>`).join('')}
               </div>
-              < div style = "overflow-x:auto;" >
-                <table style="border-collapse:separate;border-spacing:2px;font-size:0.62rem;" >
-                  <thead>
+            </div>
+          </div>
+          <!-- Heatmap -->
+          <div style="margin-top:14px;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              Heatmap nhiệt độ Pha 3 theo giờ (7 ngày)
+            </div>
+            <div style="overflow-x:auto;">
+              <table style="border-collapse:separate;border-spacing:2px;font-size:0.62rem;">
+                <thead>
                   <tr>
-                  <td style="padding:2px 8px 2px 0;color:#475569;white-space:nowrap;" > </td>
-                    ${ Array.from({ length: 24 }, (_, h) => `<td style="text-align:center;width:22px;color:#475569;padding:0;">${h}h</td>`).join('') }
-    </tr>
-      </thead>
-      < tbody id = "temp-heatmap-body" >
-        ${
-          heatmapRows.map(row => `
+                    <td style="padding:2px 8px 2px 0;color:#475569;white-space:nowrap;"></td>
+                    ${Array.from({ length: 24 }, (_, h) => `<td style="text-align:center;width:22px;color:#475569;padding:0;">${h}h</td>`).join('')}
+                  </tr>
+                </thead>
+                <tbody id="temp-heatmap-body">
+                  ${heatmapRows.map(row => `
                     <tr>
                       <td style="padding:2px 8px 2px 0;color:#94a3b8;font-weight:600;white-space:nowrap;">${row.label}</td>
                       ${row.data.map(val => `
                         <td title="${val !== null ? val.toFixed(1) + '°C' : '—'}"
                           style="width:22px;height:16px;background:${this.tempCellColor(val, T_IDS[2])};border-radius:2px;opacity:0.85;"></td>
                       `).join('')}
-                    </tr>`).join('')
-    }
-    </tbody>
-      </table>
-      </div>
-      < div style = "display:flex;gap:12px;margin-top:8px;font-size:0.62rem;color:#64748b;" >
-        <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;" > </span> &lt;45°C</span >
-          <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;" > </span> 45–55°C</span >
-            <div id="temp-hm-legend" style = "display:flex;gap:12px;" > ${ hmLegend } </div>
-              </div>
-              </div>
-              </div>
-
-              < !--Section: Camera nhiệt-- >
-                <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-                  <div id="temp-cam-header" > ${ this.groupHeader('🟠', 'Camera nhiệt — 10 điểm đo', '#f97316', camStatus2, camSC2) } </div>
-                    < !--Horizontal bar chart-- >
-                      <div style="margin-bottom:14px;" >
-                        <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" >
-                          Nhiệt độ hiện tại — sắp xếp cao → thấp
-                            </div>
-                            < div style = "position:relative;height:220px;" > <canvas id="an-c-cam-bar" > </canvas></div >
-                              </div>
-                              < !--Line chart P1 - P10-- >
-                                <div>
-                                <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" >
-                                  10 điểm đo theo thời gian(°C) — ${ this.range }
-    </div>
-      < div style = "position:relative;height:200px;" > <canvas id="an-c-cam-line" > </canvas></div >
-        </div>
+                    </tr>`).join('')}
+                </tbody>
+              </table>
+            </div>
+            <div style="display:flex;gap:12px;margin-top:8px;font-size:0.62rem;color:#64748b;">
+              <span><span style="display:inline-block;width:10px;height:10px;background:#3b82f6;border-radius:2px;"></span> &lt;45°C</span>
+              <span><span style="display:inline-block;width:10px;height:10px;background:#22c55e;border-radius:2px;"></span> 45–55°C</span>
+              <div id="temp-hm-legend" style="display:flex;gap:12px;">${hmLegend}</div>
+            </div>
+          </div>
         </div>
 
-        < !--Histogram phân phối-- >
-          <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" > Phân phối nhiệt độ(Tủ 471) </div>
-              < div style = "position:relative;height:160px;" > <canvas id="an-c-temp-hist" > </canvas></div >
-                </div>
-                  `);
+        <!-- Section: Camera nhiệt -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div id="temp-cam-header">${this.groupHeader('🟠', 'Camera nhiệt — 10 điểm đo', '#f97316', camStatus2, camSC2)}</div>
+          <!-- Horizontal bar chart -->
+          <div style="margin-bottom:14px;">
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              Nhiệt độ hiện tại — sắp xếp cao → thấp
+            </div>
+            <div style="position:relative;height:220px;"><canvas id="an-c-cam-bar"></canvas></div>
+          </div>
+          <!-- Line chart P1 - P10 -->
+          <div>
+            <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+              10 điểm đo theo thời gian (°C) — ${this.range}
+            </div>
+            <div style="position:relative;height:200px;"><canvas id="an-c-cam-line"></canvas></div>
+          </div>
+        </div>
+
+        <!-- Histogram phân phối -->
+        <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+          <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối nhiệt độ (Tủ 471)</div>
+          <div style="position:relative;height:160px;"><canvas id="an-c-temp-hist"></canvas></div>
+        </div>
+      `);
     } else {
       // LIVE Update
       const elH = document.getElementById('temp-plc-header');
@@ -1040,19 +1048,19 @@ export class AnalyticsPage {
       const elStats = document.getElementById('temp-stats-list');
       if (elStats) {
         elStats.innerHTML = stats.map(s => `
-                < div style = "margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;" >
-                  <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;" > ${ s.label } </div>
-                    < div style = "font-size:0.7rem;color:#94a3b8;" > Min: <b style="color:#e2e8f0;" > ${ s.min }°C < /b></div >
-                      <div style="font-size:0.7rem;color:#94a3b8;" > Max: <b style="color:#e2e8f0;" > ${ s.max }°C < /b></div >
-                        <div style="font-size:0.7rem;color:#94a3b8;" > Avg: <b style="color:#e2e8f0;" > ${ s.avg }°C < /b></div >
-                          ${ s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : '' }
-            ${ s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : '' }
-            ${ s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : '' }
-    </div>`).join('');
-  }
-  const elHM = document.getElementById('temp-heatmap-body');
-  if(elHM) {
-    elHM.innerHTML = heatmapRows.map(row => `
+          <div style="margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid #0f172a;">
+            <div style="font-size:0.75rem;font-weight:700;color:${s.color};margin-bottom:4px;">${s.label}</div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Min: <b style="color:#e2e8f0;">${s.min}°C</b></div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Max: <b style="color:#e2e8f0;">${s.max}°C</b></div>
+            <div style="font-size:0.7rem;color:#94a3b8;">Avg: <b style="color:#e2e8f0;">${s.avg}°C</b></div>
+            ${s.warnV !== undefined ? `<div style="font-size:0.7rem;color:#f59e0b;">>${s.warnV}°C (warning): ${s.overWarn} lần</div>` : ''}
+            ${s.almV !== undefined ? `<div style="font-size:0.7rem;color:#ef4444;">>${s.almV}°C (alarm): ${s.overAlm} lần</div>` : ''}
+            ${s.warnV === undefined && s.almV === undefined ? `<div style="font-size:0.65rem;color:#334155;font-style:italic;">Chưa cài ngưỡng</div>` : ''}
+          </div>`).join('');
+      }
+      const elHM = document.getElementById('temp-heatmap-body');
+      if (elHM) {
+        elHM.innerHTML = heatmapRows.map(row => `
           <tr>
             <td style="padding:2px 8px 2px 0;color:#94a3b8;font-weight:600;white-space:nowrap;">${row.label}</td>
             ${row.data.map(val => `
@@ -1060,10 +1068,10 @@ export class AnalyticsPage {
                 style="width:22px;height:16px;background:${this.tempCellColor(val, T_IDS[2])};border-radius:2px;opacity:0.85;"></td>
             `).join('')}
           </tr>`).join('');
-  }
-  const elLeg = document.getElementById('temp-hm-legend');
-  if(elLeg) elLeg.innerHTML = hmLegend;
-}
+      }
+      const elLeg = document.getElementById('temp-hm-legend');
+      if (elLeg) elLeg.innerHTML = hmLegend;
+    }
 
 // Line chart với ngưỡng từ Rules
 const now = Date.now();
@@ -1158,7 +1166,7 @@ this.mkChart('an-c-temp-hist', {
   // ══════════════════════════════════════════════════════════════
   // TAB 3 — PHÓNG ĐIỆN
   // ══════════════════════════════════════════════════════════════
-  private async buildPd(): Promise < void> {
+  private async buildPd(): Promise<void> {
   await this.loadHistory();
 
   const data = this.pdH.map(h => h.value);
@@ -1194,32 +1202,31 @@ this.mkChart('an-c-temp-hist', {
   const pdAiStatus = (pdAiVal !== null && pdAiVal >= -20) ? 'NGUY HIỂM' : (pdAiVal !== null && pdAiVal >= -27) ? 'CẢNH BÁO' : 'BÌNH THƯỜNG';
   const pdAiColor = pdAiStatus === 'NGUY HIỂM' ? '#ef4444' : pdAiStatus === 'CẢNH BÁO' ? '#f59e0b' : '#10b981';
 
-
     const isFirstLoad = !document.getElementById('an-c-pd-line');
     if (isFirstLoad) {
       this.setTabHTML('pd', `
-    < div style = "background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-    <div id="pd-plc-header" > ${ this.groupHeader('🔵', 'Tủ 471 — Cảm biến phóng điện', '#3b82f6', pdStatus, pdSC) } </div>
-  < div style = "font-size:0.7rem;color:#64748b;margin-bottom:12px;" >
-  Sensor: <code style="color:#a855f7;background:#0f172a;padding:1px 6px;border-radius:3px;" > phong_dien </code>
-  & nbsp;·& nbsp; Đơn vị: dBmW & nbsp;·& nbsp; PLC S7 - 1200
+    <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+    <div id="pd-plc-header">${this.groupHeader('🔵', 'Tủ 471 — Cảm biến phóng điện', '#3b82f6', pdStatus, pdSC)}</div>
+  <div style="font-size:0.7rem;color:#64748b;margin-bottom:12px;">
+  Sensor: <code style="color:#a855f7;background:#0f172a;padding:1px 6px;border-radius:3px;">phong_dien</code>
+  &nbsp;·&nbsp; Đơn vị: dBmW &nbsp;·&nbsp; PLC S7-1200
     </div>
 
-    < div style = "display:grid;grid-template-columns:1fr 220px;gap:12px;" >
+    <div style="display:grid;grid-template-columns:1fr 220px;gap:12px;">
       <div>
-      <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" >
-        Cường độ phóng điện(dB) — ${ this.range }
+      <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">
+        Cường độ phóng điện (dB) — ${this.range}
 </div>
-  < div style = "position:relative;height:260px;" > <canvas id="an-c-pd-line" > </canvas></div >
+  <div style="position:relative;height:260px;"><canvas id="an-c-pd-line"></canvas></div>
     </div>
 
-    < !--THỐNG KÊ KỸ THUẬT-- >
-      <div id="pd-stats-panel" style = "background:#0f172a;border-radius:8px;padding:14px 16px;border:1px solid #1e293b;min-width:180px;" >
-        <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;" > Thống kê PD </div>
-          < div style = "margin-bottom:8px;" > <div style="font-size:0.7rem;color:#94a3b8;" > Min < /div><div id="pd-min" style="font-size:1.1rem;font-weight:700;color:#a855f7;">${minPD} dB</div > </div>
-            < div style = "margin-bottom:8px;" > <div style="font-size:0.7rem;color:#94a3b8;" > Max < /div><div id="pd-max" style="font-size:1.1rem;font-weight:700;color:#ef4444;">${maxPD} dB</div > </div>
-              < div style = "margin-bottom:12px;" > <div style="font-size:0.7rem;color:#94a3b8;" > Avg < /div><div id="pd-avg" style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">${avgPD} dB</div > </div>
-                < div id = "pd-alerts-box" >
+    <!-- THỐNG KÊ KỸ THUẬT -->
+      <div id="pd-stats-panel" style="background:#0f172a;border-radius:8px;padding:14px 16px;border:1px solid #1e293b;min-width:180px;">
+        <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:10px;">Thống kê PD</div>
+          <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Min</div><div id="pd-min" style="font-size:1.1rem;font-weight:700;color:#a855f7;">${minPD} dB</div></div>
+            <div style="margin-bottom:8px;"><div style="font-size:0.7rem;color:#94a3b8;">Max</div><div id="pd-max" style="font-size:1.1rem;font-weight:700;color:#ef4444;">${maxPD} dB</div></div>
+              <div style="margin-bottom:12px;"><div style="font-size:0.7rem;color:#94a3b8;">Avg</div><div id="pd-avg" style="font-size:1.1rem;font-weight:700;color:#e2e8f0;">${avgPD} dB</div></div>
+                <div id="pd-alerts-box">
                   ${
                     warnV !== undefined ? `
                 <div style="padding:8px;background:rgba(245,158,11,0.1);border-radius:6px;margin-bottom:6px;">
@@ -1239,50 +1246,50 @@ this.mkChart('an-c-temp-hist', {
   </div>
   </div>
 
-  < !--AI PD PROGNOSIS SECTION-- >
-    <div style="background:linear-gradient(135deg, #0f172a, #1e3a8a);border-radius:10px;padding:16px;border:1px solid #1e40af;margin-top:12px;box-shadow:0 4px 20px rgba(0,0,0,0.3);" >
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;" >
-        <div style="display:flex;align-items:center;gap:8px;" >
-          <span style="font-size:1.2rem;" >🤖</span>
-            < h3 style = "margin:0;font-size:0.9rem;color:#60a5fa;letter-spacing:0.5px;" > PHÂN TÍCH XU HƯỚNG PHÓNG ĐIỆN(AI) </h3>
+  <!-- AI PD PROGNOSIS SECTION -->
+    <div style="background:linear-gradient(135deg, #0f172a, #1e3a8a);border-radius:10px;padding:16px;border:1px solid #1e40af;margin-top:12px;box-shadow:0 4px 20px rgba(0,0,0,0.3);">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <span style="font-size:1.2rem;">🤖</span>
+            <h3 style="margin:0;font-size:0.9rem;color:#60a5fa;letter-spacing:0.5px;">PHÂN TÍCH XU HƯỚNG PHÓNG ĐIỆN (AI)</h3>
               </div>
-              < span style = "font-size:0.6rem;color:#93c5fd;background:rgba(30,64,175,0.5);padding:3px 8px;border-radius:20px;border:1px solid #3b82f6;" > PREDICTIVE MAINTENANCE </span>
+              <span style="font-size:0.6rem;color:#93c5fd;background:rgba(30,64,175,0.5);padding:3px 8px;border-radius:20px;border:1px solid #3b82f6;">PREDICTIVE MAINTENANCE</span>
                 </div>
 
-                < div style = "display:grid;grid-template-columns: 1fr 1fr 1.5fr; gap:20px; align-items:center;" >
-                  <div style="background:rgba(15,23,42,0.6);padding:12px;border-radius:8px;border:1px solid rgba(59,130,246,0.2);" >
-                    <div style="font-size:0.6rem;color:#94a3b8;font-weight:700;margin-bottom:4px;" > CƯỜNG ĐỘ HIỆN TẠI </div>
-                      < div id = "pd-ai-cur" style = "font-size:1.6rem;font-weight:900;color:#e2e8f0;" > ${ parseFloat(maxPD).toFixed(1) } <span style="font-size:0.8rem;color:#64748b;" > dB < /span></div >
-                        <div id="pd-ai-cur-time" style = "font-size:0.55rem;color:#475569;margin-top:4px;" >🕒 Ghi nhận: ${ new Date().toLocaleTimeString('vi-VN') } </div>
+                <div style="display:grid;grid-template-columns: 1fr 1fr 1.5fr; gap:20px; align-items:center;">
+                  <div style="background:rgba(15,23,42,0.6);padding:12px;border-radius:8px;border:1px solid rgba(59,130,246,0.2);">
+                    <div style="font-size:0.6rem;color:#94a3b8;font-weight:700;margin-bottom:4px;">CƯỜNG ĐỘ HIỆN TẠI</div>
+                      <div id="pd-ai-cur" style="font-size:1.6rem;font-weight:900;color:#e2e8f0;">${parseFloat(maxPD).toFixed(1)} <span style="font-size:0.8rem;color:#64748b;">dB</span></div>
+                        <div id="pd-ai-cur-time" style="font-size:0.55rem;color:#475569;margin-top:4px;">🕒 Ghi nhận: ${new Date().toLocaleTimeString('vi-VN')}</div>
                           </div>
 
-                          < div style = "background:rgba(30,58,138,0.4);padding:12px;border-radius:8px;border:1px solid #2563eb;" >
-                            <div style="font-size:0.6rem;color:#93c5fd;font-weight:700;margin-bottom:4px;" > AI DỰ BÁO(T + 10M) </div>
-                              < div id = "pd-ai-pred" style = "font-size:1.6rem;font-weight:900;color:#60a5fa;" > ${ pdAiVal !== null ? pdAiVal.toFixed(1) : '---' } <span style="font-size:0.8rem;color:#3b82f6;" > dB < /span></div >
-                                <div id="pd-ai-pred-time" style = "font-size:0.55rem;color:#3b82f6;margin-top:4px;" >📅 Lúc: ${ latestPdPred?.ForecastTime || '---' } </div>
+                          <div style="background:rgba(30,58,138,0.4);padding:12px;border-radius:8px;border:1px solid #2563eb;">
+                            <div style="font-size:0.6rem;color:#93c5fd;font-weight:700;margin-bottom:4px;">AI DỰ BÁO (T + 10M)</div>
+                              <div id="pd-ai-pred" style="font-size:1.6rem;font-weight:900;color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem;color:#3b82f6;">dB</span></div>
+                                <div id="pd-ai-pred-time" style="font-size:0.55rem;color:#3b82f6;margin-top:4px;">📅 Lúc: ${latestPdPred?.ForecastTime || '---'}</div>
                                   </div>
 
-                                  < div style = "padding-left:10px; border-left: 2px dashed rgba(59,130,246,0.3);" >
-                                    <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:6px;" > ĐÁNH GIÁ NGUY CƠ: </div>
-                                      < div style = "display:flex;align-items:center;gap:10px;" >
-                                        <div id="pd-ai-status-dot" style = "width:12px;height:12px;border-radius:50%;background:${pdAiColor};box-shadow:0 0 10px ${pdAiColor};" > </div>
-                                          < div id = "pd-ai-status-text" style = "font-size:1.1rem;font-weight:800;color:${pdAiColor};" > ${ latestPdPred ? pdAiStatus : 'ĐANG PHÂN TÍCH...' } </div>
+                                  <div style="padding-left:10px; border-left: 2px dashed rgba(59,130,246,0.3);">
+                                    <div style="font-size:0.65rem;color:#94a3b8;margin-bottom:6px;">ĐÁNH GIÁ NGUY CƠ:</div>
+                                      <div style="display:flex;align-items:center;gap:10px;">
+                                        <div id="pd-ai-status-dot" style="width:12px;height:12px;border-radius:50%;background:${pdAiColor};box-shadow:0 0 10px ${pdAiColor};"></div>
+                                          <div id="pd-ai-status-text" style="font-size:1.1rem;font-weight:800;color:${pdAiColor};">${latestPdPred ? pdAiStatus : 'ĐANG PHÂN TÍCH...'}</div>
                                             </div>
                                             </div>
                                             </div>
                                             </div>
 
-                                            < div style = "display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;" >
-                                              <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-                                                <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" > Sự kiện PD / ngày(7 ngày) </div>
-                                                  < div style = "position:relative;height:160px;" > <canvas id="an-c-pd-bar" > </canvas></div >
+                                            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px;">
+                                              <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+                                                <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Sự kiện PD / ngày (7 ngày)</div>
+                                                  <div style="position:relative;height:160px;"><canvas id="an-c-pd-bar"></canvas></div>
                                                     </div>
-                                                    < div style = "background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;" >
-                                                      <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;" > Phân phối cường độ PD </div>
-                                                        < div style = "position:relative;height:160px;" > <canvas id="an-c-pd-hist" > </canvas></div >
+                                                    <div style="background:#1e293b;border-radius:10px;padding:14px 16px;border:1px solid #334155;">
+                                                      <div style="font-size:0.65rem;color:#64748b;font-weight:700;text-transform:uppercase;margin-bottom:8px;">Phân phối cường độ PD</div>
+                                                        <div style="position:relative;height:160px;"><canvas id="an-c-pd-hist"></canvas></div>
                                                           </div>
                                                           </div>
-                                                            `);
+      `);
     } else {
       // LIVE Update PD
       const elH = document.getElementById('pd-plc-header');
@@ -1300,7 +1307,7 @@ this.mkChart('an-c-temp-hist', {
       const elAiPredT = document.getElementById('pd-ai-pred-time');
       const elAiStD = document.getElementById('pd-ai-status-dot');
       const elAiStT = document.getElementById('pd-ai-status-text');
-      if (elAiCur) elAiCur.innerHTML = `${ parseFloat(maxPD).toFixed(1) } <span style="font-size:0.8rem;color:#64748b;" > dB </span>`;
+      if (elAiCur) elAiCur.innerHTML = `${parseFloat(maxPD).toFixed(1)} <span style="font-size:0.8rem;color:#64748b;">dB</span>`;
 if (elAiCurT) elAiCurT.textContent = `🕒 Ghi nhận: ${new Date().toLocaleTimeString('vi-VN')}`;
 if (elAiPred) elAiPred.innerHTML = `${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem;color:#3b82f6;">dB</span>`;
 if (elAiPredT) elAiPredT.textContent = `📅 Lúc: ${latestPdPred?.ForecastTime || '---'}`;
@@ -1787,7 +1794,7 @@ this.mkChart('an-c-pd-hist', {
   // ══════════════════════════════════════════════════════════════
   // TAB 6 — SỨC KHỎE & RỦI RO
   // ══════════════════════════════════════════════════════════════
-  private async buildHealth(): Promise < void> {
+  private async buildHealth(): Promise<void> {
   let apiScores: Array<{ deviceId: string; deviceName: string; deviceType: string; score: number; risk: string }> = [];
   try {
     apiScores = await stationApi.getHealthScores();

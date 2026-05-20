@@ -20,7 +20,9 @@ const ADMIN_NAV: NavItem[] = [
   { id: 'device-management', icon: '📡', label: 'Thiết bị', roles: ['admin'] },
   { id: 'user-management', icon: '👥', label: 'Người dùng', roles: ['admin'] },
   { id: 'rule-engine', icon: '🎛️', label: 'Rule Engine', roles: ['admin'] },
+  { id: 'thermal-points', icon: '🌡️', label: 'Điểm Nhiệt', roles: ['admin', 'manager'] },
 ];
+
 
 export class AppShell {
   private activeNavId: PageId = 'dashboard';

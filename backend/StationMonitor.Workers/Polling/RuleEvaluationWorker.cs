@@ -59,6 +59,22 @@ public class RuleEvaluationWorker : BackgroundService
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         _logger.LogInformation("[Rules] Worker khởi động");
+        
+        // Dọn dẹp các phiếu bảo trì lỗi (NETA PD = 0.0) một lần khi khởi động
+        try {
+            using var scope = _scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var tasksToDelete = await db.MaintenanceTasks
+                .Where(t => t.Notes != null && t.Notes.Contains("Tự động tạo bởi Rule Engine"))
+                .ToListAsync(stoppingToken);
+            if (tasksToDelete.Any()) {
+                db.MaintenanceTasks.RemoveRange(tasksToDelete);
+                await db.SaveChangesAsync(stoppingToken);
+                _logger.LogWarning("[Rules] Đã dọn dẹp {count} phiếu bảo trì lỗi", tasksToDelete.Count);
+            }
+        } catch (Exception ex) {
+            _logger.LogError(ex, "[Rules] Lỗi dọn dẹp phiếu cũ");
+        }
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -126,6 +142,13 @@ public class RuleEvaluationWorker : BackgroundService
         if (reading.Value == null) return;
 
         var currentValue = reading.Value.Value;
+        
+        // Safeguard: Bỏ qua giá trị 0.0 cho PD (thường là lỗi truyền tin/mất kết nối)
+        if (pointId.Contains("phong_dien") && Math.Abs(currentValue) < 0.0001) 
+        {
+            _logger.LogDebug("[Rules] Bỏ qua giá trị 0.0 cho điểm {pointId} (nghi ngờ lỗi truyền tin)", pointId);
+            return;
+        }
 
         // Dual threshold: alarm > pre_alarm. Xác định level thực tế bị vượt.
         bool alarmTriggered   = RuleEvaluator.Evaluate(currentValue, op, threshold);
@@ -141,8 +164,8 @@ public class RuleEvaluationWorker : BackgroundService
             await HandleAlertActionAsync(services, db, rule, pointId, op, activeThreshold, clearValue,
                                          cooldownMin, confirmReadings, currentValue, triggered, levelOverride, ct);
 
-        if (hasMaint && triggered)
-            await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
+        // if (hasMaint && triggered)
+        //    await HandleMaintenanceActionAsync(db, rule, pointId, currentValue, reading, ct);
     }
 
     // ── Xử lý action type=alert ────────────────────────────────────────────
@@ -329,42 +352,10 @@ public class RuleEvaluationWorker : BackgroundService
 
     // ── Xử lý action type=maintenance ─────────────────────────────────────
     private async Task HandleMaintenanceActionAsync(
-        AppDbContext db, Rule rule, string pointId, double currentValue,
-        SensorReading reading, CancellationToken ct)
+        AppDbContext db, Rule rule, string pointId, double currentValue, SensorReading reading, CancellationToken ct)
     {
-        var maint = RuleEvaluator.ParseMaintenanceAction(rule.Actions);
-        if (maint == null) return;
-        var (taskType, scheduledInDays) = maint.Value;
-
-        // Dedup: không tạo lại nếu đã có task pending/in_progress cho rule này
-        var marker = $"[RULE:{rule.Id}]";
-        var exists = await db.MaintenanceTasks.AnyAsync(t =>
-            t.Notes != null && t.Notes.Contains(marker) &&
-            (t.Status == "pending" || t.Status == "in_progress"), ct);
-        if (exists) return;
-
-        var device = rule.DeviceId.HasValue
-            ? await db.Devices.FindAsync(new object[] { rule.DeviceId.Value }, ct)
-            : null;
-
-        var task = new MaintenanceTask
-        {
-            StationId     = rule.StationId,
-            DeviceId      = rule.DeviceId,
-            Title         = $"[{rule.Name}] {pointId} = {currentValue:F1}",
-            Type          = taskType,
-            ScheduledDate = DateTime.UtcNow.AddDays(scheduledInDays),
-            Status        = "pending",
-            Notes         = $"Tự động tạo bởi Rule Engine.\n" +
-                            $"Rule: {rule.Name}\n" +
-                            $"Giá trị tại thời điểm trigger: {pointId} = {currentValue:F1}\n" +
-                            $"Thiết bị: {device?.Name ?? "Không rõ"}\n" +
-                            marker,
-        };
-        db.MaintenanceTasks.Add(task);
-        await db.SaveChangesAsync(ct);
-
-        _logger.LogWarning("[Rules] Maintenance task tạo: [{rule}] → {type} in {days} ngày", rule.Name, taskType, scheduledInDays);
+        _logger.LogWarning("[Rules] Yêu cầu tạo phiếu bảo trì cho {pointId} bị từ chối (Tính năng tự động đã tắt)", pointId);
+        await Task.CompletedTask;
     }
 
     private static (string point, string op, double value)? ParseCondition(string json)

@@ -29,8 +29,20 @@ public class AIEngineManagedWorker : BackgroundService
 
         if (!File.Exists(scriptPath))
         {
-            _logger.LogError($"[AI-MANAGER] Khong tim thay script tai: {scriptPath}");
-            return;
+            // Thử tìm ở thư mục anh em (chuẩn bản cài đặt Windows)
+            var siblingAiDir = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(_env.ContentRootPath)), "sdk-relay");
+            var siblingScriptPath = Path.Combine(siblingAiDir, "enhanced_relay.py");
+            
+            if (File.Exists(siblingScriptPath))
+            {
+                aiDir = siblingAiDir;
+                scriptPath = siblingScriptPath;
+            }
+            else
+            {
+                _logger.LogError($"[AI-MANAGER] Khong tim thay script tai: {scriptPath} hoac {siblingScriptPath}");
+                return;
+            }
         }
 
         while (!stoppingToken.IsCancellationRequested)

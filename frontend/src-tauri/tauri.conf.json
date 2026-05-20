@@ -1,13 +1,13 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Station Monitor",
-  "mainBinaryName": "world-monitor",
+  "mainBinaryName": "station-monitor",
   "version": "2.5.4",
-  "identifier": "app.worldmonitor.desktop",
+  "identifier": "vn.stationmonitor.desktop",
   "build": {
     "beforeDevCommand": "npm run dev",
-    "beforeBuildCommand": "npm run build:desktop",
-    "frontendDist": "../dist",
+    "beforeBuildCommand": "",
+    "frontendDist": "../dist2",
     "devUrl": "http://localhost:5173"
   },
   "app": {
@@ -15,7 +15,7 @@
     "windows": [
 
       {
-        "title": "World Monitor",
+        "title": "Station Monitor",
         "width": 1440,
         "height": 900,
         "minWidth": 1200,
@@ -36,16 +36,10 @@
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "app",
-      "dmg",
-      "nsis",
-      "msi",
-      "appimage"
-    ],
+    "targets": ["nsis"],
     "category": "Productivity",
-    "shortDescription": "World Monitor desktop app (supports World and Tech variants)",
-    "longDescription": "World Monitor desktop app for real-time global intelligence. Build with VITE_VARIANT=tech to package Tech Monitor branding and dataset defaults.",
+    "shortDescription": "Station Monitor - Hệ thống giám sát trạm điện thông minh",
+    "longDescription": "Station Monitor - Giám sát trạm điện, nhiệt độ, camera AI real-time.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -53,7 +47,11 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [],
+    "resources": [
+      "resources/backend/*",
+      "resources/media-server/*",
+      "resources/sdk-relay/*"
+    ],
     "windows": {
       "digestAlgorithm": "sha256",
       "timestampUrl": "https://timestamp.digicert.com"

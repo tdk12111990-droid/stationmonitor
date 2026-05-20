@@ -34,6 +34,10 @@ public class PlcPollingWorker : BackgroundService
     // Đọc mỗi 3 giây
     private const int PollIntervalMs = 3000;
 
+    // Chỉ đánh dấu offline sau 60 giây fail liên tục
+    private const int OfflineGraceSecs = 60;
+    private readonly Dictionary<Guid, DateTime> _failSince = new();
+
     // Theo dõi lần dọn dẹp cuối cùng
     private DateTime _lastCleanup = DateTime.MinValue;
 
@@ -147,7 +151,10 @@ public class PlcPollingWorker : BackgroundService
             if (!plc.IsConnected)
             {
                 _logger.LogWarning("[PLC] Không kết nối được {Ip}", ip);
-                await UpdateDeviceStatusAsync(db, device.Id, "offline");
+                if (!_failSince.TryGetValue(device.Id, out var since))
+                    _failSince[device.Id] = DateTime.UtcNow;
+                else if ((DateTime.UtcNow - since).TotalSeconds >= OfflineGraceSecs)
+                    await UpdateDeviceStatusAsync(db, device.Id, "offline");
                 return;
             }
 
@@ -191,12 +198,20 @@ public class PlcPollingWorker : BackgroundService
             var logParts = readings.Select(r => $"{r.PointId}={r.Value:0.#}{r.Unit}");
             _logger.LogDebug("[PLC] {Ip} → {Points}", ip, string.Join(", ", logParts));
 
+            _failSince.Remove(device.Id);
             await UpdateDeviceStatusAsync(db, device.Id, "online");
         }
         catch (Exception ex)
         {
             _logger.LogError("[PLC] Lỗi đọc {Ip}: {Msg}", ip, ex.Message);
-            await UpdateDeviceStatusAsync(db, device.Id, "offline");
+            if (!_failSince.TryGetValue(device.Id, out var since))
+            {
+                _failSince[device.Id] = DateTime.UtcNow;
+            }
+            else if ((DateTime.UtcNow - since).TotalSeconds >= OfflineGraceSecs)
+            {
+                await UpdateDeviceStatusAsync(db, device.Id, "offline");
+            }
         }
         finally
         {

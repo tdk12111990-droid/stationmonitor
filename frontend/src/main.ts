@@ -35,6 +35,7 @@ import {
 } from '@/pages/OtherPages';
 import { ReportsPage } from '@/pages/ReportsPage';
 import { RuleEnginePage } from '@/pages/RuleEnginePage';
+import { ThermalPointsPage } from '@/pages/ThermalPointsPage';
 applyStoredTheme();
 
 // ── Xóa data cũ khi schema thay đổi ─────────────────────────
@@ -112,7 +113,8 @@ router
   .register('audit-log', shellPage('audit-log', AuditLogPage))
   .register('maintenance', shellPage('maintenance', MaintenancePage))
   .register('multisite', shellPage('multisite', MultisitePage))
-  .register('rule-engine', shellPage('rule-engine', RuleEnginePage));
+  .register('rule-engine', shellPage('rule-engine', RuleEnginePage))
+  .register('thermal-points', shellPage('thermal-points', ThermalPointsPage));
 
 
 // Boot: navigate to dashboard if already logged in, else login

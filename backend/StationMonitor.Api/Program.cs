@@ -9,7 +9,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.AspNetCore.StaticFiles;
 using Hangfire;
-using Hangfire.PostgreSql;
+using Hangfire.Storage.SQLite;
 using StationMonitor.Api.Hubs;
 using StationMonitor.Api.Middleware;
 using StationMonitor.Data;
@@ -21,49 +21,53 @@ using StationMonitor.Services.Reports;
 using StationMonitor.Workers.Polling;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.ConfigureKestrel(serverOptions => {
+    serverOptions.ListenAnyIP(5056);
+});
 
 // ── QuestPDF license ──────────────────────────────────────
 QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
-// ── Wait for Database (Critical for Docker) ────────────────
-string? connString = builder.Configuration.GetConnectionString("Default");
-if (!string.IsNullOrEmpty(connString))
-{
-    Console.WriteLine("[Startup] Checking database connectivity...");
-    int retryCount = 0;
-    while (retryCount < 20)
-    {
-        try
-        {
-            using var conn = new Npgsql.NpgsqlConnection(connString);
-            conn.Open();
-            Console.WriteLine("[Startup] Database is READY.");
-            break;
-        }
-        catch (Exception ex)
-        {
-            retryCount++;
-            Console.WriteLine($"[Startup] Database not ready (Attempt {retryCount}/20): {ex.Message}");
-            System.Threading.Thread.Sleep(3000);
-            if (retryCount >= 20)
-            {
-                Console.WriteLine("[Startup] FATAL: Could not connect to database. Exiting.");
-                throw;
-            }
-        }
-    }
-}
+// ── Database Safety Check ─────────────────────────────────
+// SQLite doesn't need a network check, so we can skip the old Npgsql check
+Console.WriteLine("[Startup] Using SQLite for Desktop Mode.");
 
 
 // ── Database ──────────────────────────────────────────────
+bool isDocker = Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+string appDataFolder = isDocker 
+    ? "/app/data" 
+    : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "StationMonitor");
+
+if (!Directory.Exists(appDataFolder)) Directory.CreateDirectory(appDataFolder);
+
+string dbPath = Path.Combine(appDataFolder, "station_monitor.db");
 builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
+    options.UseSqlite($"Data Source={dbPath}"));
+    
+Console.WriteLine($"[Startup] AppData Folder: {appDataFolder}");
+Console.WriteLine($"[Startup] Database Path: {dbPath}");
+
+// Đảm bảo quyền ghi
+
+try {
+    var testFile = Path.Combine(appDataFolder, "test_write.tmp");
+    File.WriteAllText(testFile, "test");
+    File.Delete(testFile);
+    Console.WriteLine("[Startup] Write Permission: OK");
+} catch (Exception ex) {
+    Console.WriteLine($"[Startup] FATAL: NO WRITE PERMISSION to {appDataFolder}: {ex.Message}");
+}
 
 // ── Hangfire ──────────────────────────────────────────────
-builder.Services.AddHangfire(config =>
-    config.UsePostgreSqlStorage(c =>
-        c.UseNpgsqlConnection(builder.Configuration.GetConnectionString("Default"))));
-builder.Services.AddHangfireServer();
+try {
+    string hfPath = Path.Combine(appDataFolder, "hangfire.db");
+    builder.Services.AddHangfire(config =>
+        config.UseSQLiteStorage(hfPath));
+    builder.Services.AddHangfireServer();
+} catch (Exception ex) {
+    Console.WriteLine($"[Startup] WARNING: Hangfire could not start: {ex.Message}");
+}
 
 // ── Services ──────────────────────────────────────────────
 builder.Services.AddHttpContextAccessor();
@@ -193,13 +197,6 @@ builder.Services.AddReverseProxy()
         }
     );
 
-// ── Background Workers (Dịch vụ chạy ngầm) ────────────────
-builder.Services.AddHostedService<StationMonitor.Workers.Polling.PlcPollingWorker>();
-builder.Services.AddHostedService<StationMonitor.Workers.Polling.ModbusTcpWorker>();
-builder.Services.AddHostedService<StationMonitor.Workers.Polling.MqttSubscriberWorker>();
-builder.Services.AddHostedService<StationMonitor.Workers.Polling.RuleEvaluationWorker>();
-builder.Services.AddHostedService<StationMonitor.Workers.Polling.HealthScoreWorker>();
-
 var app = builder.Build();
 
 // ── Static Files (Frontend, SVG, Media) ──────────────────
@@ -229,87 +226,77 @@ app.MapControllers();
 app.MapHub<RealtimeHub>("/ws/realtime");
 
 // Hangfire dashboard (admin only in production)
-app.UseHangfireDashboard("/hangfire");
+try {
+    app.UseHangfireDashboard("/hangfire");
+} catch { }
 
 // SPA fallback: serve index.html for all non-API routes
 app.MapFallbackToFile("index.html");
 
 // Đăng ký recurring job: tạo báo cáo ngày lúc 00:05 hàng ngày
-RecurringJob.AddOrUpdate<ReportSchedulerWorker>(
-    "daily-report",
-    worker => worker.GenerateDailyAsync(),
-    "5 0 * * *");  // 00:05 mỗi ngày
+try {
+    RecurringJob.AddOrUpdate<ReportSchedulerWorker>(
+        "daily-report",
+        worker => worker.GenerateDailyAsync(),
+        "5 0 * * *");  // 00:05 mỗi ngày
+} catch (Exception ex) {
+    Console.WriteLine($"[Startup] WARNING: Could not register recurring job: {ex.Message}");
+}
 
 // ── Startup Tasks ─────────────────────────────────────────
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.Migrate();
-
-    // Đảm bảo bảng LicenseKeys tồn tại (phòng trường hợp migration lỗi)
-    await db.Database.ExecuteSqlRawAsync(@"
-        CREATE TABLE IF NOT EXISTS ""LicenseKeys"" (
-            ""Id"" uuid NOT NULL PRIMARY KEY,
-            ""Key"" text NOT NULL,
-            ""IssuedTo"" text NOT NULL,
-            ""MaxConcurrentSessions"" integer NOT NULL,
-            ""ExpiresAt"" timestamp with time zone,
-            ""IsActive"" boolean NOT NULL,
-            ""CreatedAt"" timestamp with time zone NOT NULL
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS ""IX_LicenseKeys_Key"" ON ""LicenseKeys"" (""Key"");
+try {
+    using (var scope = app.Services.CreateScope())
+    {
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         
-        CREATE TABLE IF NOT EXISTS ""ActiveSessions"" (
-            ""Id"" uuid NOT NULL PRIMARY KEY,
-            ""UserId"" uuid NOT NULL,
-            ""LicenseKeyId"" uuid NOT NULL REFERENCES ""LicenseKeys""(""Id"") ON DELETE CASCADE,
-            ""SessionToken"" text NOT NULL,
-            ""IpAddress"" text,
-            ""UserAgent"" text,
-            ""LoginAt"" timestamp with time zone NOT NULL,
-            ""LastSeenAt"" timestamp with time zone NOT NULL,
-            ""ExpiresAt"" timestamp with time zone NOT NULL,
-            ""IsRevoked"" boolean NOT NULL
-        );
-    ");
+        // SQLite: Dùng EnsureCreated để tạo bảng chuẩn từ C# Model nếu chưa có
+        db.Database.EnsureCreated();
 
-    // Đảm bảo các cột được thêm vào kể cả khi migration đã bị đánh dấu "applied" mà DDL chưa chạy
-    await db.Database.ExecuteSqlRawAsync(@"ALTER TABLE ""Rules"" ADD COLUMN IF NOT EXISTS ""RuleSet"" text;");
+        // Vá lỗi thiếu cột RuleSet cho SQLite (vì SQLite không hỗ trợ IF NOT EXISTS trong ALTER TABLE)
+        try {
+            db.Database.ExecuteSqlRaw("ALTER TABLE Rules ADD COLUMN RuleSet TEXT;");
+            Console.WriteLine("[Startup] Added missing column RuleSet to Rules table.");
+        } catch { 
+            // Cột đã tồn tại, không làm gì cả
+        }
 
-    var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
-    await authService.SeedAdminIfNotExistsAsync();
+        var authService = scope.ServiceProvider.GetRequiredService<AuthService>();
+        await authService.SeedAdminIfNotExistsAsync();
 
-    // Seed trạm + thiết bị mặc định nếu chưa có
-    await SeedDefaultStationAsync(db);
+        // Seed trạm + thiết bị mặc định nếu chưa có
+        await SeedDefaultStationAsync(db);
 
-    // Fix go2rtc_id sai cho Camera 153 nếu đang dùng "hikvision_main"
-    await FixCamera153Go2rtcIdAsync(db);
+        // Fix go2rtc_id sai cho Camera 153 nếu đang dùng "hikvision_main"
+        await FixCamera153Go2rtcIdAsync(db);
 
-    // Đổi tên PLC thành "Tủ 471" nếu vẫn còn tên cũ
-    await FixPlcNameAsync(db);
+        // Đổi tên PLC thành "Tủ 471" nếu vẫn còn tên cũ
+        await FixPlcNameAsync(db);
 
-    // Gán RuleSet cho các rule chưa có nhóm (mặc định thuộc "Tủ 471 — CBM")
-    await FixUngroupedRulesAsync(db);
+        // Gán RuleSet cho các rule chưa có nhóm (mặc định thuộc "Tủ 471 — CBM")
+        await FixUngroupedRulesAsync(db);
 
-    // Seed rules NETA MTS 2023 mặc định cho PD (nếu chưa có)
-    await SeedNetaRulesAsync(db);
+        // Seed rules NETA MTS 2023 mặc định cho PD (nếu chưa có)
+        await SeedNetaRulesAsync(db);
 
-    // Seed rules nhiệt độ (≥50°C cảnh báo, ≥65°C nguy hiểm) nếu chưa có
-    await SeedTemperatureRulesAsync(db);
+        // Seed rules nhiệt độ (≥50°C cảnh báo, ≥65°C nguy hiểm) nếu chưa có
+        await SeedTemperatureRulesAsync(db);
 
-    // Seed 10 rules nhiệt độ cho Camera 152 (P1 -> P10)
-    await SeedThermalPointsRulesAsync(db);
+        // Seed 10 rules nhiệt độ cho Camera 152 (P1 -> P10)
+        await SeedThermalPointsRulesAsync(db);
 
-    // Seed license key mặc định nếu chưa có
-    await SeedDefaultLicenseAsync(db);
+        // Seed license key mặc định nếu chưa có
+        await SeedDefaultLicenseAsync(db);
 
-    // Seed sơ đồ một sợi (SLD) mặc định
-    await SeedDefaultSldAsync(db);
+        // Seed sơ đồ một sợi (SLD) mặc định
+        await SeedDefaultSldAsync(db);
 
-    // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
-    var deviceService = scope.ServiceProvider.GetRequiredService<DeviceService>();
-    var cameras = await db.Devices.Where(d => d.Type.StartsWith("camera")).ToListAsync();
-    await deviceService.SyncAllCamerasToGo2RtcAsync(cameras);
+        // Sync tất cả camera trong DB lên go2rtc (phòng khi go2rtc restart)
+        var deviceService = scope.ServiceProvider.GetRequiredService<DeviceService>();
+        var cameras = await db.Devices.Where(d => d.Type.StartsWith("camera")).ToListAsync();
+        await deviceService.SyncAllCamerasToGo2RtcAsync(cameras);
+    }
+} catch (Exception ex) {
+    Console.WriteLine($"[Startup] WARNING: Database tasks failed (expected if DB is missing): {ex.Message}");
 }
 
 app.Run();

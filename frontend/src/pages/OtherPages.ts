@@ -262,7 +262,6 @@ export class MultisitePage {
         <div id="stationRows" style="display:flex; flex-direction:column; gap:10px;"></div>
       </div>
 
-      <div id="stationCardsBottom" style="position:absolute; bottom:25px; left:50%; transform:translateX(-50%); width:96%; max-width:1400px; z-index:1000; display:none; grid-template-columns:repeat(auto-fit, minmax(320px, 1fr)); gap:20px;"></div>
 
       <div id="stationModal" class="modal-industrial">
         <div class="modal-content" style="max-width:600px; background:#fff; border-radius:24px;">
@@ -316,8 +315,7 @@ export class MultisitePage {
 
       // Đảm bảo luôn có các trạm hiển thị trên UI
       const virtualStations = [
-        { id: 'virtual-la-1', name: '110kV LONG AN (Trạm 1)', location: JSON.stringify({ lat: 10.63, lng: 106.50, alerts: 3, temp: 42, pd: 0 }), code: 'LA001', status: 'online' },
-        { id: 'virtual-la-2', name: '110kV LONG AN (Trạm 2)', location: JSON.stringify({ lat: 10.68, lng: 106.55, alerts: 0, temp: 32, pd: 0 }), code: 'LA002', status: 'online' },
+        { id: 'virtual-la-1', name: '110kV LONG AN', location: JSON.stringify({ lat: 10.63, lng: 106.50, alerts: 3, temp: 42, pd: 0 }), code: 'LA001', status: 'online' },
         { id: 'virtual-tt', name: '110kV TÂN TRỤ', location: JSON.stringify({ lat: 10.51, lng: 106.52, alerts: 0, temp: 34, pd: 0 }), code: 'TT001', status: 'online' }
       ];
 
@@ -354,51 +352,25 @@ export class MultisitePage {
 
   private renderUI(): void {
     const rows = document.getElementById('stationRows');
-    const cards = document.getElementById('stationCardsBottom');
-    if (!rows || !cards) return;
+    if (!rows) return;
     document.getElementById('stationCount')!.textContent = `${this.stations.length} TRẠM`;
     const data = this.stations.map(s => ({ ...s, meta: this.parseLoc(s.location) }));
+    const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
     rows.innerHTML = data.sort((a, b) => b.meta.alerts - a.meta.alerts).map(s => {
       const color = s.meta.alerts > 0 ? '#ef4444' : '#10b981';
-      return `<div style="display:flex; align-items:center; gap:12px; padding:8px 12px; border-radius:10px; background:rgba(255,255,255,0.5); border:1px solid #f1f5f9;">
-        <div style="width:8px; height:8px; background:${color}; border-radius:50%;"></div>
-        <div style="flex:1; font-size:0.7rem; font-weight:800; color:#1e293b; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-        <div style="font-size:0.65rem; font-weight:900; color:${color};">${s.meta.alerts}</div>
-      </div>`;
-    }).join('');
-    cards.style.display = 'grid'; // Hiện dãy thẻ phía dưới
-    const displayData = data.slice(0, 4); // Lấy tối đa 4 trạm để hiện cards
-
-    let cardsHtml = displayData.map(s => {
-      const color = s.meta.alerts > 0 ? '#ef4444' : '#10b981';
-      const realStation = this.stations.find(x => !x.id.startsWith('virtual'));
       const targetId = s.id.startsWith('virtual') ? (realStation?.id || s.id) : s.id;
-
-      return `<div class="multisite-card-light" style="background:rgba(255,255,255,0.95); border-radius:16px; padding:18px; border:1px solid #fff; box-shadow:0 10px 30px rgba(0,0,0,0.05); cursor:pointer; transition: transform 0.2s;" onclick="(window as any).router.navigate('dashboard', { stationId: '${targetId}' })" onmouseover="this.style.transform='translateY(-5px)'" onmouseout="this.style.transform='translateY(0)'">
-        <div style="font-size:0.6rem; color:#3b82f6; font-weight:900; margin-bottom:4px; letter-spacing:1px;">HỆ THỐNG GIÁM SÁT</div>
-        <div style="font-weight:900; font-size:0.9rem; color:#0f172a; margin-bottom:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${s.name}</div>
-        <div style="display:flex; gap:10px;">
-          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:10px; border:1px solid #f1f5f9;">
-            <div style="font-size:0.55rem; color:#94a3b8; font-weight:700;">NHIỆT ĐỘ</div>
-            <div style="font-size:1.1rem; font-weight:900; color:#1e293b;">${s.meta.temp}°C</div>
-          </div>
-          <div style="flex:1; background:#f8fafc; padding:8px; border-radius:10px; border:1px solid #f1f5f9;">
-            <div style="font-size:0.55rem; color:#94a3b8; font-weight:700;">CẢNH BÁO</div>
-            <div style="font-size:1.1rem; font-weight:900; color:${color};">${s.meta.alerts}</div>
-          </div>
+      const alertBadge = s.meta.alerts > 0
+        ? `<span style="display:inline-flex;align-items:center;gap:3px;background:#fef2f2;border:1px solid #fecaca;color:#ef4444;font-size:0.62rem;font-weight:900;padding:2px 7px;border-radius:99px;">⚠️ ${s.meta.alerts} cảnh báo</span>`
+        : `<span style="display:inline-flex;align-items:center;gap:3px;background:#f0fdf4;border:1px solid #bbf7d0;color:#10b981;font-size:0.62rem;font-weight:900;padding:2px 7px;border-radius:99px;">✓ Bình thường</span>`;
+      return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:10px;background:rgba(255,255,255,0.5);border:1px solid #f1f5f9;">
+        <div style="width:8px;height:8px;flex-shrink:0;background:${color};border-radius:50%;"></div>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:0.7rem;font-weight:800;color:#1e293b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-bottom:3px;">${s.name}</div>
+          ${alertBadge}
         </div>
+        <button onclick="(window as any).router.navigate('dashboard',{stationId:'${targetId}'})" style="flex-shrink:0;padding:4px 10px;background:#1d4ed8;border:none;border-radius:6px;color:#fff;font-size:0.62rem;font-weight:700;cursor:pointer;">Vào trạm</button>
       </div>`;
     }).join('');
-
-    // Thêm ô "THÊM TRẠM MỚI" ở cuối (chỉ là UI)
-    cardsHtml += `
-      <div style="background:rgba(255,255,255,0.4); border-radius:16px; padding:18px; border:2px dashed rgba(255,255,255,0.8); display:flex; flex-direction:column; align-items:center; justify-content:center; cursor:pointer; gap:10px; opacity:0.7; transition:all 0.2s;" onmouseover="this.style.opacity='1';this.style.background='rgba(255,255,255,0.6)'" onmouseout="this.style.opacity='0.7';this.style.background='rgba(255,255,255,0.4)'">
-        <div style="width:40px; height:40px; border-radius:50%; background:#fff; display:flex; align-items:center; justify-content:center; font-size:1.5rem; color:#64748b; box-shadow:0 4px 12px rgba(0,0,0,0.05);">+</div>
-        <div style="font-size:0.75rem; font-weight:900; color:#475569; letter-spacing:1px;">THÊM TRẠM MỚI</div>
-      </div>
-    `;
-
-    cards.innerHTML = cardsHtml;
   }
 
   private renderMarkers(): void {
@@ -411,11 +383,20 @@ export class MultisitePage {
       const color = isWarn ? '#ef4444' : '#10b981';
       const markerIcon = L.divIcon({
         className: 'custom-dot-label',
-        html: `<div style="position:relative; width:12px; height:12px;">
-                 <div class="map-label-content"><span style="font-size:0.6rem; font-weight:900;">${s.name}</span><span style="font-size:0.55rem; font-weight:800; color:${color};">${meta.alerts} ⚠️ • ${meta.temp}°C</span></div>
-                 <div style="width:12px; height:12px; background:${color}; border-radius:50%; border:2px solid #fff; box-shadow:0 2px 8px rgba(0,0,0,0.2);" class="${isWarn ? 'pulse-red' : 'pulse-green'}"></div>
+        html: `<div style="position:relative; width:22px; height:22px;">
+                 <div class="map-label-content">
+                   <span style="font-size:0.62rem; font-weight:900; color:#0f172a;">${s.name}</span>
+                   <span style="font-size:0.55rem; font-weight:800; color:${color};">${meta.alerts > 0 ? `⚠️ ${meta.alerts} cảnh báo` : '✓ Bình thường'}</span>
+                   <span style="font-size:0.55rem;font-weight:800;color:#fff;background:#1d4ed8;padding:1px 6px;border-radius:4px;margin-top:2px;">→ Vào trạm</span>
+                 </div>
+                 <div style="width:22px; height:22px; background:${color}; border-radius:50%; border:3px solid #fff; box-shadow:0 3px 12px rgba(0,0,0,0.35);" class="${isWarn ? 'pulse-red' : 'pulse-green'}"></div>
+                 <div style="position:absolute;top:26px;left:50%;transform:translateX(-50%);white-space:nowrap;
+                   background:#fff;color:#0f172a;font-size:0.6rem;font-weight:800;
+                   padding:2px 7px;border-radius:4px;border:1px solid ${color};box-shadow:0 2px 6px rgba(0,0,0,0.15);">
+                   ${s.name}
+                 </div>
                </div>`,
-        iconSize: [12, 12], iconAnchor: [6, 6]
+        iconSize: [22, 22], iconAnchor: [11, 11]
       });
       const marker = L.marker([meta.lat, meta.lng], { icon: markerIcon, draggable: this.isEditMode }).addTo(this.map);
 
