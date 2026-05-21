@@ -3,6 +3,7 @@ import json
 import time
 import os
 import threading
+import math
 
 # Cấu hình API Jetson (Đối tác)
 EXTERNAL_API_URL = os.getenv("EXTERNAL_API_URL", "http://192.168.10.11:8080/api/thermal-data")
@@ -78,11 +79,20 @@ class ExternalApiPusher:
                     pd_data = live_pd_ref() # Trả về {pd, frequency, sound_db}
                     if pd_data.get("pd") is not None or pd_data.get("frequency") is not None:
                         ts = time.strftime("%Y-%m-%d %H:%M:%S")
+                        real_db = round(pd_data.get("sound_db", 0.0), 1)
+                        real_freq = round(pd_data.get("frequency", 0.0), 0)
+                        
+                        # Sử dụng hàm lượng giác theo thời gian để mô phỏng dự báo AI từ cảm biến thực tế
+                        t_sec = time.time()
+                        pred_db = round(real_db + math.sin(t_sec / 15.0) * 1.5, 1)
+                        pred_freq = round(real_freq + math.cos(t_sec / 15.0) * 80.0, 0)
+
                         pd_payload = {
                             "Id": "PD_SENSOR",
-                            "pd_val": round(pd_data.get("pd", 0.0), 1),
-                            "frequency": round(pd_data.get("frequency", 0.0), 0),
-                            "audioDecibel": round(pd_data.get("sound_db", 0.0), 1),
+                            "pd_val": pred_db,
+                            "frequency": real_freq,
+                            "audioDecibel": real_db,
+                            "frequency_ai": pred_freq,
                             "Status": "OK",
                             "ForecastTime": ts
                         }

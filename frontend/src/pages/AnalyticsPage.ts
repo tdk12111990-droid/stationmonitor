@@ -132,23 +132,21 @@ export class AnalyticsPage {
     this.bindExportHistory();
     await this.loadAll();
     await this.initTab('overview');
+    // Pre-fetch AI data immediately so tab shows data when user clicks it
+    // Use a short delay so overview renders first
+    setTimeout(() => this.updateAiValuesOnly().catch(() => {}), 2000);
     this.startAiPoller();
   }
 
   private startAiPoller(): void {
     if (this.aiPoller) return;
     this.aiPoller = setInterval(async () => {
-      if (this.live) return;
-      const tab = this.activeTab;
-      if (tab === 'ai' || tab === 'pd' || tab === 'overview') {
-        try {
-          console.log('[Analytics] Refreshing AI predictions in background...');
-          if (this.stationId) {
-            this.sensors = await stationApi.getLatestPoints(this.stationId);
-          }
-          await this.updateAiValuesOnly();
-        } catch (e) { console.warn('[Analytics] BG AI poll failed:', e); }
-      }
+      try {
+        if (this.stationId) {
+          this.sensors = await stationApi.getLatestPoints(this.stationId);
+        }
+        await this.updateAiValuesOnly();
+      } catch (e) { console.warn('[Analytics] BG AI poll failed:', e); }
     }, 10000);
   }
 
@@ -312,6 +310,8 @@ export class AnalyticsPage {
       btn.style.color = active ? '#f1f5f9' : '#64748b';
       btn.style.fontWeight = active ? '700' : '500';
     });
+    // AI tab always rebuilds fresh when activated (so charts render at correct size)
+    if (id === 'ai') this.tabReady.delete('ai');
     await this.initTab(id);
   }
 
@@ -497,23 +497,30 @@ export class AnalyticsPage {
                 <div id="ai-pd-update" style="text-align:right; color:#64748b; font-size:0.8rem; margin-bottom:12px;">
                   Cập nhật: ${latestPdPred?.Timestamp ? latestPdPred.Timestamp.split(' ')[1] : '---'}
                 </div>
-                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:12px;">
-                  <div style="background:rgba(30,58,138,0.3); padding:12px; border-radius:6px;">
-                    <div style="font-size:0.85rem; color:#64748b;">DỰ BÁO PD</div>
-                    <div id="ai-pd-val" style="font-size:1.8rem; font-weight:900; color:#60a5fa;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.9rem;">dB</span></div>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
+                  <!-- 1. THỰC TẾ: Cường độ âm thanh -->
+                  <div style="background:rgba(16,185,129,0.1); padding:12px; border-radius:6px; border:1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:0.7rem; color:#10b981; margin-bottom:4px; letter-spacing:0.5px;">📡 ÂM THANH THỰC TẾ</div>
+                    <div id="ai-pd-audio" style="font-size:1.7rem; font-weight:900; color:#e2e8f0; line-height:1;">${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">dB</span></div>
+                    <div style="width:100%; height:3px; background:#0f172a; border-radius:2px; margin-top:8px; overflow:hidden;">
+                      <div id="ai-audio-vu-bar" style="width:10%; height:100%; background:#10b981; transition: width 0.3s ease;"></div>
+                    </div>
                   </div>
-                  <div style="background:rgba(30,58,138,0.3); padding:10px; border-radius:6px;">
-                    <div style="font-size:0.75rem; color:#64748b; margin-bottom:4px;">TẦN SỐ AI</div>
-                    <div id="ai-pd-freq" style="font-size:1.8rem; font-weight:900; color:#a78bfa; line-height:1;">${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:0.9rem;">Hz</span></div>
+                  <!-- 2. THỰC TẾ: Tần số -->
+                  <div style="background:rgba(16,185,129,0.1); padding:12px; border-radius:6px; border:1px solid rgba(16,185,129,0.25);">
+                    <div style="font-size:0.7rem; color:#10b981; margin-bottom:4px; letter-spacing:0.5px;">📡 TẦN SỐ THỰC TẾ</div>
+                    <div id="ai-pd-freq-real" style="font-size:1.7rem; font-weight:900; color:#e2e8f0; line-height:1;">${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">Hz</span></div>
                     <div style="font-size:0.5rem; color:#475569; margin-top:8px; letter-spacing:1px;">SPECTRUM ANALYZER</div>
                   </div>
-                </div>
-                  <div style="background:rgba(30,58,138,0.3); padding:10px; border-radius:6px; text-align:center; margin-top:10px;">
-                  <div style="font-size:0.75rem; color:#64748b; margin-bottom:4px;">CƯỜNG ĐỘ ÂM THANH THỰC TẾ</div>
-                  <div id="ai-pd-audio" style="font-size:1.6rem; font-weight:900; color:#e2e8f0; line-height:1;">${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:0.9rem;">dB</span></div>
-                  <!-- AUDIO VU METER -->
-                  <div style="width:100%; height:4px; background:#0f172a; border-radius:2px; margin-top:12px; overflow:hidden;">
-                     <div id="ai-audio-vu-bar" style="width:10%; height:100%; background:#10b981; transition: width 0.3s ease;"></div>
+                  <!-- 3. AI: Dự báo PD -->
+                  <div style="background:rgba(96,165,250,0.1); padding:12px; border-radius:6px; border:1px solid rgba(96,165,250,0.25);">
+                    <div style="font-size:0.7rem; color:#60a5fa; margin-bottom:4px; letter-spacing:0.5px;">🤖 DỰ BÁO PD (AI)</div>
+                    <div id="ai-pd-val" style="font-size:1.7rem; font-weight:900; color:#60a5fa; line-height:1;">${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">dB</span></div>
+                  </div>
+                  <!-- 4. AI: Tần số AI -->
+                  <div style="background:rgba(167,139,250,0.1); padding:12px; border-radius:6px; border:1px solid rgba(167,139,250,0.25);">
+                    <div style="font-size:0.7rem; color:#a78bfa; margin-bottom:4px; letter-spacing:0.5px;">🤖 TẦN SỐ AI</div>
+                    <div id="ai-pd-freq" style="font-size:1.7rem; font-weight:900; color:#a78bfa; line-height:1;">${(latestPdPred && latestPdPred.frequency_ai !== undefined) ? parseFloat(latestPdPred.frequency_ai).toFixed(0) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">Hz</span></div>
                   </div>
                 </div>
               </div>
@@ -587,16 +594,18 @@ export class AnalyticsPage {
       const pdSt = document.getElementById('ai-pd-status');
       const pdUp = document.getElementById('ai-pd-update');
       const pdV = document.getElementById('ai-pd-val');
-      const pdF = document.getElementById('ai-pd-freq');
+      const pdFReal = document.getElementById('ai-pd-freq-real');
+      const pdFAi = document.getElementById('ai-pd-freq');
       const pdA = document.getElementById('ai-pd-audio');
       if (pdSt) {
         pdSt.textContent = pdAiVal !== null ? pdAiStatus : 'WAITING';
         pdSt.style.color = statusColors[pdAiStatus];
       }
       if (pdUp) pdUp.textContent = `Cập nhật: ${latestPdPred?.Timestamp ? latestPdPred.Timestamp.split(' ')[1] : '---'}`;
-      if (pdV) pdV.innerHTML = `${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:1rem;">dB</span>`;
-      if (pdF) pdF.innerHTML = `${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:1rem;">Hz</span>`;
-      if (pdA) pdA.innerHTML = `${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:1rem;">dB</span>`;
+      if (pdV) pdV.innerHTML = `${pdAiVal !== null ? pdAiVal.toFixed(1) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">dB</span>`;
+      if (pdFReal) pdFReal.innerHTML = `${(latestPdPred && latestPdPred.frequency !== undefined) ? parseFloat(latestPdPred.frequency).toFixed(0) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">Hz</span>`;
+      if (pdFAi) pdFAi.innerHTML = `${(latestPdPred && latestPdPred.frequency_ai !== undefined) ? parseFloat(latestPdPred.frequency_ai).toFixed(0) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">Hz</span>`;
+      if (pdA) pdA.innerHTML = `${(latestPdPred && latestPdPred.audioDecibel !== undefined) ? parseFloat(latestPdPred.audioDecibel).toFixed(1) : '---'} <span style="font-size:0.8rem; color:#94a3b8;">dB</span>`;
     }
 
     // --- VẼ BIỂU ĐỒ NHIỆT ĐỘ ---

@@ -34,14 +34,14 @@ def save_to_csv(filename, timestamp, id, val, status="OK", forecast_time=""):
     except Exception as e:
         print(f"LỖI LƯU CSV ({filename}): {e}")
 
-def save_to_pd_csv(filename, timestamp, id, pd_val, freq, s_db, status="OK", forecast_time=""):
+def save_to_pd_csv(filename, timestamp, id, pd_val, freq, s_db, freq_ai, status="OK", forecast_time=""):
     try:
         file_exists = os.path.isfile(filename)
         with open(filename, 'a', newline='') as f:
             writer = csv.writer(f)
             if not file_exists:
-                writer.writerow(['Timestamp', 'Id', 'PredictedValue', 'frequency', 'audioDecibel', 'Status', 'ForecastTime'])
-            writer.writerow([timestamp, id, pd_val, freq, s_db, status, forecast_time])
+                writer.writerow(['Timestamp', 'Id', 'PredictedValue', 'frequency', 'audioDecibel', 'frequency_ai', 'Status', 'ForecastTime'])
+            writer.writerow([timestamp, id, pd_val, freq, s_db, freq_ai, status, forecast_time])
     except Exception as e:
         print(f"LỖI LƯU PD_CSV ({filename}): {e}")
 
@@ -116,11 +116,12 @@ def pd_prediction_api():
     pd_val = data.get("pd_val", 0.0)
     freq = data.get("frequency", 0.0)
     s_db = data.get("audioDecibel", 0.0)
+    freq_ai = data.get("frequency_ai", freq)
     status = data.get("Status", "OK")
     forecast_ts = data.get("ForecastTime", ts)
     
-    save_to_pd_csv(PD_CSV_FILE, ts, pd_id, pd_val, freq, s_db, status, forecast_ts)
-    sys.stderr.write(f"[DEBUG] Saved PD {pd_id}: {pd_val}dB, {freq}Hz, {s_db}dB(Audio)\n")
+    save_to_pd_csv(PD_CSV_FILE, ts, pd_id, pd_val, freq, s_db, freq_ai, status, forecast_ts)
+    sys.stderr.write(f"[DEBUG] Saved PD {pd_id}: {pd_val}dB, {freq}Hz, {s_db}dB(Audio), {freq_ai}Hz(AI)\n")
     
     # Ingest vào Backend local (nếu cần xem biểu đồ lịch sử ở phần Phóng điện)
     try:

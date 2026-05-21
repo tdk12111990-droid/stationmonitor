@@ -64,6 +64,11 @@ export default defineConfig({
         target: 'http://localhost:5056',
         changeOrigin: true,
         secure: false,
+      },
+      '/ai-api': {
+        target: 'http://localhost:5056',
+        changeOrigin: true,
+        secure: false,
       }
     }
   }

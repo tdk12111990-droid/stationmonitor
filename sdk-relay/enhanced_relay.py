@@ -80,9 +80,9 @@ class UnifiedStreamListener(threading.Thread):
     def __init__(self, ip, user, password):
         super().__init__(daemon=True)
         self.ip = ip
-        # Dùng cổng 8000 cho camera 153 theo cấu hình cũ
-        port = 8000 if ip == "192.168.10.153" else 80
-        self.url = f"http://{ip}:{port}/ISAPI/Event/notification/alertStream?format=json"
+        # Dùng cổng 80 (ISAPI standard) cho camera 153 Acoustic Imager
+        port = 80
+        self.url = f"http://{ip}:{port}/ISAPI/Event/notification/alertStream"
         self.auth = HTTPDigestAuth(user, password)
         self.running = True
         self.pending_data = {}
@@ -758,7 +758,8 @@ class StreamRelay:
             '-preset', 'ultrafast', '-tune', 'zerolatency', '-r', '15', '-g', '30', '-crf', '28', 
             '-threads', '2', '-bufsize', '2M', '-maxrate', '2M', '-rtsp_transport', 'tcp', '-f', 'rtsp', self.output_url ]
         # Ghi log lỗi FFmpeg để debug MSE
-        f_err = open('ffmpeg_error.log', 'a')
+        f_err_path = os.path.join(CURRENT_DIR, 'ffmpeg_error.log')
+        f_err = open(f_err_path, 'a')
         return subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=f_err)
 
     def _draw_points(self, frame, blink):
@@ -927,7 +928,8 @@ if __name__ == "__main__":
 
         # Khởi chạy Pusher gửi sang Jetson (Real-time mỗi 2s cho DB, 5m cho AI)
         pusher = ExternalApiPusher(CAMERA_IP, debug_logger=debug_log)
-        pd_func = lambda: { "pd": LIVE_PD, "frequency": LIVE_FREQ, "sound_db": LIVE_DB }
+        # Acoustic Imager (camera 153) chính là thiết bị đo PD — audioDecibel = cường độ phóng điện
+        pd_func = lambda: { "pd": LIVE_DB, "frequency": LIVE_FREQ, "sound_db": LIVE_DB }
         ai_thread = threading.Thread(target=pusher.start, args=(LIVE_TEMPS, fetcher, pd_func), daemon=True)
         ai_thread.start()
         
