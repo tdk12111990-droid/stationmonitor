@@ -308,9 +308,25 @@ export class ThermalPointsPage {
       imgOverlay.style.opacity = String(this.overlayOpacity / 100);
     }
 
+    const tx = parseFloat((document.getElementById('tpTx') as HTMLInputElement)?.value || '');
+    const ty = parseFloat((document.getElementById('tpTy') as HTMLInputElement)?.value || '');
+    const ox = parseFloat((document.getElementById('tpOx') as HTMLInputElement)?.value || '');
+    const oy = parseFloat((document.getElementById('tpOy') as HTMLInputElement)?.value || '');
+
     const coord = document.getElementById('tpPickerCoord');
-    if (coord) coord.textContent = 'Click vào ảnh để chọn tọa độ';
-    (document.getElementById('tpPickerDot') as HTMLElement).style.display = 'none';
+    const hasThermal = !isNaN(tx) && !isNaN(ty);
+    const hasOptical = !isNaN(ox) && !isNaN(oy);
+
+    if (isThermal && hasThermal) {
+      this.updatePickerDot(tx, ty);
+      if (coord) coord.textContent = `tx: ${tx.toFixed(4)}, ty: ${ty.toFixed(4)}`;
+    } else if (!isThermal && hasOptical) {
+      this.updatePickerDot(ox, oy);
+      if (coord) coord.textContent = `ox: ${ox.toFixed(4)}, oy: ${oy.toFixed(4)}`;
+    } else {
+      (document.getElementById('tpPickerDot') as HTMLElement).style.display = 'none';
+      if (coord) coord.textContent = 'Click vào ảnh để chọn tọa độ';
+    }
   }
 
   private updatePickerDot(x?: number, y?: number): void {
