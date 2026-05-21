@@ -133,30 +133,51 @@ def pd_prediction_api():
     
     return jsonify({"success": True}), 200
 
+def get_last_csv_records(filename, n=100):
+    if not os.path.exists(filename):
+        return []
+    try:
+        with open(filename, 'r', encoding='utf-8') as f:
+            header = f.readline().strip()
+        
+        last_lines = []
+        with open(filename, 'rb') as f:
+            f.seek(0, 2)
+            pos = f.tell()
+            buffer = bytearray()
+            chunk_size = 4096
+            while pos > 0 and len(last_lines) <= n:
+                to_read = min(chunk_size, pos)
+                pos -= to_read
+                f.seek(pos)
+                chunk = f.read(to_read)
+                buffer = chunk + buffer
+                lines = buffer.split(b'\n')
+                if pos > 0:
+                    buffer = lines[0]
+                    last_lines = [line.decode('utf-8', 'ignore') for line in lines[1:] if line] + last_lines
+                else:
+                    last_lines = [line.decode('utf-8', 'ignore') for line in lines if line]
+            
+            last_lines = last_lines[-n:]
+        
+        csv_data = [header] + last_lines
+        reader = csv.DictReader(csv_data)
+        return list(reader)
+    except Exception as e:
+        print(f"Error reading CSV {filename}: {e}")
+        return []
+
 @app.route('/api/ai-predictions', methods=['GET'])
 def get_predictions():
-    if not os.path.exists(CSV_FILE): return jsonify([])
-    try:
-        with open(CSV_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            return jsonify(list(reader)[-100:])
-    except: return jsonify([])
+    return jsonify(get_last_csv_records(CSV_FILE, 100))
 
 @app.route('/api/pd-predictions', methods=['GET'])
 def get_pd_predictions():
     import sys
     sys.stderr.write(f"[DEBUG] Web fetching PD from: {PD_CSV_FILE}\n")
-    if not os.path.exists(PD_CSV_FILE):
-        sys.stderr.write(f"[DEBUG] File NOT FOUND at {PD_CSV_FILE}\n")
-        return jsonify([])
-    try:
-        with open(PD_CSV_FILE, 'r') as f:
-            reader = csv.DictReader(f)
-            data = list(reader)
-            sys.stderr.write(f"[DEBUG] Read {len(data)} rows from CSV\n")
-            return jsonify(data[-100:])
-    except Exception as e:
-        sys.stderr.write(f"[DEBUG] Error reading CSV: {e}\n")
-        return jsonify([])
+    data = get_last_csv_records(PD_CSV_FILE, 100)
+    sys.stderr.write(f"[DEBUG] Read {len(data)} rows from CSV efficiently\n")
+    return jsonify(data)
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8089)
