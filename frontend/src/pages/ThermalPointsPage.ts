@@ -17,7 +17,7 @@ export class ThermalPointsPage {
   private editingId: string | null = null;
   private pickerMode: 'thermal' | 'optical' = 'thermal';
   private zoomLevel: number = 100; // Mức zoom mặc định 100%
-  private overlayOpacity: number = 40; // Độ mờ của lớp phủ mặc định 40%
+  private overlayOpacity: number = 100; // Độ mờ của lớp phủ mặc định 100%
 
 
   private get token() {
@@ -250,7 +250,7 @@ export class ThermalPointsPage {
     // Load ảnh thermal vào picker
     this.pickerMode = 'thermal';
     this.zoomLevel = 100;
-    this.overlayOpacity = 40;
+    this.overlayOpacity = 100;
     this.updatePickerTab();
     this.updatePickerDot(pt?.tx, pt?.ty);
 
