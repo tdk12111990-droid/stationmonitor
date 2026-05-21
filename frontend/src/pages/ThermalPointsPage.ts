@@ -17,7 +17,7 @@ export class ThermalPointsPage {
   private editingId: string | null = null;
   private pickerMode: 'thermal' | 'optical' = 'thermal';
   private zoomLevel: number = 100; // Mức zoom mặc định 100%
-  private overlayOpacity: number = 100; // Độ mờ của lớp phủ mặc định 100%
+  private overlayOpacity: number = 40; // Độ mờ của lớp phủ mặc định 40%
 
 
   private get token() {
@@ -137,7 +137,7 @@ export class ThermalPointsPage {
         <div class="tp-picker-tabs">
           <button class="tp-picker-tab active" data-tab="thermal">📷 Ảnh Nhiệt (tx, ty)</button>
           <button class="tp-picker-tab" data-tab="optical">🖼️ Ảnh Quang (ox, oy)</button>
-          <div style="margin-left: auto; display: flex; align-items: center; gap: 6px;">
+          <div style="margin-left: auto; display: none; align-items: center; gap: 6px;">
             <button class="btn-industrial btn-sm" id="tpZoomOutBtn" style="font-size: 11px; padding: 2px 8px;">🔍 -</button>
             <span id="tpZoomLabel" style="font-size: 11px; color: #64748b; font-family: monospace; min-width: 30px; text-align: center;">100%</span>
             <button class="btn-industrial btn-sm" id="tpZoomInBtn" style="font-size: 11px; padding: 2px 8px;">🔍 +</button>
@@ -250,7 +250,7 @@ export class ThermalPointsPage {
     // Load ảnh thermal vào picker
     this.pickerMode = 'thermal';
     this.zoomLevel = 100;
-    this.overlayOpacity = 100;
+    this.overlayOpacity = 40;
     this.updatePickerTab();
     this.updatePickerDot(pt?.tx, pt?.ty);
 
