@@ -105,10 +105,30 @@ public class RuleEvaluationWorker : BackgroundService
         var rules = await db.Rules.Where(r => r.Enabled).ToListAsync(ct);
         if (rules.Count == 0) return;
 
-        var latestReadings = await db.SensorReadings
-            .GroupBy(r => r.PointId)
-            .Select(g => g.OrderByDescending(x => x.Time).First())
-            .ToDictionaryAsync(r => r.PointId, r => r, ct);
+        // Lấy danh sách PointId thực sự cần đánh giá từ các rule đang bật để tối ưu hóa truy vấn
+        var pointIds = new List<string>();
+        foreach (var rule in rules)
+        {
+            var condition = RuleEvaluator.ParseConditionExtended(rule.Condition);
+            if (condition != null && !string.IsNullOrEmpty(condition.Value.point))
+            {
+                pointIds.Add(condition.Value.point);
+            }
+        }
+        pointIds = pointIds.Distinct().ToList();
+
+        var latestReadings = new Dictionary<string, SensorReading>();
+        foreach (var pointId in pointIds)
+        {
+            var reading = await db.SensorReadings
+                .Where(r => r.PointId == pointId)
+                .OrderByDescending(x => x.Time)
+                .FirstOrDefaultAsync(ct);
+            if (reading != null)
+            {
+                latestReadings[pointId] = reading;
+            }
+        }
 
         foreach (var rule in rules)
         {
